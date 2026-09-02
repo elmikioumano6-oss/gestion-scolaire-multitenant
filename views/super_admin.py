@@ -20,7 +20,6 @@ def afficher_super_admin():
         cred = st.session_state["last_created_credentials"]
         st.success(f"✅ Compte généré avec succès pour **{cred['school_name']}** !")
         
-        # Lien réel de la plateforme
         lien_plateforme = "https://gestion-scolaire-multitenant-fcdbzcspet6krxvurgmfny.streamlit.app"
         
         msg = (
@@ -32,22 +31,47 @@ def afficher_super_admin():
             f"⚠️ Un changement de mot de passe vous sera demandé à la première connexion."
         )
         encoded_msg = urllib.parse.quote(msg)
-        clean_phone = "".join(filter(str.isdigit, cred['contacts']))
         
+        # Extraction de tous les numéros disponibles dans le champ contacts
+        raw_contacts = str(cred.get('contacts', ''))
+        # Sépare par '/', ',' ou '-'
+        liste_brute = [p.strip() for p in raw_contacts.replace(',', '/').replace('-', '/').split('/') if p.strip()]
+        
+        # Nettoyage et formatage des numéros (ajout de 227 si 8 chiffres)
+        numeros_valides = []
+        for num in liste_brute:
+            clean_num = "".join(filter(str.isdigit, num))
+            if len(clean_num) == 8:
+                clean_num = "227" + clean_num
+            if len(clean_num) >= 8:
+                numeros_valides.append((num, clean_num)) # (format affiché, format international)
+
         col_wa1, col_wa2 = st.columns([2, 1])
         with col_wa1:
-            if clean_phone:
-                wa_url = f"https://wa.me/{clean_phone}?text={encoded_msg}"
+            if numeros_valides:
+                if len(numeros_valides) > 1:
+                    # Choix du numéro si plusieurs sont disponibles
+                    choix_label = st.selectbox(
+                        "📱 Cet établissement a plusieurs numéros. Lequel voulez-vous utiliser pour WhatsApp ?",
+                        options=[n[0] for n in numeros_valides],
+                        key="select_whatsapp_number"
+                    )
+                    selected_clean = next(n[1] for n in numeros_valides if n[0] == choix_label)
+                else:
+                    choix_label, selected_clean = numeros_valides[0]
+                
+                wa_url = f"https://wa.me/{selected_clean}?text={encoded_msg}"
                 st.markdown(
                     f"""
                     <a href="{wa_url}" target="_blank" style="display:inline-block;background-color:#25D366;color:white;padding:10px 20px;border-radius:5px;text-decoration:none;font-weight:bold;margin-bottom:10px;">
-                        📲 Envoyer les accès par WhatsApp au {cred['contacts']}
+                        📲 Envoyer les accès par WhatsApp au {choix_label}
                     </a>
                     """,
                     unsafe_allow_html=True,
                 )
             else:
                 st.warning("⚠️ Aucun numéro de téléphone valide n'a été renseigné pour ce contact.")
+                
         with col_wa2:
             if st.button("Fermer cet encadré"):
                 del st.session_state["last_created_credentials"]
