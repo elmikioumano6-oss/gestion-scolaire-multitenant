@@ -13,7 +13,6 @@ class School(Base):
     contacts = Column(String(255), default="N/D")
     logo = Column(String(255), nullable=True)
     
-    # Correction : utilisation de la colonne 'actif' (et non is_active) pour correspondre au code de vérification
     actif = Column(Boolean, default=True)
     date_expiration = Column(DateTime, nullable=True)
     
@@ -95,6 +94,7 @@ class User(Base):
     role = Column(String)
     
     derniere_activite = Column(DateTime, nullable=True)
+    changer_mdp_requis = Column(Boolean, default=False)  # Champ ajouté pour forcer le changement au premier login
 
     enseignant_id = Column(Integer, ForeignKey("enseignants.id"), nullable=True)
     eleve_id = Column(Integer, ForeignKey("eleves.id"), nullable=True)

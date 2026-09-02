@@ -5,6 +5,7 @@ import os
 from database.db_config import SessionLocal
 from database.models import AnneeScolaire, User, School
 import streamlit as st
+import bcrypt
 from streamlit_option_menu import option_menu
 
 
@@ -107,6 +108,42 @@ def main():
                         st.query_params.clear()
                         st.error(f"⛔ L'établissement '{ecole_live.nom}' a été suspendu.")
                         st.stop()
+
+                # --- INTERCEPTION DU CHANGEMENT DE MOT DE PASSE OBLIGATOIRE ---
+                if getattr(usr_to_update, 'changer_mdp_requis', False):
+                    st.markdown(
+                        """
+                        <style>
+                            [data-testid="stSidebar"] { display: none !important; }
+                        </style>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    
+                    st.warning("⚠️ **Sécurité requise :** C'est votre première connexion ou votre mot de passe est provisoire. Veuillez définir un nouveau mot de passe personnel pour accéder à la plateforme.")
+                    
+                    with st.form("form_force_change_pwd"):
+                        nouveau_p = st.text_input("Nouveau mot de passe", type="password")
+                        confirme_p = st.text_input("Confirmer le nouveau mot de passe", type="password")
+                        btn_valider = st.form_submit_button("Enregistrer et accéder à la plateforme")
+                        
+                        if btn_valider:
+                            if len(nouveau_p) < 6:
+                                st.error("Le mot de passe doit contenir au moins 6 caractères.")
+                            elif nouveau_p != confirme_p:
+                                st.error("Les mots de passe ne correspondent pas.")
+                            else:
+                                try:
+                                    usr_to_update.password = bcrypt.hashpw(nouveau_p.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+                                    usr_to_update.changer_mdp_requis = False  # Désactivation de l'obligation
+                                    db_act.commit()
+                                    st.success("Mot de passe mis à jour avec succès !")
+                                    st.rerun()
+                                except Exception as ex:
+                                    db_act.rollback()
+                                    st.error(f"Erreur lors de la mise à jour : {ex}")
+                    db_act.close()
+                    return  # Bloque l'affichage du reste de l'application tant que le mot de passe n'est pas changé
 
                 usr_to_update.derniere_activite = datetime.utcnow()
                 db_act.commit()
