@@ -17,7 +17,7 @@ def main():
         initial_sidebar_state="expanded",
     )
 
-    # Initialisation de la base de données et création des tables manquantes (y compris activity_logs)
+    # Initialisation de la base de données et création des tables manquantes
     init_db()
 
     query_params = st.query_params
@@ -26,7 +26,6 @@ def main():
     url_user = query_params.get("user", "")
     url_role = query_params.get("role", "")
 
-    # Si une session est active OU qu'on essaie de se restaurer via l'URL
     target_user = st.session_state.get("username") or url_user
 
     if target_user:
@@ -37,7 +36,6 @@ def main():
                 role_db = str(user_verif.role or "").strip().lower()
                 is_super = (role_db == "super_admin")
 
-                # VÉRIFICATION DE L'ÉCOLE ASSOCIÉE (Si l'utilisateur appartient à une école et n'est pas super admin)
                 if user_verif.school_id and not is_super:
                     ecole_verif = db_sec.query(School).filter(School.id == user_verif.school_id).first()
                     if ecole_verif:
@@ -45,7 +43,6 @@ def main():
                         date_exp = getattr(ecole_verif, 'date_expiration', None)
                         now = datetime.utcnow()
                         
-                        # Si l'école est suspendue ou expirée, on bloque tout net
                         if not is_active or (date_exp and date_exp < now):
                             st.session_state.clear()
                             st.session_state["authenticated"] = False
@@ -54,7 +51,6 @@ def main():
                             st.error(f"⛔ L'établissement '{ecole_verif.nom}' a été suspendu ou la période d'essai a expiré.")
                             st.stop()
 
-                # Si l'école est active ou si c'est le super admin, on valide la session
                 st.session_state["authenticated"] = True
                 st.session_state["username"] = user_verif.username
                 st.session_state["role"] = role_db
@@ -63,7 +59,7 @@ def main():
                 
                 if user_verif.school_id:
                     ecole = db_sec.query(School).filter(School.id == user_verif.school_id).first()
-                    st.session_state["school_name"] = ecole.nom if ecole else "École Inconnue"
+                    st.session_state["school_name"] = ecole.nom if ecole else "Gestion Scolaire Pro"
                 else:
                     st.session_state["school_name"] = "Plateforme Globale"
             else:
@@ -78,7 +74,6 @@ def main():
         finally:
             db_sec.close()
 
-    # Initialisation par défaut si toujours vide
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
     if "role" not in st.session_state:
@@ -95,13 +90,12 @@ def main():
     role_utilisateur = str(st.session_state.get("role", "login")).lower()
     nom_utilisateur = st.session_state.get("username", "Utilisateur")
 
-    # --- MISE À JOUR DU STATUT "DERNIÈRE ACTIVITÉ" EN TEMPS RÉEL & DOUBLE CHECK SÉCURITÉ ---
+    # --- MISE À JOUR DU STATUT "DERNIÈRE ACTIVITÉ" & SÉCURITÉ ---
     if st.session_state.get("authenticated") and nom_utilisateur:
         db_act = SessionLocal()
         try:
             usr_to_update = db_act.query(User).filter(User.username == nom_utilisateur).first()
             if usr_to_update:
-                # Double vérification anti-contournement en temps réel pour les non super-admin
                 if usr_to_update.school_id and not st.session_state.get("is_super_admin", False):
                     ecole_live = db_act.query(School).filter(School.id == usr_to_update.school_id).first()
                     if ecole_live and not getattr(ecole_live, 'actif', True):
@@ -112,7 +106,6 @@ def main():
                         st.error(f"⛔ L'établissement '{ecole_live.nom}' a été suspendu.")
                         st.stop()
 
-                # --- INTERCEPTION DU CHANGEMENT DE MOT DE PASSE OBLIGATOIRE ---
                 if getattr(usr_to_update, 'changer_mdp_requis', False):
                     st.markdown(
                         """
@@ -138,7 +131,7 @@ def main():
                             else:
                                 try:
                                     usr_to_update.password = bcrypt.hashpw(nouveau_p.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-                                    usr_to_update.changer_mdp_requis = False  # Désactivation de l'obligation
+                                    usr_to_update.changer_mdp_requis = False
                                     db_act.commit()
                                     st.success("Mot de passe mis à jour avec succès !")
                                     st.rerun()
@@ -146,7 +139,7 @@ def main():
                                     db_act.rollback()
                                     st.error(f"Erreur lors de la mise à jour : {ex}")
                     db_act.close()
-                    return  # Bloque l'affichage du reste de l'application tant que le mot de passe n'est pas changé
+                    return
 
                 usr_to_update.derniere_activite = datetime.utcnow()
                 db_act.commit()
@@ -155,7 +148,7 @@ def main():
         finally:
             db_act.close()
 
-    # --- 2. SI NON CONNECTÉ OU SI LA PAGE DEMANDÉE EST LOGIN : AFFICHAGE DU LOGIN ---
+    # --- 2. CONNEXION ---
     page_demandee_urt = query_params.get("page", "")
     if not st.session_state.get("authenticated") or not st.session_state.get("username") or role_utilisateur == "login" or page_demandee_urt == "Login":
         st.markdown(
@@ -177,33 +170,33 @@ def main():
             st.error(f"Erreur lors du chargement de la page de connexion : {e}")
         return
 
-    # --- 3. BARRE LATÉRALE - MENU SANS LOGIN ---
+    # --- 3. BARRE LATÉRALE ---
     with st.sidebar:
         try:
             school_name_lower = st.session_state.get('school_name', '').lower()
             if "etoile" in school_name_lower:
                 logo_file = "Logo L'ETOILE DU SUCCES.png"
             else:
-                logo_file = "Logo CSP-RAHMAT-FH.png"
+                logo_file = "Logo Gestion Scolaire Pro.png" if os.path.exists("Logo Gestion Scolaire Pro.png") else "Logo CSP-RAHMAT-FH.png"
 
             col_logo1, col_logo2, col_logo3 = st.columns([1, 2, 1])
             with col_logo2:
                 if os.path.exists(logo_file):
                     st.image(logo_file, width=100)
                 else:
-                    st.image("Logo CSP-RAHMAT-FH.png", width=100)
+                    st.markdown("<div style='text-align: center;'><h3>🏫</h3></div>", unsafe_allow_html=True)
         except Exception:
             st.markdown(
                 "<div style='text-align: center;'><h3>🏫</h3></div>",
                 unsafe_allow_html=True,
             )
 
-        nom_affiche_ecole = st.session_state.get('school_name', 'Plateforme Scolaire')
+        nom_affiche_ecole = st.session_state.get('school_name', 'Gestion Scolaire Pro')
         st.markdown(
             f"""
             <div style="text-align: left; margin-top: -5px; margin-bottom: 0px;">
                 <h3 style="color: #C5A059; font-family: 'Georgia', serif; font-size: 1.1rem; font-weight: 700; margin-bottom: 0px; letter-spacing: 0.5px;">{nom_affiche_ecole}</h3>
-                <p style='color: #D4AF37; font-size: 0.8rem; font-style: italic; font-weight: 500; margin-top: 2px; margin-bottom: 0px;'>Plateforme Multi-Écoles</p>
+                <p style='color: #D4AF37; font-size: 0.8rem; font-style: italic; font-weight: 500; margin-top: 2px; margin-bottom: 0px;'>Gestion Scolaire Pro</p>
             </div>
             """,
             unsafe_allow_html=True,
@@ -419,7 +412,6 @@ def main():
             ]
             menu_key_val = "menu_principal_admin"
 
-        # Récupération de la page dans l'URL pour garder le bon index au F5
         page_demandee = query_params.get("page", options_menu[0])
         default_idx = 0
         if page_demandee in options_menu:
@@ -454,7 +446,6 @@ def main():
             },
         )
 
-        # Mise à jour transparente de l'URL pour la persistance
         st.query_params["user"] = nom_utilisateur
         st.query_params["role"] = role_utilisateur
         st.query_params["page"] = menu_option
