@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
+import urllib.parse
 import bcrypt
 from database.db_config import SessionLocal
 from database.models import School, User
@@ -13,6 +14,47 @@ def afficher_super_admin():
     if not st.session_state.get("is_super_admin", False):
         st.warning("⚠️ Accès strictement réservé au Super Administrateur.")
         return
+
+    # --- AFFICHAGE DES DERNIERS ACCÈS CRÉÉS (POUR ENVOI RAPIDE WHATSAPP) ---
+    if "last_created_credentials" in st.session_state:
+        cred = st.session_state["last_created_credentials"]
+        st.success(f"✅ Compte généré avec succès pour **{cred['school_name']}** !")
+        
+        # Lien réel de la plateforme
+        lien_plateforme = "https://gestion-scolaire-multitenant-fcdbzcspet6krxvurgmfny.streamlit.app"
+        
+        msg = (
+            f"Bonjour, votre espace de gestion pour l'établissement {cred['school_name']} "
+            f"est actif sur la plateforme Gestion Scolaire Pro.\n\n"
+            f"🔗 Lien d'accès : {lien_plateforme}\n"
+            f"👤 Identifiant : {cred['username']}\n"
+            f"🔑 Mot de passe provisoire : {cred['password']}\n\n"
+            f"⚠️ Un changement de mot de passe vous sera demandé à la première connexion."
+        )
+        encoded_msg = urllib.parse.quote(msg)
+        clean_phone = "".join(filter(str.isdigit, cred['contacts']))
+        
+        col_wa1, col_wa2 = st.columns([2, 1])
+        with col_wa1:
+            if clean_phone:
+                wa_url = f"https://wa.me/{clean_phone}?text={encoded_msg}"
+                st.markdown(
+                    f"""
+                    <a href="{wa_url}" target="_blank" style="display:inline-block;background-color:#25D366;color:white;padding:10px 20px;border-radius:5px;text-decoration:none;font-weight:bold;margin-bottom:10px;">
+                        📲 Envoyer les accès par WhatsApp au {cred['contacts']}
+                    </a>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.warning("⚠️ Aucun numéro de téléphone valide n'a été renseigné pour ce contact.")
+        with col_wa2:
+            if st.button("Fermer cet encadré"):
+                del st.session_state["last_created_credentials"]
+                st.rerun()
+
+        st.text_area("Copier le message d'accès (si besoin) :", value=msg, height=140)
+        st.markdown("---")
 
     db = SessionLocal()
     try:
@@ -98,6 +140,13 @@ def afficher_super_admin():
                                             existing_usr.role = "admin"
                                             existing_usr.changer_mdp_requis = True
                                             db.commit()
+                                            
+                                            st.session_state["last_created_credentials"] = {
+                                                "school_name": ecole.nom,
+                                                "username": adm_username.strip(),
+                                                "password": adm_password.strip(),
+                                                "contacts": ecole.contacts or ""
+                                            }
                                             st.success(f"✅ Compte {adm_username.strip()} mis à jour avec succès !")
                                             st.rerun()
                                         else:
@@ -113,6 +162,13 @@ def afficher_super_admin():
                                         )
                                         db.add(nouveau_compte)
                                         db.commit()
+                                        
+                                        st.session_state["last_created_credentials"] = {
+                                            "school_name": ecole.nom,
+                                            "username": adm_username.strip(),
+                                            "password": adm_password.strip(),
+                                            "contacts": ecole.contacts or ""
+                                        }
                                         st.success(f"✅ Compte administrateur `{adm_username.strip()}` créé avec succès pour {ecole.nom} !")
                                         st.rerun()
 
@@ -174,7 +230,14 @@ def afficher_super_admin():
                                 db.add(nouvel_admin)
                                 db.commit()
 
-                                st.success(f"✅ L'établissement **{nom_ecole}** et son compte administrateur (**{admin_username.strip()}**) ont été créés avec succès !")
+                                st.session_state["last_created_credentials"] = {
+                                    "school_name": nom_ecole.strip(),
+                                    "username": admin_username.strip(),
+                                    "password": admin_password.strip(),
+                                    "contacts": contacts_ecole.strip()
+                                }
+
+                                st.success(f"✅ L'établissement **{nom_ecole}** et son compte administrateur ont été créés avec succès !")
                                 st.rerun()
 
     finally:
