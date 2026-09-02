@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 from database.db_config import SessionLocal
-from database.models import Classe, School
+from database.models import Classe, School, ActivityLog
 
 def afficher_emploi_temps():
     st.subheader("📅 Gestion des Emplois du Temps")
@@ -27,6 +28,10 @@ def afficher_emploi_temps():
             classes_query = classes_query.filter(Classe.school_id == school_id)
         classes_cycle = classes_query.all()
 
+        # Initialisation du stockage en session state pour les emplois du temps dynamiques
+        if "emplois_du_temps_data" not in st.session_state:
+            st.session_state["emplois_du_temps_data"] = {}
+
         with tab1:
             st.markdown(f"### Emplois du Temps — **{school_name} ({cycle_en_cours})**")
 
@@ -39,10 +44,22 @@ def afficher_emploi_temps():
                 classe_obj = next((c for c in classes_cycle if c.libelle == classe_choisie), None)
                 if classe_obj:
                     st.info(f"Emploi du temps pour la classe : **{classe_obj.libelle}**")
+                    
                     jours = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"]
-                    df_edt = pd.DataFrame(columns=["Jour", "08h00 - 10h00", "10h15 - 12h15", "15h00 - 17h00"], data=[
-                        [jour, "—", "—", "—"] for jour in jours
-                    ])
+                    creneaux_horaires = ["08h00 - 10h00", "10h15 - 12h15", "15h00 - 17h00"]
+                    
+                    # Récupération des données stockées pour cette école, cycle et classe
+                    key_edt = f"{school_id}_{cycle_en_cours}_{classe_choisie}"
+                    edt_dict = st.session_state["emplois_du_temps_data"].get(key_edt, {})
+
+                    data_grille = []
+                    for jour in jours:
+                        ligne = {"Jour": jour}
+                        for horaire in creneaux_horaires:
+                            ligne[horaire] = edt_dict.get((jour, horaire), "—")
+                        data_grille.append(ligne)
+
+                    df_edt = pd.DataFrame(data_grille)
                     st.dataframe(df_edt, use_container_width=True)
 
         with tab2:
@@ -66,6 +83,29 @@ def afficher_emploi_temps():
                         if not matiere:
                             st.error("⚠️ Veuillez indiquer la matière.")
                         else:
+                            target_school_id = school_id
+                            if is_super_admin and not target_school_id:
+                                ecole_defaut = db.query(School).first()
+                                target_school_id = ecole_defaut.id if ecole_defaut else 1
+
+                            key_edt = f"{target_school_id}_{cycle_en_cours}_{classe_selectionnee}"
+                            if key_edt not in st.session_state["emplois_du_temps_data"]:
+                                st.session_state["emplois_du_temps_data"][key_edt] = {}
+                            
+                            st.session_state["emplois_du_temps_data"][key_edt][(jour, horaire)] = matiere.strip().upper()
+
+                            # Traçabilité dans le journal d'activité
+                            nouveau_log = ActivityLog(
+                                school_id=target_school_id,
+                                timestamp=datetime.utcnow(),
+                                username=st.session_state.get("username", "admin"),
+                                action=f"Planification créneau EDT : {matiere} ({classe_selectionnee}, {jour} {horaire})",
+                                module="Emploi du temps",
+                                statut="Succès"
+                            )
+                            db.add(nouveau_log)
+                            db.commit()
+
                             st.success(f"✅ Créneau de {matiere} ajouté avec succès pour {classe_selectionnee} ({jour}, {horaire}) !")
                             st.rerun()
 

@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 from database.db_config import SessionLocal
-from database.models import Classe, Eleve, School
+from database.models import Classe, Eleve, School, ActivityLog
 
 def afficher_alerte_performance():
     st.subheader("🚨 Alertes de Performance & Élèves en Difficulté")
@@ -11,7 +12,6 @@ def afficher_alerte_performance():
     school_id = st.session_state.get("school_id")
     is_super_admin = st.session_state.get("is_super_admin", False)
     
-    # Récupération dynamique du nom de l'école active
     db = SessionLocal()
     try:
         if school_id:
@@ -30,7 +30,6 @@ def afficher_alerte_performance():
 
     db = SessionLocal()
     try:
-        # Isolation multi-écoles et multi-cycles pour les classes
         classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours)
         if not is_super_admin and school_id:
             classes_query = classes_query.filter(Classe.school_id == school_id)
@@ -44,7 +43,7 @@ def afficher_alerte_performance():
             return
 
         noms_classes = [c.libelle for c in classes_cycle]
-        classe_choisie = st.selectbox("Sélectionner la classe à auditer", noms_classes)
+        classe_choisie = st.selectbox("Sélectionner la classe à auditer", noms_classes, key="alerte_classe_select")
 
         classe_obj = next((c for c in classes_cycle if c.libelle == classe_choisie), None)
         if classe_obj:
@@ -56,22 +55,48 @@ def afficher_alerte_performance():
             if not eleves:
                 st.info(f"Aucun élève enregistré dans la classe **{classe_choisie}**.")
             else:
-                st.success(f"Audit des performances actif pour la classe de **{classe_choisie}** ({len(eleves)} élèves).")
+                notes_store = st.session_state.get("notes_evaluation_data", {})
                 
-                # Tableau récapitulatif des alertes
-                data_alertes = []
+                eleves_en_difficulte = []
                 for e in eleves:
-                    data_alertes.append({
-                        "Nom & Prénom": f"{e.nom} {e.prenom}",
-                        "Moyenne Générale": "—",
-                        "Statut": "Normal",
-                        "Action Recommandée": "Aucune"
-                    })
-                df_alertes = pd.DataFrame(data_alertes)
-                st.dataframe(df_alertes, use_container_width=True)
+                    notes_eleve = []
+                    for key, evaluations in notes_store.items():
+                        if f"_{classe_choisie}_" in key or str(school_id) in key:
+                            if e.id in evaluations:
+                                notes_eleve.append(evaluations[e.id])
+
+                    moyenne = round(sum(notes_eleve) / len(notes_eleve), 2) if notes_eleve else None
+                    
+                    if moyenne is not None and moyenne < 10.0:
+                        eleves_en_difficulte.append({
+                            "Nom & Prénom": f"{e.nom} {e.prenom}",
+                            "Matricule": getattr(e, 'matricule', 'N/D'),
+                            "Moyenne Générale": moyenne,
+                            "Niveau d'Alerte": "Critique (< 10/20)"
+                        })
+
+                if not eleves_en_difficulte:
+                    st.success(f"✅ Aucun élève en situation de difficulté critique (moyenne < 10) détecté dans la classe **{classe_choisie}**.")
+                else:
+                    st.warning(f"⚠️ {len(eleves_en_difficulte)} élève(s) nécessitant un suivi pédagogique renforcé détecté(s).")
+                    df_alertes = pd.DataFrame(eleves_en_difficulte)
+                    st.dataframe(df_alertes, use_container_width=True)
+
+                target_school_id = school_id or 1
+                nouveau_log = ActivityLog(
+                    school_id=target_school_id,
+                    timestamp=datetime.utcnow(),
+                    username=st.session_state.get("username", "admin"),
+                    action=f"Consultation alertes de performance - Classe {classe_choisie}",
+                    module="Alerte Performance",
+                    statut="Succès"
+                )
+                db.add(nouveau_log)
+                db.commit()
 
     finally:
         db.close()
 
-# Alias de compatibilité complète pour le routeur
+# Alias de compatibilité
 afficher_alertes_performance = afficher_alerte_performance
+afficher_alerte = afficher_alerte_performance

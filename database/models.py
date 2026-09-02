@@ -279,3 +279,15 @@ class Paiement(Base):
     date_paiement = Column(DateTime)
 
     eleve = relationship("Eleve", back_populates="paiements")
+
+class Depense(Base):
+    __tablename__ = 'depenses'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    school_id = Column(Integer, ForeignKey('schools.id'), nullable=False)
+    cycle = Column(String(50), nullable=False)
+    libelle = Column(String(200), nullable=False)
+    montant = Column(Float, nullable=False)
+    categorie = Column(String(100), nullable=False)
+    date_depense = Column(DateTime, default=datetime.utcnow)
+    auteur = Column(String(100), nullable=True)

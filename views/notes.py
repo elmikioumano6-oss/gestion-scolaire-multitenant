@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 from database.db_config import SessionLocal
-from database.models import Classe, Matiere, Eleve, School
+from database.models import Classe, Matiere, Eleve, School, ActivityLog
 
 def afficher_notes():
     st.subheader("📝 Saisie des Notes & Évaluations")
@@ -54,6 +55,13 @@ def afficher_notes():
         with col2:
             matiere_choisie = st.selectbox("Matière", noms_matieres, key="notes_matiere")
 
+        # Initialisation du stockage des notes en session state
+        if "notes_evaluation_data" not in st.session_state:
+            st.session_state["notes_evaluation_data"] = {}
+
+        key_notes_store = f"{school_id}_{cycle_en_cours}_{classe_choisie}_{matiere_choisie}"
+        notes_enregistrees = st.session_state["notes_evaluation_data"].get(key_notes_store, {})
+
         classe_obj = next((c for c in classes_cycle if c.libelle == classe_choisie), None)
         if classe_obj:
             eleves_query = db.query(Eleve).filter(Eleve.classe_id == classe_obj.id)
@@ -67,12 +75,39 @@ def afficher_notes():
                 st.success(f"Saisie active pour **{classe_choisie}** en **{matiere_choisie}** ({len(eleves)} élèves).")
                 
                 with st.form("form_saisie_notes"):
+                    saisie_temporaire = {}
                     for e in eleves:
-                        st.number_input(f"Note pour {e.nom} {e.prenom} (sur 20)", min_value=0.0, max_value=20.0, step=0.25, key=f"note_{e.id}")
+                        val_actuelle = notes_enregistrees.get(e.id, 0.0)
+                        saisie_temporaire[e.id] = st.number_input(
+                            f"Note pour {e.nom} {e.prenom} (sur 20)",
+                            min_value=0.0,
+                            max_value=20.0,
+                            value=float(val_actuelle),
+                            step=0.25,
+                            key=f"note_eleve_{e.id}"
+                        )
                     
                     submitted = st.form_submit_button("Enregistrer les notes")
                     if submitted:
-                        st.success("✅ Notes enregistrées avec succès pour cette évaluation !")
+                        target_school_id = school_id or 1
+                        
+                        # Sauvegarde dans le session state
+                        st.session_state["notes_evaluation_data"][key_notes_store] = saisie_temporaire
+
+                        # Traçabilité dans le journal d'activité
+                        nouveau_log = ActivityLog(
+                            school_id=target_school_id,
+                            timestamp=datetime.utcnow(),
+                            username=st.session_state.get("username", "admin"),
+                            action=f"Enregistrement notes : {matiere_choisie} ({classe_choisie})",
+                            module="Saisie des notes",
+                            statut="Succès"
+                        )
+                        db.add(nouveau_log)
+                        db.commit()
+
+                        st.success("✅ Notes enregistrées et consignées avec succès pour cette évaluation !")
+                        st.rerun()
 
     finally:
         db.close()

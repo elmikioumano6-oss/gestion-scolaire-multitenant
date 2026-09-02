@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
 from database.db_config import SessionLocal
-from database.models import AnneeScolaire, School
+from database.models import AnneeScolaire, School, ActivityLog
+from datetime import datetime
 
 def afficher_annee_scolaire():
     st.subheader("📅 Gestion des Années Scolaires")
@@ -72,6 +73,18 @@ def afficher_annee_scolaire():
                             date_fin=date_fin
                         )
                         db.add(nouvelle_annee)
+
+                        # Traçabilité automatique dans le journal d'activité
+                        nouveau_log = ActivityLog(
+                            school_id=target_school_id,
+                            timestamp=datetime.utcnow(),
+                            username=st.session_state.get("username", "admin"),
+                            action=f"Création de l'année scolaire {libelle}",
+                            module="Année Scolaire",
+                            statut="Succès"
+                        )
+                        db.add(nouveau_log)
+
                         db.commit()
                         st.success(f"✅ L'année scolaire '{libelle}' a été configurée avec succès !")
                         st.rerun()

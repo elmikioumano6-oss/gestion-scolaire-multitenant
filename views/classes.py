@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 from database.db_config import SessionLocal
-from database.models import Classe, School
+from database.models import Classe, School, ActivityLog
 
 def afficher_classes():
     st.subheader("🏫 Gestion des Classes & Tarifs")
@@ -83,6 +84,18 @@ def afficher_classes():
                             cycle=cycle_en_cours
                         )
                         db.add(nouvelle_classe)
+
+                        # Traçabilité automatique dans le journal d'activité
+                        nouveau_log = ActivityLog(
+                            school_id=target_school_id,
+                            timestamp=datetime.utcnow(),
+                            username=st.session_state.get("username", "admin"),
+                            action=f"Création de la classe {libelle} ({cycle_en_cours})",
+                            module="Classes & Tarifs",
+                            statut="Succès"
+                        )
+                        db.add(nouveau_log)
+
                         db.commit()
                         st.success(f"✅ La classe '{libelle}' a été créée avec succès pour le cycle {cycle_en_cours} !")
                         st.rerun()

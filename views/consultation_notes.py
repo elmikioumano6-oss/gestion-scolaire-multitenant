@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 from database.db_config import SessionLocal
-from database.models import Classe, Eleve, School
+from database.models import Classe, Eleve, School, ActivityLog
 
 def afficher_consultation_notes():
     st.subheader("📊 Consultation Détaillée des Notes")
@@ -58,17 +59,57 @@ def afficher_consultation_notes():
             else:
                 st.success(f"Résultats affichés pour la classe de **{classe_choisie}** ({len(eleves)} élèves).")
                 
+                # Récupération des notes enregistrées en session pour les évaluer
+                notes_store = st.session_state.get("notes_evaluation_data", {})
+
                 data_consult = []
                 for e in eleves:
+                    # Recherche de toutes les notes de cet élève à travers les matières stockées
+                    notes_eleve = []
+                    for key, evaluations in notes_store.items():
+                        if f"_{classe_choisie}_" in key or str(school_id) in key:
+                            if e.id in evaluations:
+                                notes_eleve.append(evaluations[e.id])
+
+                    moyenne = round(sum(notes_eleve) / len(notes_eleve), 2) if notes_eleve else "—"
+                    
+                    # Attribution d'une mention indicative si une moyenne existe
+                    mention = "—"
+                    if isinstance(moyenne, (int, float)):
+                        if moyenne >= 16:
+                            mention = "Très Bien"
+                        elif moyenne >= 14:
+                            mention = "Bien"
+                        elif moyenne >= 12:
+                            mention = "Assez Bien"
+                        elif moyenne >= 10:
+                            mention = "Passable"
+                        else:
+                            mention = "Insuffisant"
+
                     data_consult.append({
                         "Nom & Prénom": f"{e.nom} {e.prenom}",
                         "Matricule": getattr(e, 'matricule', 'N/D'),
-                        "Moyenne Trimestrielle": "—",
-                        "Rang": "—",
-                        "Mention": "—"
+                        "Moyenne Trimestrielle": moyenne,
+                        "Rang": "En attente",
+                        "Mention": mention
                     })
+
                 df_consult = pd.DataFrame(data_consult)
                 st.dataframe(df_consult, use_container_width=True)
+
+                # Traçabilité dans le journal d'activité
+                target_school_id = school_id or 1
+                nouveau_log = ActivityLog(
+                    school_id=target_school_id,
+                    timestamp=datetime.utcnow(),
+                    username=st.session_state.get("username", "admin"),
+                    action=f"Consultation des notes - Classe {classe_choisie}",
+                    module="Consultation des notes",
+                    statut="Succès"
+                )
+                db.add(nouveau_log)
+                db.commit()
 
     finally:
         db.close()

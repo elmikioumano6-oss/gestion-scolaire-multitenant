@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 from database.db_config import SessionLocal
-from database.models import Classe, School
+from database.models import Classe, School, ActivityLog
 
 def afficher_planification_evaluations():
     st.subheader("📋 Planification des Évaluations")
@@ -32,11 +33,23 @@ def afficher_planification_evaluations():
 
         noms_classes = [c.libelle for c in classes_cycle]
         
+        # Initialisation du stockage en session state pour les évaluations du cycle/école
+        if "evaluations_data" not in st.session_state:
+            st.session_state["evaluations_data"] = {}
+
         tab1, tab2 = st.tabs(["📅 Calendrier des Évaluations", "➕ Planifier une Évaluation"])
+
+        key_evals = f"{school_id}_{cycle_en_cours}"
+        liste_evals = st.session_state["evaluations_data"].get(key_evals, [])
 
         with tab1:
             st.markdown(f"### Calendrier Officiel — **{school_name} ({cycle_en_cours})**")
-            st.info("Aucune évaluation programmée pour le moment dans cet établissement.")
+            
+            if not liste_evals:
+                st.info("Aucune évaluation programmée pour le moment dans cet établissement.")
+            else:
+                df_evals = pd.DataFrame(liste_evals)
+                st.dataframe(df_evals, use_container_width=True)
 
         with tab2:
             st.markdown(f"### Nouvelle Programmation — **{school_name} ({cycle_en_cours})**")
@@ -54,6 +67,34 @@ def afficher_planification_evaluations():
                     if not titre:
                         st.error("⚠️ L'intitulé de l'évaluation est obligatoire.")
                     else:
+                        target_school_id = school_id
+                        if is_super_admin and not target_school_id:
+                            ecole_defaut = db.query(School).first()
+                            target_school_id = ecole_defaut.id if ecole_defaut else 1
+
+                        nouvelle_eval = {
+                            "Classe": classe_choisie,
+                            "Intitulé": titre.strip(),
+                            "Type": type_eval,
+                            "Date": str(date_eval)
+                        }
+
+                        if key_evals not in st.session_state["evaluations_data"]:
+                            st.session_state["evaluations_data"][key_evals] = []
+                        st.session_state["evaluations_data"][key_evals].append(nouvelle_eval)
+
+                        # Traçabilité dans le journal d'activité
+                        nouveau_log = ActivityLog(
+                            school_id=target_school_id,
+                            timestamp=datetime.utcnow(),
+                            username=st.session_state.get("username", "admin"),
+                            action=f"Planification évaluation : {titre} ({classe_choisie})",
+                            module="Planification des Évaluations",
+                            statut="Succès"
+                        )
+                        db.add(nouveau_log)
+                        db.commit()
+
                         st.success(f"✅ Évaluation '{titre}' programmée avec succès pour la classe de **{classe_choisie}** !")
                         st.rerun()
 

@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 from database.db_config import SessionLocal
-from database.models import School, Classe, Eleve
+from database.models import School, Classe, Eleve, ActivityLog
 
 def afficher_espace_inspection():
     st.subheader("🏛️ Espace Inspection Académique & Suivi Global")
@@ -47,8 +48,22 @@ def afficher_espace_inspection():
             df_global = pd.DataFrame(data_global)
             st.dataframe(df_global, use_container_width=True)
 
+            # Traçabilité dans le journal d'activité global
+            target_school_id = school_id if school_id else 1
+            nouveau_log = ActivityLog(
+                school_id=target_school_id,
+                timestamp=datetime.utcnow(),
+                username=st.session_state.get("username", "super_admin"),
+                action=f"Consultation du tableau de bord global d'inspection ({cycle_en_cours})",
+                module="Espace Inspection",
+                statut="Succès"
+            )
+            db.add(nouveau_log)
+            db.commit()
+
     finally:
         db.close()
 
-# Alias de compatibilité complète pour le routeur
-afficher_espace_inspection_academique = afficher_espace_inspection
+# Définition explicite des deux fonctions pour garantir la compatibilité avec le routeur app.py
+def afficher_espace_inspection_academique():
+    afficher_espace_inspection()

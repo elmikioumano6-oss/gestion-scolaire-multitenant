@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 from database.db_config import SessionLocal
-from database.models import Classe, Eleve, School
+from database.models import Classe, Eleve, School, ActivityLog
 
 def afficher_presence():
     st.subheader("📋 Gestion Avancée des Présences & Assiduité")
@@ -57,6 +58,7 @@ def afficher_presence():
                 st.info(f"Aucun élève inscrit dans la classe **{classe_choisie}**.")
             else:
                 st.success(f"Feuille d'appel active pour la classe de **{classe_choisie}** ({len(eleves)} élèves).")
+                
                 data_appel = []
                 for e in eleves:
                     data_appel.append({
@@ -66,10 +68,24 @@ def afficher_presence():
                         "Motif d'absence": "—"
                     })
                 df_appel = pd.DataFrame(data_appel)
-                edited_df = st.data_editor(df_appel, use_container_width=True)
+                edited_df = st.data_editor(df_appel, use_container_width=True, key=f"editor_presence_{classe_choisie}")
                 
                 if st.button("Enregistrer l'appel"):
-                    st.success("✅ Registre des présences mis à jour avec succès pour cet établissement !")
+                    target_school_id = school_id or 1
+                    
+                    # Traçabilité dans le journal d'activité
+                    nouveau_log = ActivityLog(
+                        school_id=target_school_id,
+                        timestamp=datetime.utcnow(),
+                        username=st.session_state.get("username", "admin"),
+                        action=f"Validation appel des présences - Classe {classe_choisie}",
+                        module="Présence",
+                        statut="Succès"
+                    )
+                    db.add(nouveau_log)
+                    db.commit()
+
+                    st.success("✅ Registre des présences mis à jour et consigné avec succès pour cet établissement !")
 
     finally:
         db.close()

@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 from database.db_config import SessionLocal
-from database.models import Matiere, School
+from database.models import Matiere, School, ActivityLog
 
 def afficher_matieres():
     st.subheader("📚 Gestion des Matières & Coefficients")
@@ -72,6 +73,18 @@ def afficher_matieres():
                             cycle=cycle_en_cours
                         )
                         db.add(nouvelle_matiere)
+
+                        # Traçabilité automatique dans le journal d'activité
+                        nouveau_log = ActivityLog(
+                            school_id=target_school_id,
+                            timestamp=datetime.utcnow(),
+                            username=st.session_state.get("username", "admin"),
+                            action=f"Ajout de la matière {libelle_matiere} (Coeff: {coefficient})",
+                            module="Matières & Coeffs",
+                            statut="Succès"
+                        )
+                        db.add(nouveau_log)
+
                         db.commit()
                         st.success(f"✅ La matière '{libelle_matiere}' a été ajoutée avec succès au cycle {cycle_en_cours} !")
                         st.rerun()

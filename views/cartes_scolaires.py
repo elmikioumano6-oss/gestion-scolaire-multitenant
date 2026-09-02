@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 from database.db_config import SessionLocal
-from database.models import Classe, Eleve, School
+from database.models import Classe, Eleve, School, ActivityLog
 
 def afficher_cartes_scolaires():
     st.subheader("🪪 Génération des Cartes Scolaires")
@@ -63,6 +64,18 @@ def afficher_cartes_scolaires():
                 )
 
                 if st.button("🖨️ Imprimer / Télécharger la carte"):
+                    target_school_id = eleve_obj.school_id or school_id
+                    nouveau_log = ActivityLog(
+                        school_id=target_school_id,
+                        timestamp=datetime.utcnow(),
+                        username=st.session_state.get("username", "admin"),
+                        action=f"Impression carte scolaire - {eleve_obj.nom} {eleve_obj.prenom}",
+                        module="Cartes Scolaires",
+                        statut="Succès"
+                    )
+                    db.add(nouveau_log)
+                    db.commit()
+
                     st.success(f"✅ La carte scolaire de {eleve_obj.nom} {eleve_obj.prenom} a été préparée pour l'impression !")
 
     finally:

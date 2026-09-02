@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
 from database.db_config import SessionLocal
-from database.models import Classe, Eleve, User, School
+from database.models import Classe, Eleve, User, Paiement
+from sqlalchemy import func
 
 def afficher_tableau_de_bord():
     st.subheader("📊 Tableau de Bord Exécutif & Pilotage")
@@ -37,6 +38,8 @@ def afficher_tableau_de_bord():
             eleves_query = eleves_query.filter(Eleve.school_id == school_id)
         eleves = eleves_query.all()
 
+        eleves_ids = [e.id for e in eleves]
+
         # Isolation stricte multi-écoles pour les enseignants / utilisateurs
         users_query = db.query(User)
         if not is_super_admin and school_id:
@@ -47,8 +50,16 @@ def afficher_tableau_de_bord():
         total_classes = len(classes_cycle)
         total_enseignants = len([u for u in users if str(u.role).lower() in ["prof", "enseignant"]])
 
-        total_recettes = sum([getattr(e, 'montant_paye', 0.0) or 0.0 for e in eleves])
-        
+        # Calcul sécurisé des recettes réelles basées sur la table Paiement pour ces élèves
+        total_recettes = 0.0
+        if eleves_ids:
+            recettes_query = db.query(func.sum(Paiement.montant)).filter(Paiement.eleve_id.in_(eleves_ids))
+            if not is_super_admin and school_id:
+                recettes_query = recettes_query.filter(Paiement.school_id == school_id)
+            res_recettes = recettes_query.scalar()
+            if res_recettes:
+                total_recettes = float(res_recettes)
+
         total_attendu = 0.0
         for eleve in eleves:
             classe = next((c for c in classes_cycle if c.id == eleve.classe_id), None)

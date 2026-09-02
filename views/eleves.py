@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 from database.db_config import SessionLocal
-from database.models import Eleve, Classe, School
+from database.models import Eleve, Classe, School, Paiement, ActivityLog
 
 def afficher_eleves():
     st.subheader("🎓 Gestion et Inscription des Élèves")
@@ -91,6 +92,30 @@ def afficher_eleves():
                                 montant_paye=montant_paye_init
                             )
                             db.add(nouvel_eleve)
+                            db.flush() # Pour récupérer l'ID de l'élève nouvellement créé
+
+                            # Si un versement initial est effectué, on l'ajoute aussi dans la table des paiements pour la cohérence financière
+                            if montant_paye_init > 0:
+                                nouveau_paiement = Paiement(
+                                    school_id=target_school_id,
+                                    eleve_id=nouvel_eleve.id,
+                                    montant=montant_paye_init,
+                                    motif="Frais d'inscription / Versement initial",
+                                    date_paiement=datetime.utcnow()
+                                )
+                                db.add(nouveau_paiement)
+
+                            # Traçabilité dans le journal d'activité
+                            nouveau_log = ActivityLog(
+                                school_id=target_school_id,
+                                timestamp=datetime.utcnow(),
+                                username=st.session_state.get("username", "admin"),
+                                action=f"Inscription de l'élève {nom} {prenom} ({classe_choisie})",
+                                module="Inscription Élèves",
+                                statut="Succès"
+                            )
+                            db.add(nouveau_log)
+
                             db.commit()
                             st.success(f"✅ L'élève {nom} {prenom} a été inscrit avec succès !")
                             st.rerun()

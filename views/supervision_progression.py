@@ -1,17 +1,17 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 from database.db_config import SessionLocal
-from database.models import Classe, Matiere, School
+from database.models import Matiere, School, ActivityLog
 
 def afficher_supervision_progression():
-    st.subheader("📚 Pilotage, Suivi & Avancement des Programmes")
-    st.markdown("Tableau de bord exécutif de la Direction des Études : analyse globale de la couverture des programmes officiels et des volumes horaires par discipline avec isolation multi-tenant stricte.")
+    st.subheader("📚 Pilotage, Suivi & Avancement Global des Programmes")
+    st.markdown("Tableau de bord exécutif de la Direction des Études : analyse croisée des volumes prévisionnels, des heures réalisées et des alertes de retard par discipline.")
     st.markdown("---")
 
     school_id = st.session_state.get("school_id")
     is_super_admin = st.session_state.get("is_super_admin", False)
     
-    # Récupération dynamique du nom de l'école active
     db = SessionLocal()
     try:
         if school_id:
@@ -30,45 +30,74 @@ def afficher_supervision_progression():
 
     db = SessionLocal()
     try:
-        # Isolation multi-écoles et multi-cycles pour les classes et matières
-        classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours)
-        if not is_super_admin and school_id:
-            classes_query = classes_query.filter(Classe.school_id == school_id)
-        classes_cycle = classes_query.all()
-
+        # Récupération de toutes les matières du cycle actif pour l'établissement
         matieres_query = db.query(Matiere).filter(Matiere.cycle == cycle_en_cours)
         if not is_super_admin and school_id:
             matieres_query = matieres_query.filter(Matiere.school_id == school_id)
         matieres_cycle = matieres_query.all()
 
-        st.markdown(f"### Suivi des Programmes — **{school_name} ({cycle_en_cours})**")
+        st.markdown(f"### Synthèse des Programmes — **{school_name} ({cycle_en_cours})**")
 
-        if not classes_cycle:
-            st.warning(f"⚠️ Aucune classe disponible pour le cycle **{cycle_en_cours}** dans l'établissement **{school_name}**. Veuillez d'abord en créer dans le menu 'Classes & Tarifs'.")
+        if not matieres_cycle:
+            st.warning(f"⚠️ Aucune matière enregistrée pour le cycle **{cycle_en_cours}** dans l'établissement **{school_name}**.")
+            st.info("Veuillez d'abord configurer vos disciplines dans le menu **Matières & Coeffs**.")
             return
 
-        noms_classes = [c.libelle for c in classes_cycle]
-        classe_choisie = st.selectbox("Sélectionner la classe à auditer", noms_classes)
+        # Récupération de toutes les entrées du cahier de texte pour ce cycle/école
+        key_cahier = f"{school_id}_{cycle_en_cours}"
+        toutes_entrees = st.session_state.get("cahier_texte_data", {}).get(key_cahier, [])
 
-        st.success(f"Tableau de bord d'avancement des programmes actif pour la classe de **{classe_choisie}**.")
-        
-        if matieres_cycle:
-            data_prog = []
-            for m in matieres_cycle:
-                data_prog.append({
-                    "Discipline / Matière": getattr(m, 'libelle', 'Matière'),
-                    "Coefficient": getattr(m, 'coefficient', 1),
-                    "Progression Estimée": "0%",
-                    "Statut": "Normal"
-                })
-            df_prog = pd.DataFrame(data_prog)
-            st.dataframe(df_prog, use_container_width=True)
-        else:
-            st.info("Aucune matière enregistrée pour ce cycle. Utilisez le menu 'Matières & Coeffs' pour en ajouter.")
+        data_suivi = []
+        for mat in matieres_cycle:
+            # Filtrage des séances dispensées pour cette matière (toutes classes confondues du cycle)
+            seances_mat = [e for e in toutes_entrees if e.get("Matière") == mat.libelle]
+            
+            # Calcul du volume horaire réalisé (estimation standard de 2h par séance enregistrée)
+            volume_realise = len(seances_mat) * 2
+            
+            # Volume horaire annuel prévu (standard réglementaire de 45h)
+            volume_prevu = 45 
+            
+            # Calcul du taux de couverture
+            taux = min(100, int((volume_realise / volume_prevu) * 100)) if volume_prevu > 0 else 0
+
+            # Analyse croisée et attribution de la remarque / statut de retard
+            if taux < 20:
+                remarque = "🔴 En retard critique"
+            elif taux < 40:
+                remarque = "🟠 En léger retard"
+            elif taux <= 80:
+                remarque = "🟢 Rythme conforme"
+            else:
+                remarque = "🔵 Programme bien avancé"
+
+            data_suivi.append({
+                "Discipline / Matière": mat.libelle,
+                "Coefficient": getattr(mat, 'coefficient', 1) or 1,
+                "Volume Prévu": f"{volume_prevu}h",
+                "Volume Réalisé": f"{volume_realise}h",
+                "Taux d'Avancement": f"{taux}%",
+                "Analyse & Remarque": remarque
+            })
+
+        df_suivi = pd.DataFrame(data_suivi)
+        st.dataframe(df_suivi, use_container_width=True)
+
+        # Traçabilité de l'audit dans le journal d'activité
+        target_school_id = school_id or 1
+        db.add(ActivityLog(
+            school_id=target_school_id,
+            timestamp=datetime.utcnow(),
+            username=st.session_state.get("username", "admin"),
+            action=f"Consultation du suivi global des programmes ({cycle_en_cours})",
+            module="Suivi des Programmes",
+            statut="Succès"
+        ))
+        db.commit()
 
     finally:
         db.close()
 
-# Alias de compatibilité complète pour le routeur
+# Alias de compatibilité exhaustive pour éviter toute erreur du routeur app.py
 afficher_suivi_programmes = afficher_supervision_progression
 afficher_suivi_des_programmes = afficher_supervision_progression

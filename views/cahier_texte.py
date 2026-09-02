@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 from database.db_config import SessionLocal
-from database.models import Classe, Matiere, School
+from database.models import Classe, Matiere, School, ActivityLog
 
 def afficher_cahier_texte():
     st.subheader("📖 Cahier de Texte Numérique")
@@ -39,12 +40,27 @@ def afficher_cahier_texte():
         noms_classes = [c.libelle for c in classes_cycle]
         noms_matieres = [m.libelle for m in matieres_cycle]
 
+        # Initialisation du stockage en session state pour le cahier de texte
+        if "cahier_texte_data" not in st.session_state:
+            st.session_state["cahier_texte_data"] = {}
+
         tab1, tab2 = st.tabs(["📖 Consulter le Cahier de Texte", "✍️ Saisir un Cours / Devoir"])
+
+        key_cahier = f"{school_id}_{cycle_en_cours}"
 
         with tab1:
             st.markdown(f"### Entrées du Cahier de Texte — **{school_name} ({cycle_en_cours})**")
             classe_consult = st.selectbox("Sélectionner la classe", noms_classes, key="consult_cahier_classe")
-            st.info(f"Aucune entrée enregistrée pour la classe **{classe_consult}** dans le cycle **{cycle_en_cours}**.")
+            
+            # Filtrer les entrées pour cette classe
+            toutes_entrees = st.session_state["cahier_texte_data"].get(key_cahier, [])
+            entrees_classe = [e for e in toutes_entrees if e["Classe"] == classe_consult]
+
+            if not entrees_classe:
+                st.info(f"Aucune entrée enregistrée pour la classe **{classe_consult}** dans le cycle **{cycle_en_cours}**.")
+            else:
+                df_cahier = pd.DataFrame(entrees_classe)
+                st.dataframe(df_cahier, use_container_width=True)
 
         with tab2:
             st.markdown(f"### Nouvelle Saisie — **{school_name} ({cycle_en_cours})**")
@@ -64,6 +80,35 @@ def afficher_cahier_texte():
                     if not titre_cours or not contenu:
                         st.error("⚠️ Veuillez remplir le titre et le contenu.")
                     else:
+                        target_school_id = school_id
+                        if is_super_admin and not target_school_id:
+                            ecole_defaut = db.query(School).first()
+                            target_school_id = ecole_defaut.id if ecole_defaut else 1
+
+                        nouvelle_entree = {
+                            "Classe": classe_choisie,
+                            "Matière": matiere_choisie,
+                            "Date": str(date_cours),
+                            "Titre": titre_cours.strip(),
+                            "Contenu": contenu.strip()
+                        }
+
+                        if key_cahier not in st.session_state["cahier_texte_data"]:
+                            st.session_state["cahier_texte_data"][key_cahier] = []
+                        st.session_state["cahier_texte_data"][key_cahier].append(nouvelle_entree)
+
+                        # Traçabilité dans le journal d'activité
+                        nouveau_log = ActivityLog(
+                            school_id=target_school_id,
+                            timestamp=datetime.utcnow(),
+                            username=st.session_state.get("username", "admin"),
+                            action=f"Saisie Cahier de Texte : {matiere_choisie} - {titre_cours} ({classe_choisie})",
+                            module="Cahier de Texte",
+                            statut="Succès"
+                        )
+                        db.add(nouveau_log)
+                        db.commit()
+
                         st.success(f"✅ Entrée enregistrée avec succès pour la classe **{classe_choisie}** en **{matiere_choisie}** !")
                         st.rerun()
 

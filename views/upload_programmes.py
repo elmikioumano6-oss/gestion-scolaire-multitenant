@@ -1,7 +1,9 @@
 import streamlit as st
 import pandas as pd
+import io
+from datetime import datetime
 from database.db_config import SessionLocal
-from database.models import School
+from database.models import School, Matiere, ActivityLog
 
 def afficher_upload_programmes():
     st.subheader("📥 Import des Programmes & Coefficients")
@@ -11,7 +13,6 @@ def afficher_upload_programmes():
     school_id = st.session_state.get("school_id")
     is_super_admin = st.session_state.get("is_super_admin", False)
     
-    # Récupération dynamique du nom de l'école active
     db = SessionLocal()
     try:
         if school_id:
@@ -34,8 +35,23 @@ def afficher_upload_programmes():
     st.markdown("#### Étape 1 : Télécharger le modèle officiel")
     st.markdown("Récupérez le fichier modèle pré-formaté au format Excel. Remplissez-le avec les matières, chapitres et coefficients de votre établissement.")
     
-    if st.button("📊 Télécharger le modèle Excel (.xlsx)"):
-        st.success("✅ Modèle téléchargé avec succès pour cet établissement !")
+    df_modele = pd.DataFrame({
+        "Matière": ["Mathématiques", "Français", "Histoire-Géo", "Physique-Chimie"],
+        "Coefficient": [4, 4, 2, 3],
+        "Volume Horaire Prévu": [45, 45, 30, 35]
+    })
+    
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df_modele.to_excel(writer, index=False, sheet_name='Modele_Programmes')
+    excel_data = output.getvalue()
+
+    st.download_button(
+        label="📊 Télécharger le modèle Excel (.xlsx)",
+        data=excel_data,
+        file_name=f"modele_programmes_{cycle_en_cours.lower()}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
     st.markdown("---")
     st.markdown("#### Étape 2 : Importer et prévisualiser votre fichier")
@@ -52,7 +68,44 @@ def afficher_upload_programmes():
             st.dataframe(df_import, use_container_width=True)
 
             if st.button("Enregistrer les données importées"):
-                st.success(f"✅ Les programmes ont été importés et rattachés à **{school_name}** avec succès !")
+                db = SessionLocal()
+                try:
+                    target_school_id = school_id or 1
+                    count_added = 0
+                    for _, row in df_import.iterrows():
+                        nom_mat = str(row.get("Matière", "")).strip()
+                        coef = float(row.get("Coefficient", 1) or 1)
+                        if nom_mat and nom_mat != "nan":
+                            existante = db.query(Matiere).filter(
+                                Matiere.school_id == target_school_id,
+                                Matiere.cycle == cycle_en_cours,
+                                Matiere.libelle == nom_mat
+                            ).first()
+                            if not existante:
+                                nouvelle_matiere = Matiere(
+                                    school_id=target_school_id,
+                                    cycle=cycle_en_cours,
+                                    libelle=nom_mat,
+                                    coefficient=coef
+                                )
+                                db.add(nouvelle_matiere)
+                                count_added += 1
+
+                    db.add(ActivityLog(
+                        school_id=target_school_id,
+                        timestamp=datetime.utcnow(),
+                        username=st.session_state.get("username", "admin"),
+                        action=f"Importation de programmes ({count_added} matières) pour le cycle {cycle_en_cours}",
+                        module="Import Programmes PDF",
+                        statut="Succès"
+                    ))
+                    db.commit()
+                    st.success(f"✅ {count_added} matière(s) importée(s) et rattachée(s) à **{school_name}** ({cycle_en_cours}) avec succès !")
+                except Exception as ex:
+                    db.rollback()
+                    st.error(f"⚠️ Erreur lors de l'enregistrement en base de données : {ex}")
+                finally:
+                    db.close()
         except Exception as e:
             st.error(f"⚠️ Erreur lors de la lecture du fichier : {e}")
 

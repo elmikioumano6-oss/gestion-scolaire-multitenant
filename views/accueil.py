@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
 from database.db_config import SessionLocal
-from database.models import Eleve, Classe, User, School
-from sqlalchemy import inspect
+from database.models import Eleve, Classe, User, School, Paiement
+from sqlalchemy import func
 
 def afficher_accueil():
     # --- 1. RÉCUPÉRATION DYNAMIQUE DE L'ÉCOLE ACTIVE ---
@@ -24,7 +24,7 @@ def afficher_accueil():
                 adresse_ecole = getattr(ecole, 'adresse', "Quartier, Niamey - Niger")
                 contacts_ecole = getattr(ecole, 'contacts', "N/D")
 
-        # --- 2. EN-TÊTE INSTITUTIONNEL ÉPURÉ (SANS DOUBLE LOGO) ---
+        # --- 2. EN-TÊTE INSTITUTIONNEL ÉPURÉ ---
         st.markdown(
             f"""
             <div style="background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%); padding: 25px; border-radius: 12px; border-left: 6px solid #D97706; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 25px;">
@@ -55,17 +55,17 @@ def afficher_accueil():
         total_recettes = 0.0
         total_attendu = total_eleves * 65000  
         
-        if school_id:
-            inspector = inspect(db.bind)
-            tables = inspector.get_table_names()
-            for t_name in tables:
-                if 'paiement' in t_name.lower() or 'encaissement' in t_name.lower():
-                    try:
-                        df_p = pd.read_sql(f"SELECT SUM(montant) as total FROM {t_name}", con=db.bind)
-                        if not df_p.empty and df_p['total'].iloc[0] is not None:
-                            total_recettes = float(df_p['total'].iloc[0])
-                    except Exception:
-                        pass
+        # Calcul sécurisé des recettes avec isolation multi-tenant via SQLAlchemy
+        try:
+            query_paiements = db.query(Paiement)
+            if not is_super_admin and school_id:
+                query_paiements = query_paiements.filter(Paiement.school_id == school_id)
+            
+            result_paiements = query_paiements.with_entities(func.sum(Paiement.montant)).scalar()
+            if result_paiements:
+                total_recettes = float(result_paiements)
+        except Exception:
+            total_recettes = 0.0
 
         taux_recouvrement = (total_recettes / total_attendu * 100) if total_attendu > 0 else 0.0
 
