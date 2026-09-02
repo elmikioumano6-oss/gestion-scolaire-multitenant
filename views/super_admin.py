@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
+import bcrypt
 from database.db_config import SessionLocal
 from database.models import School, User
 
@@ -27,11 +28,12 @@ def afficher_super_admin():
                 for ecole in ecoles:
                     statut_texte = "✅ Actif" if getattr(ecole, 'actif', True) else "⛔ Suspendu"
                     
-                    with st.expander(f"🏫 {ecole.nom} (ID: {ecole.id}) — Statut : {statut_texte}"):
+                    with st.expander(f"🏫 {ecole.nom} (ID: {ecole.id}) [Code: {ecole.code}] — Statut : {statut_texte}"):
                         with st.form(key=f"form_update_{ecole.id}"):
                             col1, col2 = st.columns(2)
                             
                             with col1:
+                                st.write(f"**Code :** {getattr(ecole, 'code', 'N/D')}")
                                 st.write(f"**Devise :** {getattr(ecole, 'devise', 'N/D')}")
                                 st.write(f"**Adresse :** {getattr(ecole, 'adresse', 'N/D')}")
                                 st.write(f"**Contacts :** {getattr(ecole, 'contacts', 'N/D')}")
@@ -57,48 +59,125 @@ def afficher_super_admin():
                                         ecole_maj.actif = nouveau_statut_actif
                                         ecole_maj.date_expiration = datetime.combine(nouvelle_date_exp, datetime.min.time())
                                         
-                                        # Désactivation ou réactivation en cascade des utilisateurs de cette école
                                         utilisateurs_ecole = db.query(User).filter(User.school_id == ecole.id).all()
                                         for u in utilisateurs_ecole:
-                                            # Si votre modèle User possède un champ actif, on le synchronise
                                             if hasattr(u, 'actif'):
                                                 u.actif = nouveau_statut_actif
                                                 
                                         db.commit()
-                                        st.success(f"✅ Paramètres mis à jour pour {ecole_maj.nom} (Accès utilisateurs synchronisés) !")
+                                        st.success(f"✅ Paramètres mis à jour pour {ecole_maj.nom} !")
+                                        st.rerun()
+
+                        # --- GESTION DES COMPTES ADMINISTRATEURS POUR CETTE ÉCOLE EXISTANTE ---
+                        st.markdown("---")
+                        st.markdown("#### 👤 Gestion des Comptes Administrateurs / Censeurs")
+                        
+                        utilisateurs_ecole = db.query(User).filter(User.school_id == ecole.id).all()
+                        if utilisateurs_ecole:
+                            for u in utilisateurs_ecole:
+                                st.markdown(f"- **Utilisateur :** `{u.username}` | **Rôle :** `{u.role}` | **Mot de passe à changer :** `{'Oui' if u.changer_mdp_requis else 'Non'}`")
+                        else:
+                            st.warning("⚠️ Aucun compte utilisateur n'est encore associé à cet établissement.")
+
+                        with st.form(key=f"form_admin_existant_{ecole.id}"):
+                            st.write("Créer ou réinitialiser un accès administrateur pour cette école :")
+                            adm_username = st.text_input("Identifiant de connexion", key=f"adm_user_{ecole.id}")
+                            adm_password = st.text_input("Mot de passe provisoire", type="password", key=f"adm_pass_{ecole.id}")
+                            btn_save_adm = st.form_submit_button("Créer / Réinitialiser le compte Admin")
+                            
+                            if btn_save_adm:
+                                if not adm_username.strip() or not adm_password.strip():
+                                    st.error("Veuillez renseigner l'identifiant et le mot de passe.")
+                                elif len(adm_password) < 6:
+                                    st.error("Le mot de passe provisoire doit contenir au moins 6 caractères.")
+                                else:
+                                    existing_usr = db.query(User).filter(User.username == adm_username.strip()).first()
+                                    if existing_usr:
+                                        if existing_usr.school_id == ecole.id:
+                                            existing_usr.password = bcrypt.hashpw(adm_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+                                            existing_usr.role = "admin"
+                                            existing_usr.changer_mdp_requis = True
+                                            db.commit()
+                                            st.success(f"✅ Compte {adm_username.strip()} mis à jour avec succès !")
+                                            st.rerun()
+                                        else:
+                                            st.error("⛔ Cet identifiant est déjà utilisé par un autre utilisateur dans une autre école.")
+                                    else:
+                                        hashed_p = bcrypt.hashpw(adm_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+                                        nouveau_compte = User(
+                                            school_id=ecole.id,
+                                            username=adm_username.strip(),
+                                            password=hashed_p,
+                                            role="admin",
+                                            changer_mdp_requis=True
+                                        )
+                                        db.add(nouveau_compte)
+                                        db.commit()
+                                        st.success(f"✅ Compte administrateur `{adm_username.strip()}` créé avec succès pour {ecole.nom} !")
                                         st.rerun()
 
         with tab2:
-            st.markdown("### Enregistrer un Nouvel Établissement")
+            st.markdown("### Enregistrer un Nouvel Établissement et son Administrateur")
             with st.form("form_create_school"):
+                st.markdown("#### 1. Informations de l'établissement")
+                code_ecole = st.text_input("Code unique de l'établissement (ex: RAHMAT, CHALLENGE)")
                 nom_ecole = st.text_input("Nom de l'établissement")
                 devise_ecole = st.text_input("Devise", value="Discipline - Qualité - Réussite")
                 adresse_ecole = st.text_input("Adresse / Quartier, Ville", value="Niamey, Niger")
                 contacts_ecole = st.text_input("Numéros de téléphone (séparés par /)")
-                
                 periode_essai_mois = st.number_input("Période d'essai (en mois)", min_value=1, max_value=12, value=1)
 
-                submitted_school = st.form_submit_button("Créer l'établissement et activer l'essai")
+                st.markdown("#### 2. Compte Administrateur / Censeur initial")
+                admin_username = st.text_input("Identifiant de connexion (ex: admin_rahmat)")
+                admin_password = st.text_input("Mot de passe provisoire", type="password")
+
+                submitted_school = st.form_submit_button("Créer l'établissement et générer le compte")
                 if submitted_school:
-                    if not nom_ecole.strip():
-                        st.error("⚠️ Le nom de l'établissement est obligatoire.")
+                    if not nom_ecole.strip() or not code_ecole.strip():
+                        st.error("⚠️ Le nom et le code unique de l'établissement sont obligatoires.")
+                    elif not admin_username.strip() or not admin_password.strip():
+                        st.error("⚠️ L'identifiant et le mot de passe administrateur sont obligatoires.")
+                    elif len(admin_password) < 6:
+                        st.error("⚠️ Le mot de passe provisoire doit contenir au moins 6 caractères.")
                     else:
-                        date_expiration_val = datetime.utcnow() + timedelta(days=30 * periode_essai_mois)
-                        nouvelle_ecole = School(
-                            nom=nom_ecole.strip(),
-                            devise=devise_ecole.strip(),
-                            adresse=adresse_ecole.strip(),
-                            contacts=contacts_ecole.strip(),
-                            actif=True,
-                            date_expiration=date_expiration_val
-                        )
-                        db.add(nouvelle_ecole)
-                        db.commit()
-                        st.success(f"✅ L'établissement **{nom_ecole}** a été créé avec succès avec un essai de {periode_essai_mois} mois !")
-                        st.rerun()
+                        code_nettoye = code_ecole.strip().upper()
+                        code_existant = db.query(School).filter(School.code == code_nettoye).first()
+                        if code_existant:
+                            st.error(f"⚠️ Un établissement avec le code '{code_nettoye}' existe déjà.")
+                        else:
+                            user_existant = db.query(User).filter(User.username == admin_username.strip()).first()
+                            if user_existant:
+                                st.error(f"⚠️ L'identifiant '{admin_username.strip()}' est déjà utilisé.")
+                            else:
+                                date_expiration_val = datetime.utcnow() + timedelta(days=30 * periode_essai_mois)
+                                nouvelle_ecole = School(
+                                    code=code_nettoye,
+                                    nom=nom_ecole.strip(),
+                                    devise=devise_ecole.strip(),
+                                    adresse=adresse_ecole.strip(),
+                                    contacts=contacts_ecole.strip(),
+                                    actif=True,
+                                    date_expiration=date_expiration_val
+                                )
+                                db.add(nouvelle_ecole)
+                                db.commit()
+                                db.refresh(nouvelle_ecole)
+
+                                hashed_pwd = bcrypt.hashpw(admin_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+                                nouvel_admin = User(
+                                    school_id=nouvelle_ecole.id,
+                                    username=admin_username.strip(),
+                                    password=hashed_pwd,
+                                    role="admin",
+                                    changer_mdp_requis=True
+                                )
+                                db.add(nouvel_admin)
+                                db.commit()
+
+                                st.success(f"✅ L'établissement **{nom_ecole}** et son compte administrateur (**{admin_username.strip()}**) ont été créés avec succès !")
+                                st.rerun()
 
     finally:
         db.close()
 
-# Alias de compatibilité
 afficher_super_admin_global = afficher_super_admin
