@@ -33,7 +33,8 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 def init_db():
-    from database.models import School, User
+    # Importation explicite de tous les modèles (y compris ActivityLog) pour la création des tables
+    from database.models import School, User, ActivityLog
     import bcrypt
     
     Base.metadata.create_all(bind=engine)

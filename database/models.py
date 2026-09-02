@@ -5,6 +5,7 @@ from database.db_config import Base
 
 class School(Base):
     __tablename__ = "schools"
+    
     id = Column(Integer, primary_key=True, index=True)
     nom = Column(String(150), nullable=False)
     code = Column(String(50), unique=True, nullable=False)
@@ -15,7 +16,6 @@ class School(Base):
     
     actif = Column(Boolean, default=True)
     date_expiration = Column(DateTime, nullable=True)
-    
     created_at = Column(DateTime, default=datetime.utcnow)
 
     annees = relationship("AnneeScolaire", back_populates="school", cascade="all, delete-orphan")
@@ -27,6 +27,7 @@ class School(Base):
 
 class AnneeScolaire(Base):
     __tablename__ = "annees_scolaires"
+    
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False)
     libelle = Column(String, index=True)
@@ -38,6 +39,7 @@ class AnneeScolaire(Base):
 
 class Classe(Base):
     __tablename__ = "classes"
+    
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False)
     libelle = Column(String, index=True)
@@ -64,6 +66,7 @@ class Classe(Base):
 
 class Eleve(Base):
     __tablename__ = "eleves"
+    
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False)
     nom = Column(String, index=True)
@@ -87,6 +90,7 @@ class Eleve(Base):
 
 class User(Base):
     __tablename__ = "users"
+    
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=True)
     username = Column(String, unique=True, index=True)
@@ -94,7 +98,7 @@ class User(Base):
     role = Column(String)
     
     derniere_activite = Column(DateTime, nullable=True)
-    changer_mdp_requis = Column(Boolean, default=False)  # Champ ajouté pour forcer le changement au premier login
+    changer_mdp_requis = Column(Boolean, default=False)
 
     enseignant_id = Column(Integer, ForeignKey("enseignants.id"), nullable=True)
     eleve_id = Column(Integer, ForeignKey("eleves.id"), nullable=True)
@@ -105,6 +109,7 @@ class User(Base):
 
 class Matiere(Base):
     __tablename__ = "matieres"
+    
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False)
     libelle = Column(String, index=True, nullable=True)
@@ -124,6 +129,7 @@ class Matiere(Base):
 
 class Programme(Base):
     __tablename__ = "programmes"
+    
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False)
     code_matiere = Column(String, index=True, nullable=True)
@@ -135,6 +141,7 @@ class Programme(Base):
 
 class Note(Base):
     __tablename__ = "notes"
+    
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False)
     eleve_id = Column(Integer, ForeignKey("eleves.id"))
@@ -148,6 +155,7 @@ class Note(Base):
 
 class Enseignant(Base):
     __tablename__ = "enseignants"
+    
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False)
     nom = Column(String, index=True)
@@ -164,6 +172,7 @@ class Enseignant(Base):
 
 class Affectation(Base):
     __tablename__ = "affectations"
+    
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False)
     enseignant_id = Column(Integer, ForeignKey("enseignants.id"), nullable=True)
@@ -176,6 +185,7 @@ class Affectation(Base):
 
 class Presence(Base):
     __tablename__ = "presences"
+    
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False)
     eleve_id = Column(Integer, ForeignKey("eleves.id"), nullable=True)
@@ -187,6 +197,7 @@ class Presence(Base):
 
 class EmploiDuTemps(Base):
     __tablename__ = "emplois_du_temps"
+    
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False)
     classe_id = Column(Integer, ForeignKey("classes.id"), nullable=True)
@@ -200,6 +211,7 @@ class EmploiDuTemps(Base):
 
 class CahierTexte(Base):
     __tablename__ = "cahiers_texte"
+    
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False)
     classe_id = Column(Integer, ForeignKey("classes.id"), nullable=True)
@@ -216,6 +228,7 @@ class CahierTexte(Base):
 
 class EcheancePaiement(Base):
     __tablename__ = "echeances_paiements"
+    
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False)
     libelle = Column(String)
@@ -224,6 +237,7 @@ class EcheancePaiement(Base):
 
 class PlanificationEvaluation(Base):
     __tablename__ = "planification_evaluations"
+    
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False)
     classe_id = Column(Integer, ForeignKey("classes.id"), nullable=True)
@@ -238,17 +252,20 @@ class PlanificationEvaluation(Base):
     classe = relationship("Classe")
     matiere = relationship("Matiere")
 
-class LogActivite(Base):
-    __tablename__ = "log_activites"
+class ActivityLog(Base):
+    __tablename__ = "activity_logs"
+    
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=True)
-    utilisateur = Column(String, nullable=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    username = Column(String, nullable=True)
     action = Column(String, nullable=True)
-    details = Column(String, nullable=True)
-    date_heure = Column(DateTime, nullable=True)
+    module = Column(String, nullable=True)
+    statut = Column(String, default="Succès")
 
 class Paiement(Base):
     __tablename__ = "paiements"
+    
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False)
     reference_recu = Column(String, unique=True, index=True)

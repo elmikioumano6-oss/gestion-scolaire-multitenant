@@ -2,7 +2,7 @@ import importlib
 import inspect
 from datetime import datetime
 import os
-from database.db_config import SessionLocal
+from database.db_config import SessionLocal, init_db
 from database.models import AnneeScolaire, User, School
 import streamlit as st
 import bcrypt
@@ -16,6 +16,9 @@ def main():
         layout="wide",
         initial_sidebar_state="expanded",
     )
+
+    # Initialisation de la base de données et création des tables manquantes (y compris activity_logs)
+    init_db()
 
     query_params = st.query_params
 

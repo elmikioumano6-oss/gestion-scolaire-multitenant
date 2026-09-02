@@ -1,6 +1,7 @@
 import streamlit as st
 from database.db_config import SessionLocal
-from database.models import User, School
+from database.models import User, School, ActivityLog
+from datetime import datetime
 import bcrypt
 
 def afficher_login():
@@ -30,6 +31,21 @@ def afficher_login():
                                 pwd_match = (user.password == password)
                                 
                             if pwd_match:
+                                # Enregistrement de la connexion dans le journal d'activité
+                                try:
+                                    nouveau_log = ActivityLog(
+                                        school_id=user.school_id,
+                                        timestamp=datetime.utcnow(),
+                                        username=user.username,
+                                        action="Connexion à la plateforme",
+                                        module="Authentification",
+                                        statut="Succès"
+                                    )
+                                    db.add(nouveau_log)
+                                    db.commit()
+                                except Exception:
+                                    db.rollback()
+
                                 st.session_state["authenticated"] = True
                                 st.session_state["username"] = user.username
                                 st.session_state["role"] = str(user.role).strip().lower()
