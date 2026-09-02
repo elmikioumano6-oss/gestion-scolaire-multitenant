@@ -5,7 +5,7 @@ import streamlit as st
 
 # Récupération sécurisée depuis st.secrets avec repli local SQLite si Supabase est inaccessible
 try:
-    DATABASE_URL = st.secrets["database"]["url"]
+    DATABASE_URL = st.secrets["DB_URL"]
     # Pour PostgreSQL/Supabase, on utilise connect_timeout
     connect_args = {"connect_timeout": 10}
 except Exception:
