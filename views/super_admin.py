@@ -267,4 +267,5 @@ def afficher_super_admin():
     finally:
         db.close()
 
+# Alias de compatibilité
 afficher_super_admin_global = afficher_super_admin
