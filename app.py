@@ -120,26 +120,36 @@ def main():
                     
                     st.warning("⚠️ **Sécurité requise :** C'est votre première connexion ou votre mot de passe est provisoire. Veuillez définir un nouveau mot de passe personnel pour accéder à la plateforme.")
                     
-                    with st.form("form_force_change_pwd"):
-                        nouveau_p = st.text_input("Nouveau mot de passe", type="password")
-                        confirme_p = st.text_input("Confirmer le nouveau mot de passe", type="password")
-                        btn_valider = st.form_submit_button("Enregistrer et accéder à la plateforme")
+                    if "temp_new_p" not in st.session_state:
+                        st.session_state["temp_new_p"] = ""
+                    if "temp_conf_p" not in st.session_state:
+                        st.session_state["temp_conf_p"] = ""
+
+                    st.session_state["temp_new_p"] = st.text_input("Nouveau mot de passe", type="password", value=st.session_state["temp_new_p"], key="input_new_p")
+                    st.session_state["temp_conf_p"] = st.text_input("Confirmer le nouveau mot de passe", type="password", value=st.session_state["temp_conf_p"], key="input_conf_p")
+                    
+                    if st.button("Enregistrer et accéder à la plateforme", type="primary"):
+                        nouveau_p = st.session_state["temp_new_p"]
+                        confirme_p = st.session_state["temp_conf_p"]
                         
-                        if btn_valider:
-                            if len(nouveau_p) < 6:
-                                st.error("Le mot de passe doit contenir au moins 6 caractères.")
-                            elif nouveau_p != confirme_p:
-                                st.error("Les mots de passe ne correspondent pas.")
-                            else:
-                                try:
-                                    usr_to_update.password = bcrypt.hashpw(nouveau_p.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-                                    usr_to_update.changer_mdp_requis = False
-                                    db_act.commit()
-                                    st.success("Mot de passe mis à jour avec succès !")
-                                    st.rerun()
-                                except Exception as ex:
-                                    db_act.rollback()
-                                    st.error(f"Erreur lors de la mise à jour : {ex}")
+                        if len(nouveau_p) < 6:
+                            st.error("Le mot de passe doit contenir au moins 6 caractères.")
+                        elif nouveau_p != confirme_p:
+                            st.error("Les mots de passe ne correspondent pas.")
+                        else:
+                            try:
+                                usr_to_update.password = bcrypt.hashpw(nouveau_p.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+                                usr_to_update.changer_mdp_requis = False
+                                db_act.commit()
+                                if "temp_new_p" in st.session_state:
+                                    del st.session_state["temp_new_p"]
+                                if "temp_conf_p" in st.session_state:
+                                    del st.session_state["temp_conf_p"]
+                                st.success("Mot de passe mis à jour avec succès !")
+                                st.rerun()
+                            except Exception as ex:
+                                db_act.rollback()
+                                st.error(f"Erreur lors de la mise à jour : {ex}")
                     db_act.close()
                     return
 
