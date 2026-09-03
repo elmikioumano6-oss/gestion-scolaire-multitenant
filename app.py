@@ -24,7 +24,7 @@ def main():
         from database.db_config import engine
         import sqlalchemy as sa
         with engine.connect() as conn:
-            conn.execute(sa.text("ALTER TABLE users ADD COLUMN changer_mdp_requis BOOLEAN DEFAULT 0;"))
+            conn.execute(sa.text("ALTER TABLE users ADD COLUMN changer_mdp_requis BOOLEAN DEFAULT 1;"))
             conn.commit()
     except Exception:
         pass  # La colonne existe déjà, on ignore l'erreur

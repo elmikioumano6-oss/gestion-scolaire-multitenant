@@ -98,7 +98,7 @@ class User(Base):
     role = Column(String)
     
     derniere_activite = Column(DateTime, nullable=True)
-    changer_mdp_requis = Column(Boolean, default=False)
+    changer_mdp_requis = Column(Boolean, default=True)
 
     enseignant_id = Column(Integer, ForeignKey("enseignants.id"), nullable=True)
     eleve_id = Column(Integer, ForeignKey("eleves.id"), nullable=True)
