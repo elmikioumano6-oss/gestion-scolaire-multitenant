@@ -15,22 +15,24 @@ def afficher_super_admin():
         st.warning("⚠️ Accès strictement réservé au Super Administrateur.")
         return
 
-    # --- SECTION DE MAINTENANCE / SÉCURITÉ GLOBALE ---
-    with st.expander("🔒 Sécurité et Mises à jour globales des comptes"):
-        st.markdown("Si vous avez des comptes administrateurs créés avant la mise en place de la sécurité de première connexion, vous pouvez les forcer à changer leur mot de passe ici.")
-        if st.button("🔑 Forcer le changement de mot de passe pour TOUS les administrateurs existants", type="secondary"):
+    # --- SECTION DE SÉCURITÉ GLOBALE (FIXÉE EN HAUT POUR NE PLUS DISPARAÎTRE) ---
+    with st.expander("🔒 Sécurité et Mises à jour globales des comptes", expanded=True):
+        st.markdown("Si vous avez des comptes administrateurs ou censeurs créés avant la mise en place de la sécurité, forcez ici l'exigence d'un changement de mot de passe à leur prochaine connexion.")
+        if st.button("🔑 Forcer le changement de mot de passe pour TOUS les administrateurs existants", type="primary"):
             db_sec_all = SessionLocal()
             try:
                 nb_maj = db_sec_all.query(User).filter(User.role != "super_admin").update(
                     {User.changer_mdp_requis: True}, synchronize_session=False
                 )
                 db_sec_all.commit()
-                st.success(f"✅ Succès ! {nb_maj} compte(s) administrateur(s) ont été configurés pour exiger un changement de mot de passe à leur prochaine connexion.")
+                st.success(f"✅ Succès ! {nb_maj} compte(s) configuré(s) pour exiger un changement de mot de passe.")
             except Exception as ex:
                 db_sec_all.rollback()
                 st.error(f"Erreur lors de la mise à jour globale : {ex}")
             finally:
                 db_sec_all.close()
+
+    st.markdown("---")
 
     # --- AFFICHAGE DES DERNIERS ACCÈS CRÉÉS (POUR ENVOI RAPIDE WHATSAPP) ---
     if "last_created_credentials" in st.session_state:
@@ -49,25 +51,21 @@ def afficher_super_admin():
         )
         encoded_msg = urllib.parse.quote(msg)
         
-        # Extraction de tous les numéros disponibles dans le champ contacts
         raw_contacts = str(cred.get('contacts', ''))
-        # Sépare par '/', ',' ou '-'
         liste_brute = [p.strip() for p in raw_contacts.replace(',', '/').replace('-', '/').split('/') if p.strip()]
         
-        # Nettoyage et formatage des numéros (ajout de 227 si 8 chiffres)
         numeros_valides = []
         for num in liste_brute:
             clean_num = "".join(filter(str.isdigit, num))
             if len(clean_num) == 8:
                 clean_num = "227" + clean_num
             if len(clean_num) >= 8:
-                numeros_valides.append((num, clean_num)) # (format affiché, format international)
+                numeros_valides.append((num, clean_num))
 
         col_wa1, col_wa2 = st.columns([2, 1])
         with col_wa1:
             if numeros_valides:
                 if len(numeros_valides) > 1:
-                    # Choix du numéro si plusieurs sont disponibles
                     choix_label = st.selectbox(
                         "📱 Cet établissement a plusieurs numéros. Lequel voulez-vous utiliser pour WhatsApp ?",
                         options=[n[0] for n in numeros_valides],
@@ -151,7 +149,6 @@ def afficher_super_admin():
                                         st.success(f"✅ Paramètres mis à jour pour {ecole_maj.nom} !")
                                         st.rerun()
 
-                        # --- GESTION DES COMPTES ADMINISTRATEURS POUR CETTE ÉCOLE EXISTANTE ---
                         st.markdown("---")
                         st.markdown("#### 👤 Gestion des Comptes Administrateurs / Censeurs")
                         
@@ -284,5 +281,4 @@ def afficher_super_admin():
     finally:
         db.close()
 
-# Alias de compatibilité
 afficher_super_admin_global = afficher_super_admin
