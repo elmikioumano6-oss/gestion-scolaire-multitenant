@@ -17,7 +17,6 @@ def main():
         initial_sidebar_state="expanded",
     )
 
-    # Initialisation de la base de données et création des tables manquantes
     init_db()
 
     query_params = st.query_params
@@ -118,38 +117,30 @@ def main():
                         unsafe_allow_html=True,
                     )
                     
-                    st.warning("⚠️ **Sécurité requise :** C'est votre première connexion ou votre mot de passe est provisoire. Veuillez définir un nouveau mot de passe personnel pour accéder à la plateforme.")
+                    st.markdown("<br><h2 style='text-align: center; color: #C5A059;'>🔒 Sécurité Obligatoire de Première Connexion</h2>", unsafe_allow_html=True)
+                    st.markdown("<p style='text-align: center; color: #6c757d;'>Vous êtes connecté avec un mot de passe provisoire. Veuillez définir votre nouveau mot de passe personnel pour accéder à la plateforme.</p>", unsafe_allow_html=True)
                     
-                    if "temp_new_p" not in st.session_state:
-                        st.session_state["temp_new_p"] = ""
-                    if "temp_conf_p" not in st.session_state:
-                        st.session_state["temp_conf_p"] = ""
-
-                    st.session_state["temp_new_p"] = st.text_input("Nouveau mot de passe", type="password", value=st.session_state["temp_new_p"], key="input_new_p")
-                    st.session_state["temp_conf_p"] = st.text_input("Confirmer le nouveau mot de passe", type="password", value=st.session_state["temp_conf_p"], key="input_conf_p")
-                    
-                    if st.button("Enregistrer et accéder à la plateforme", type="primary"):
-                        nouveau_p = st.session_state["temp_new_p"]
-                        confirme_p = st.session_state["temp_conf_p"]
+                    col_c1, col_c2, col_c3 = st.columns([1, 2, 1])
+                    with col_c2:
+                        nouveau_p = st.text_input("Nouveau mot de passe (6 caractères min.)", type="password", key="np_securite")
+                        confirme_p = st.text_input("Confirmer le nouveau mot de passe", type="password", key="cp_securite")
                         
-                        if len(nouveau_p) < 6:
-                            st.error("Le mot de passe doit contenir au moins 6 caractères.")
-                        elif nouveau_p != confirme_p:
-                            st.error("Les mots de passe ne correspondent pas.")
-                        else:
-                            try:
-                                usr_to_update.password = bcrypt.hashpw(nouveau_p.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-                                usr_to_update.changer_mdp_requis = False
-                                db_act.commit()
-                                if "temp_new_p" in st.session_state:
-                                    del st.session_state["temp_new_p"]
-                                if "temp_conf_p" in st.session_state:
-                                    del st.session_state["temp_conf_p"]
-                                st.success("Mot de passe mis à jour avec succès !")
-                                st.rerun()
-                            except Exception as ex:
-                                db_act.rollback()
-                                st.error(f"Erreur lors de la mise à jour : {ex}")
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        if st.button("Enregistrer mon nouveau mot de passe", use_container_width=True, type="primary"):
+                            if len(nouveau_p) < 6:
+                                st.error("⚠️ Le mot de passe doit contenir au moins 6 caractères.")
+                            elif nouveau_p != confirme_p:
+                                st.error("⚠️ Les mots de passe ne correspondent pas.")
+                            else:
+                                try:
+                                    usr_to_update.password = bcrypt.hashpw(nouveau_p.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+                                    usr_to_update.changer_mdp_requis = False
+                                    db_act.commit()
+                                    st.success("✅ Mot de passe mis à jour avec succès ! Chargement de l'application...")
+                                    st.rerun()
+                                except Exception as ex:
+                                    db_act.rollback()
+                                    st.error(f"Erreur lors de la mise à jour : {ex}")
                     db_act.close()
                     return
 
