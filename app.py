@@ -19,6 +19,16 @@ def main():
 
     init_db()
 
+    # --- CORRECTION AUTOMATIQUE POUR LA COLONNE SQLITE EXISTANTE ---
+    try:
+        from database.db_config import engine
+        import sqlalchemy as sa
+        with engine.connect() as conn:
+            conn.execute(sa.text("ALTER TABLE users ADD COLUMN changer_mdp_requis BOOLEAN DEFAULT 0;"))
+            conn.commit()
+    except Exception:
+        pass  # La colonne existe déjà, on ignore l'erreur
+
     query_params = st.query_params
 
     # --- 1. RESTAURATION SÉCURISÉE & VÉRIFICATION STRICTE DE L'ÉCOLE ---

@@ -263,7 +263,6 @@ class ActivityLog(Base):
     module = Column(String, nullable=True)
     statut = Column(String, default="Succès")
 
-# Alias de compatibilité pour le Journal d'Activité
 JournalActivite = ActivityLog
 
 class Paiement(Base):
