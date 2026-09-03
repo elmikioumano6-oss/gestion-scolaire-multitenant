@@ -44,6 +44,7 @@ def main():
                         now = datetime.utcnow()
                         
                         if not is_active or (date_exp and date_exp < now):
+                            db_sec.close()
                             st.session_state.clear()
                             st.session_state["authenticated"] = False
                             st.session_state["role"] = "login"
@@ -99,6 +100,7 @@ def main():
                 if usr_to_update.school_id and not st.session_state.get("is_super_admin", False):
                     ecole_live = db_act.query(School).filter(School.id == usr_to_update.school_id).first()
                     if ecole_live and not getattr(ecole_live, 'actif', True):
+                        db_act.close()
                         st.session_state.clear()
                         st.session_state["authenticated"] = False
                         st.session_state["role"] = "login"

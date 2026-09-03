@@ -51,6 +51,7 @@ def afficher_login():
                                 st.session_state["role"] = str(user.role).strip().lower()
                                 st.session_state["school_id"] = user.school_id
                                 st.session_state["is_super_admin"] = (str(user.role).strip().lower() == "super_admin")
+                                st.session_state["changer_mdp_requis"] = getattr(user, "changer_mdp_requis", False)
                                 
                                 if user.school_id:
                                     ecole = db.query(School).filter(School.id == user.school_id).first()
