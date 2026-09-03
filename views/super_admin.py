@@ -15,6 +15,23 @@ def afficher_super_admin():
         st.warning("⚠️ Accès strictement réservé au Super Administrateur.")
         return
 
+    # --- SECTION DE MAINTENANCE / SÉCURITÉ GLOBALE ---
+    with st.expander("🔒 Sécurité et Mises à jour globales des comptes"):
+        st.markdown("Si vous avez des comptes administrateurs créés avant la mise en place de la sécurité de première connexion, vous pouvez les forcer à changer leur mot de passe ici.")
+        if st.button("🔑 Forcer le changement de mot de passe pour TOUS les administrateurs existants", type="secondary"):
+            db_sec_all = SessionLocal()
+            try:
+                nb_maj = db_sec_all.query(User).filter(User.role != "super_admin").update(
+                    {User.changer_mdp_requis: True}, synchronize_session=False
+                )
+                db_sec_all.commit()
+                st.success(f"✅ Succès ! {nb_maj} compte(s) administrateur(s) ont été configurés pour exiger un changement de mot de passe à leur prochaine connexion.")
+            except Exception as ex:
+                db_sec_all.rollback()
+                st.error(f"Erreur lors de la mise à jour globale : {ex}")
+            finally:
+                db_sec_all.close()
+
     # --- AFFICHAGE DES DERNIERS ACCÈS CRÉÉS (POUR ENVOI RAPIDE WHATSAPP) ---
     if "last_created_credentials" in st.session_state:
         cred = st.session_state["last_created_credentials"]
