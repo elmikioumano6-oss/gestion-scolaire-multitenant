@@ -6,7 +6,7 @@ from database.models import Classe, School, ActivityLog
 
 def afficher_emploi_temps():
     st.subheader("📅 Gestion des Emplois du Temps")
-    st.markdown("Planification hebdomadaire des cours par classe et cycle avec isolation multi-tenant stricte.")
+    st.markdown("Planification hebdomadaire des cours par classe et cycle selon la grille horaire officielle (08h00 - 14h30 avec récréation 11h00 - 11h30).")
     st.markdown("---")
 
     school_id = st.session_state.get("school_id")
@@ -32,6 +32,16 @@ def afficher_emploi_temps():
         if "emplois_du_temps_data" not in st.session_state:
             st.session_state["emplois_du_temps_data"] = {}
 
+        # Grille horaire officielle (08h00 - 14h30, avec récréation de 11h00 à 11h30)
+        creneaux_horaires = [
+            "08h00 - 09h00",
+            "09h00 - 10h00",
+            "10h00 - 11h00",
+            "11h30 - 12h30",
+            "12h30 - 13h30",
+            "13h30 - 14h30"
+        ]
+
         with tab1:
             st.markdown(f"### Emplois du Temps — **{school_name} ({cycle_en_cours})**")
 
@@ -43,10 +53,9 @@ def afficher_emploi_temps():
                 
                 classe_obj = next((c for c in classes_cycle if c.libelle == classe_choisie), None)
                 if classe_obj:
-                    st.info(f"Emploi du temps pour la classe : **{classe_obj.libelle}**")
+                    st.info(f"Emploi du temps pour la classe : **{classe_obj.libelle}** (Pause récréation : 11h00 - 11h30)")
                     
                     jours = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"]
-                    creneaux_horaires = ["08h00 - 10h00", "10h15 - 12h15", "15h00 - 17h00"]
                     
                     # Récupération des données stockées pour cette école, cycle et classe
                     key_edt = f"{school_id}_{cycle_en_cours}_{classe_choisie}"
@@ -75,13 +84,13 @@ def afficher_emploi_temps():
                         classe_selectionnee = st.selectbox("Classe", noms_classes, key="form_edt_classe")
                         jour = st.selectbox("Jour de la semaine", ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"])
                     with col2:
-                        horaire = st.selectbox("Plage horaire", ["08h00 - 10h00", "10h15 - 12h15", "15h00 - 17h00"])
-                        matiere = st.text_input("Matière / Cours")
+                        horaire = st.selectbox("Plage horaire", creneaux_horaires)
+                        matiere = st.text_input("Matière / Cours (ou nom du vacataire)")
 
                     submitted = st.form_submit_button("Ajouter le créneau")
                     if submitted:
                         if not matiere:
-                            st.error("⚠️ Veuillez indiquer la matière.")
+                            st.error("⚠️ Veuillez indiquer la matière ou le cours.")
                         else:
                             target_school_id = school_id
                             if is_super_admin and not target_school_id:
@@ -94,10 +103,10 @@ def afficher_emploi_temps():
                             
                             st.session_state["emplois_du_temps_data"][key_edt][(jour, horaire)] = matiere.strip().upper()
 
-                            # Traçabilité dans le journal d'activité
+                            # Traçabilité dans le journal d'activité (avec l'heure locale exacte)
                             nouveau_log = ActivityLog(
                                 school_id=target_school_id,
-                                timestamp=datetime.utcnow(),
+                                timestamp=datetime.now(),
                                 username=st.session_state.get("username", "admin"),
                                 action=f"Planification créneau EDT : {matiere} ({classe_selectionnee}, {jour} {horaire})",
                                 module="Emploi du temps",

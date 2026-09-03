@@ -16,7 +16,7 @@ class School(Base):
     
     actif = Column(Boolean, default=True)
     date_expiration = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     annees = relationship("AnneeScolaire", back_populates="school", cascade="all, delete-orphan")
     classes = relationship("Classe", back_populates="school", cascade="all, delete-orphan")
@@ -221,6 +221,7 @@ class CahierTexte(Base):
     contenu_realise = Column(String, nullable=True)
     difficultees = Column(String, nullable=True)
     mesures_correctives = Column(String, nullable=True)
+    duree = Column(Float, default=1.0)
 
     classe = relationship("Classe")
     matiere = relationship("Matiere")
@@ -257,7 +258,7 @@ class ActivityLog(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=True)
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    timestamp = Column(DateTime, default=datetime.now)
     username = Column(String, nullable=True)
     action = Column(String, nullable=True)
     module = Column(String, nullable=True)
@@ -291,5 +292,5 @@ class Depense(Base):
     libelle = Column(String(200), nullable=False)
     montant = Column(Float, nullable=False)
     categorie = Column(String(100), nullable=False)
-    date_depense = Column(DateTime, default=datetime.utcnow)
+    date_depense = Column(DateTime, default=datetime.now)
     auteur = Column(String(100), nullable=True)

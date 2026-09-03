@@ -2,11 +2,11 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from database.db_config import SessionLocal
-from database.models import Classe, Matiere, Eleve, School, ActivityLog
+from database.models import Classe, Matiere, Eleve, Note, School, ActivityLog
 
 def afficher_notes():
-    st.subheader("📝 Saisie des Notes & Évaluations")
-    st.markdown("Interface dédiée à l'enregistrement et au suivi des notes par classe et par matière avec isolation multi-tenant stricte.")
+    st.subheader("📝 Saisie Globale des Notes (Mode Grille Matricielle)")
+    st.markdown("Interface matricielle : les élèves en lignes, les matières en colonnes, avec sélection de la période et du type d'évaluation (incluant Compo 1 et Compo 2) pour une persistance directe en base de données.")
     st.markdown("---")
 
     school_id = st.session_state.get("school_id")
@@ -30,84 +30,142 @@ def afficher_notes():
 
     db = SessionLocal()
     try:
+        target_school_id = school_id
+        if is_super_admin and not target_school_id:
+            ecole_defaut = db.query(School).first()
+            target_school_id = ecole_defaut.id if ecole_defaut else 1
+
         classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours)
         if not is_super_admin and school_id:
             classes_query = classes_query.filter(Classe.school_id == school_id)
+        else:
+            classes_query = classes_query.filter(Classe.school_id == target_school_id)
         classes_cycle = classes_query.all()
 
         matieres_query = db.query(Matiere).filter(Matiere.cycle == cycle_en_cours)
         if not is_super_admin and school_id:
             matieres_query = matieres_query.filter(Matiere.school_id == school_id)
+        else:
+            matieres_query = matieres_query.filter(Matiere.school_id == target_school_id)
         matieres_cycle = matieres_query.all()
 
-        st.markdown(f"### Saisie des Notes — **{school_name} ({cycle_en_cours})**")
+        st.markdown(f"### Saisie Matricielle des Notes — **{school_name} ({cycle_en_cours})**")
 
         if not classes_cycle or not matieres_cycle:
             st.warning(f"⚠️ Veuillez vous assurer que des classes et des matières sont configurées pour le cycle **{cycle_en_cours}** dans l'établissement **{school_name}**.")
             return
 
         noms_classes = [c.libelle for c in classes_cycle]
-        noms_matieres = [m.libelle for m in matieres_cycle]
 
-        col1, col2 = st.columns(2)
-        with col1:
-            classe_choisie = st.selectbox("Classe", noms_classes, key="notes_classe")
-        with col2:
-            matiere_choisie = st.selectbox("Matière", noms_matieres, key="notes_matiere")
-
-        # Initialisation du stockage des notes en session state
-        if "notes_evaluation_data" not in st.session_state:
-            st.session_state["notes_evaluation_data"] = {}
-
-        key_notes_store = f"{school_id}_{cycle_en_cours}_{classe_choisie}_{matiere_choisie}"
-        notes_enregistrees = st.session_state["notes_evaluation_data"].get(key_notes_store, {})
+        # Filtres globaux de la grille avec Compo 1 et Compo 2 ajoutés
+        col_f1, col_f2, col_f3 = st.columns(3)
+        with col_f1:
+            classe_choisie = st.selectbox("Classe", noms_classes, key="notes_classe_matrix")
+        with col_f2:
+            semestre_choisi = st.selectbox("Période / Semestre", ["Semestre 1", "Semestre 2", "Trimestre 1", "Trimestre 2", "Trimestre 3"], key="notes_semestre_matrix")
+        with col_f3:
+            type_eval = st.selectbox("Type d'évaluation", ["Interro 1", "Interro 2", "Devoir 1", "Devoir 2", "Compo 1", "Compo 2"], key="notes_type_eval_matrix")
 
         classe_obj = next((c for c in classes_cycle if c.libelle == classe_choisie), None)
         if classe_obj:
             eleves_query = db.query(Eleve).filter(Eleve.classe_id == classe_obj.id)
             if not is_super_admin and school_id:
                 eleves_query = eleves_query.filter(Eleve.school_id == school_id)
-            eleves = eleves_query.all()
+            else:
+                eleves_query = eleves_query.filter(Eleve.school_id == target_school_id)
+            eleves = eleves_query.order_by(Eleve.nom).all()
 
             if not eleves:
                 st.info(f"Aucun élève enregistré dans la classe **{classe_choisie}**.")
             else:
-                st.success(f"Saisie active pour **{classe_choisie}** en **{matiere_choisie}** ({len(eleves)} élèves).")
-                
-                with st.form("form_saisie_notes"):
-                    saisie_temporaire = {}
-                    for e in eleves:
-                        val_actuelle = notes_enregistrees.get(e.id, 0.0)
-                        saisie_temporaire[e.id] = st.number_input(
-                            f"Note pour {e.nom} {e.prenom} (sur 20)",
-                            min_value=0.0,
-                            max_value=20.0,
-                            value=float(val_actuelle),
-                            step=0.25,
-                            key=f"note_eleve_{e.id}"
-                        )
-                    
-                    submitted = st.form_submit_button("Enregistrer les notes")
-                    if submitted:
-                        target_school_id = school_id or 1
-                        
-                        # Sauvegarde dans le session state
-                        st.session_state["notes_evaluation_data"][key_notes_store] = saisie_temporaire
+                st.success(f"Grille active pour **{classe_choisie}** | **{semestre_choisi}** | **{type_eval}** ({len(eleves)} élèves, {len(matieres_cycle)} matières).")
 
-                        # Traçabilité dans le journal d'activité
-                        nouveau_log = ActivityLog(
-                            school_id=target_school_id,
-                            timestamp=datetime.utcnow(),
-                            username=st.session_state.get("username", "admin"),
-                            action=f"Enregistrement notes : {matiere_choisie} ({classe_choisie})",
-                            module="Saisie des notes",
-                            statut="Succès"
-                        )
-                        db.add(nouveau_log)
-                        db.commit()
+                # Récupération des notes existantes en base de données pour cette configuration
+                notes_existantes = db.query(Note).join(Eleve).filter(
+                    Note.school_id == target_school_id,
+                    Eleve.classe_id == classe_obj.id,
+                    Note.semestre == semestre_choisi,
+                    Note.type_evaluation == type_eval
+                ).all()
 
-                        st.success("✅ Notes enregistrées et consignées avec succès pour cette évaluation !")
-                        st.rerun()
+                dict_notes = {(n.eleve_id, n.matiere_id): n.valeur for n in notes_existantes}
+
+                # Construction du tableau matriciel (élèves en lignes, matières en colonnes)
+                data_matrice = []
+                for e in eleves:
+                    ligne = {
+                        "eleve_id": e.id,
+                        "Matricule": e.matricule,
+                        "Nom & Prénom": f"{e.nom} {e.prenom}"
+                    }
+                    for mat in matieres_cycle:
+                        ligne[mat.libelle] = float(dict_notes.get((e.id, mat.id), 0.0))
+                    data_matrice.append(ligne)
+
+                df_matrice = pd.DataFrame(data_matrice)
+
+                column_config = {
+                    "eleve_id": None,
+                    "Matricule": st.column_config.TextColumn("Matricule", disabled=True),
+                    "Nom & Prénom": st.column_config.TextColumn("Nom & Prénom", disabled=True),
+                }
+                for mat in matieres_cycle:
+                    column_config[mat.libelle] = st.column_config.NumberColumn(
+                        mat.libelle,
+                        min_value=0.0,
+                        max_value=20.0,
+                        step=0.25,
+                        format="%.2f"
+                    )
+
+                edited_df = st.data_editor(
+                    df_matrice,
+                    column_config=column_config,
+                    hide_index=True,
+                    use_container_width=True,
+                    key=f"editor_matrix_{classe_choisie}_{semestre_choisi}_{type_eval}"
+                )
+
+                if st.button("💾 Enregistrer toutes les notes de la classe", type="primary"):
+                    for _, row in edited_df.iterrows():
+                        eleve_id = row["eleve_id"]
+                        for mat in matieres_cycle:
+                            valeur_saisie = float(row[mat.libelle])
+
+                            note_obj = db.query(Note).filter(
+                                Note.school_id == target_school_id,
+                                Note.eleve_id == eleve_id,
+                                Note.matiere_id == mat.id,
+                                Note.semestre == semestre_choisi,
+                                Note.type_evaluation == type_eval
+                            ).first()
+
+                            if note_obj:
+                                note_obj.valeur = valeur_saisie
+                            else:
+                                nouvelle_note = Note(
+                                    school_id=target_school_id,
+                                    eleve_id=eleve_id,
+                                    matiere_id=mat.id,
+                                    valeur=valeur_saisie,
+                                    semestre=semestre_choisi,
+                                    type_evaluation=type_eval
+                                )
+                                db.add(nouvelle_note)
+
+                    nouveau_log = ActivityLog(
+                        school_id=target_school_id,
+                        timestamp=datetime.utcnow(),
+                        username=st.session_state.get("username", "admin"),
+                        action=f"Saisie globale notes grille ({classe_choisie} - {semestre_choisi} - {type_eval})",
+                        module="Saisie des notes",
+                        statut="Succès"
+                    )
+                    db.add(nouveau_log)
+                    db.commit()
+
+                    st.success("✅ Notes enregistrées avec succès ! Elles sont immédiatement disponibles dans la consultation des notes et les bulletins.")
+                    st.rerun()
 
     finally:
         db.close()
@@ -115,3 +173,4 @@ def afficher_notes():
 # Alias de compatibilité complète pour le routeur
 afficher_saisie_notes = afficher_notes
 afficher_gestion_notes = afficher_notes
+afficher_notes = afficher_notes
