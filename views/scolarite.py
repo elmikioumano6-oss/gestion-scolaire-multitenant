@@ -1,77 +1,136 @@
 import streamlit as st
-import pandas as pd
 from database.db_config import SessionLocal
-from database.models import Classe, Eleve, School
+from database.models import Eleve, Classe, Paiement
+from datetime import datetime
 
-def afficher_encaissement():
-    st.subheader("💳 Encaissement & Quittance")
-    st.markdown("Perception unifiée, clôture journalière, suivi des versements et édition de quittances officielles.")
+def afficher_encaissement(niveau_actif="Collège"):
+    st.subheader("💰 Gestion des Encaissements & Quittances")
+    st.markdown("Enregistrement des versements scolaires avec ventilation multi-rubriques et saisie manuelle des reçus.")
     st.markdown("---")
 
     school_id = st.session_state.get("school_id")
-    is_super_admin = st.session_state.get("is_super_admin", False)
-    school_name = st.session_state.get("school_name", "Établissement")
-    
-    # Récupération automatique du cycle actif depuis le menu latéral gauche
-    cycle_en_cours = st.session_state.get("cycle_actif", "Collège")
-
-    if not school_id and not is_super_admin:
+    if not school_id:
         st.warning("⚠️ Veuillez vous connecter pour accéder à cette section.")
         return
 
     db = SessionLocal()
     try:
-        st.markdown(f"### Encaissements — **{school_name} ({cycle_en_cours})**")
+        classes = db.query(Classe).filter(
+            Classe.school_id == school_id,
+            Classe.cycle == niveau_actif
+        ).all()
 
-        # 1. Isolation multi-écoles et multi-cycles pour les classes
-        classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours)
-        if not is_super_admin and school_id:
-            classes_query = classes_query.filter(Classe.school_id == school_id)
-        
-        classes_cycle = classes_query.all()
-
-        if not classes_cycle:
-            st.info(f"📌 Aucune classe disponible pour le cycle **{cycle_en_cours}** dans cet établissement. Veuillez d'abord en créer dans le menu 'Classes & Tarifs'.")
+        if not classes:
+            st.warning(f"Aucune classe trouvée pour le cycle {niveau_actif}.")
             return
 
-        noms_classes = [c.libelle for c in classes_cycle]
-        classe_selectionnee = st.selectbox("Sélectionner la classe", noms_classes)
+        options_classes = {c.libelle: c.id for c in classes}
+        choix_classe = st.selectbox("Sélectionner la classe", list(options_classes.keys()))
+        
+        classe_id_sel = options_classes[choix_classe]
+        eleves = db.query(Eleve).filter(
+            Eleve.school_id == school_id,
+            Eleve.classe_id == classe_id_sel
+        ).all()
 
-        classe_obj = next((c for c in classes_cycle if c.libelle == classe_selectionnee), None)
+        if not eleves:
+            st.info("Aucun élève inscrit dans cette classe.")
+            return
 
-        if classe_obj:
-            # 2. Récupérer les élèves de cette classe spécifique pour l'encaissement
-            eleves_query = db.query(Eleve).filter(Eleve.classe_id == classe_obj.id)
-            if not is_super_admin and school_id:
-                eleves_query = eleves_query.filter(Eleve.school_id == school_id)
-            eleves = eleves_query.all()
+        options_eleves = {f"{e.nom} {e.prenom} (Matricule: {e.matricule})": e.id for e in eleves}
+        choix_eleve_str = st.selectbox("Sélectionner l'élève", list(options_eleves.keys()))
+        eleve_id_sel = options_eleves[choix_eleve_str]
 
-            if not eleves:
-                st.warning(f"⚠️ Aucun élève inscrit dans la classe {classe_selectionnee}.")
-            else:
-                noms_eleves = [f"{e.nom} {e.prenom}" for e in eleves]
-                eleve_choisi = st.selectbox("Sélectionner l'élève", noms_eleves)
+        eleve_actif = db.query(Eleve).filter(Eleve.id == eleve_id_sel).first()
 
-                eleve_obj = next((e for e in eleves if f"{e.nom} {e.prenom}" == eleve_choisi), None)
+        st.info(f"Élève sélectionné : **{eleve_actif.nom} {eleve_actif.prenom}** (Classe : {choix_classe})")
 
-                if eleve_obj:
-                    st.info(f"Élève sélectionné : **{eleve_obj.nom} {eleve_obj.prenom}** (Classe : {classe_obj.libelle})")
-                    
-                    with st.form("form_encaissement"):
-                        montant_verse = st.number_input("Montant à verser (FCFA)", min_value=0.0, step=1000.0)
-                        motif = st.selectbox("Motif du versement", ["Scolarité", "Inscription", "Transport", "Cantine", "COGES"])
-                        
-                        submitted = st.form_submit_button("Valider l'encaissement et éditer la quittance")
-                        if submitted:
-                            if montant_verse <= 0:
-                                st.error("⚠️ Veuillez entrer un montant valide.")
-                            else:
-                                # Mise à jour du montant payé de l'élève
-                                actuel_paye = getattr(eleve_obj, 'montant_paye', 0.0) or 0.0
-                                eleve_obj.montant_paye = actuel_paye + montant_verse
-                                db.commit()
-                                st.success(f"✅ Encaissement de {montant_verse:,.0f} FCFA validé avec succès pour {eleve_obj.nom} !")
-                                st.rerun()
+        with st.form("form_encaissement_multiple"):
+            st.markdown("#### 📝 Ventilation du Versement Global")
+            
+            # Saisie manuelle de la référence du reçu en premier
+            ref_recu = st.text_input("Référence du Reçu / N° de Quittance (Requis)")
 
+            col_r1, col_r2 = st.columns(2)
+            
+            with col_r1:
+                payer_scolarite = st.checkbox("Scolarité", value=True)
+                montant_scolarite = st.number_input("Montant Scolarité (FCFA)", min_value=0.0, value=0.0, step=5000.0)
+
+                payer_inscription = st.checkbox("Inscription")
+                montant_inscription = st.number_input("Montant Inscription (FCFA)", min_value=0.0, value=0.0, step=1000.0)
+
+                payer_coges = st.checkbox("COGES")
+                montant_coges = st.number_input("Montant COGES (FCFA)", min_value=0.0, value=0.0, step=500.0)
+
+            with col_r2:
+                payer_cantine = st.checkbox("Cantine")
+                montant_cantine = st.number_input("Montant Cantine (FCFA)", min_value=0.0, value=0.0, step=1000.0)
+
+                payer_transport = st.checkbox("Transport")
+                montant_transport = st.number_input("Montant Transport (FCFA)", min_value=0.0, value=0.0, step=1000.0)
+
+                mode_reglement = st.selectbox("Mode de règlement", ["Espèces", "Orange Money / Moov Money", "Virement Bancaire", "Chèque"])
+                nom_payeur = st.text_input("Nom du payeur (Parent / Tuteur)", value=eleve_actif.tuteur or "")
+
+            total_versement = (
+                (montant_scolarite if payer_scolarite else 0) +
+                (montant_inscription if payer_inscription else 0) +
+                (montant_coges if payer_coges else 0) +
+                (montant_cantine if payer_cantine else 0) +
+                (montant_transport if payer_transport else 0)
+            )
+
+            st.markdown(f"### 💵 Montant Total Perçu : **{total_versement:,.0f} FCFA**")
+
+            submitted = st.form_submit_button("Valider l'encaissement global et éditer la quittance")
+            if submitted:
+                if not ref_recu.strip():
+                    st.error("Veuillez saisir la référence ou le numéro du reçu.")
+                elif total_versement <= 0:
+                    st.error("Le montant total du versement doit être supérieur à zéro.")
+                else:
+                    # Vérifier si la référence existe déjà pour cette école
+                    existant = db.query(Paiement).filter(
+                        Paiement.school_id == school_id,
+                        Paiement.reference_recu == ref_recu.strip()
+                    ).first()
+
+                    if existant:
+                        st.error(f"Erreur : La référence de reçu '{ref_recu}' existe déjà.")
+                    else:
+                        motifs_concernes = []
+                        if payer_scolarite and montant_scolarite > 0:
+                            motifs_concernes.append(f"Scolarité: {montant_scolarite}F")
+                        if payer_inscription and montant_inscription > 0:
+                            motifs_concernes.append(f"Inscription: {montant_inscription}F")
+                        if payer_coges and montant_coges > 0:
+                            motifs_concernes.append(f"COGES: {montant_coges}F")
+                        if payer_cantine and montant_cantine > 0:
+                            motifs_concernes.append(f"Cantine: {montant_cantine}F")
+                        if payer_transport and montant_transport > 0:
+                            motifs_concernes.append(f"Transport: {montant_transport}F")
+
+                        motif_global = " | ".join(motifs_concernes) if motifs_concernes else "Versement global"
+
+                        nouveau_paiement = Paiement(
+                            school_id=school_id,
+                            reference_recu=ref_recu.strip(),
+                            eleve_id=eleve_id_sel,
+                            montant=total_versement,
+                            mode_reglement=mode_reglement,
+                            motif=motif_global,
+                            nom_payeur=nom_payeur,
+                            agent_caisse=st.session_state.get("username", "admin"),
+                            date_paiement=datetime.utcnow()
+                        )
+                        db.add(nouveau_paiement)
+                        db.commit()
+
+                        st.success(f"Encaissement de **{total_versement:,.0f} FCFA** validé avec succès ! Reçu N° : **{ref_recu}**")
+                        st.balloons()
     finally:
         db.close()
+
+# Alias de compatibilité
+afficher_encaissement = afficher_encaissement

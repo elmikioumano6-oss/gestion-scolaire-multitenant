@@ -147,7 +147,7 @@ class Note(Base):
     eleve_id = Column(Integer, ForeignKey("eleves.id"))
     matiere_id = Column(Integer, ForeignKey("matieres.id"), nullable=True)
     valeur = Column(Float)
-    semestre = Column(String, default="Semestre 1")
+    semestre = Column("trimestre", String, default="Trimestre 1")
     type_evaluation = Column(String)
 
     eleve = relationship("Eleve", back_populates="notes")

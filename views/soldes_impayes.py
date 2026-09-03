@@ -1,78 +1,121 @@
 import streamlit as st
-import pandas as pd
 from database.db_config import SessionLocal
-from database.models import Classe, Eleve, School, Paiement
+from database.models import Eleve, Classe, Paiement
 
-def afficher_soldes_impayes():
-    st.subheader("⚠️ Suivi des Soldes & Impayés")
-    st.markdown("Tableau de contrôle des créances, identification des retards de paiement et édition des avis de relance.")
+def afficher_soldes_impayes(niveau_actif="Collège"):
+    st.subheader("📊 Soldes & Suivi des Impayés")
+    st.markdown("Suivi des encaissements, des réductions et des soldes restants par élève.")
     st.markdown("---")
 
     school_id = st.session_state.get("school_id")
-    is_super_admin = st.session_state.get("is_super_admin", False)
-    school_name = st.session_state.get("school_name", "Établissement")
-    
-    cycle_en_cours = st.session_state.get("cycle_actif", "Collège")
-
-    if not school_id and not is_super_admin:
+    if not school_id:
         st.warning("⚠️ Veuillez vous connecter pour accéder à cette section.")
         return
 
     db = SessionLocal()
     try:
-        # Récupération optionnelle des classes du cycle
-        classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours)
-        if not is_super_admin and school_id:
-            classes_query = classes_query.filter(Classe.school_id == school_id)
-        classes_cycle = classes_query.all()
+        classes = db.query(Classe).filter(
+            Classe.school_id == school_id,
+            Classe.cycle == niveau_actif
+        ).all()
 
-        classes_dict = {c.id: c for c in classes_cycle}
-        classes_ids = list(classes_dict.keys())
+        if not classes:
+            st.warning(f"Aucune classe trouvée pour le cycle {niveau_actif}.")
+            return
 
-        # Récupération des élèves de l'établissement (filtrés par classes du cycle si elles existent)
-        eleves_query = db.query(Eleve)
-        if not is_super_admin and school_id:
-            eleves_query = eleves_query.filter(Eleve.school_id == school_id)
+        options_classes = {c.libelle: c.id for c in classes}
+        choix_classe = st.selectbox("Filtrer par classe", list(options_classes.keys()), key="select_classe_solde")
         
-        if classes_ids:
-            eleves_query = eleves_query.filter(Eleve.classe_id.in_(classes_ids))
+        classe_id_sel = options_classes[choix_classe]
+        classe_obj = db.query(Classe).filter(Classe.id == classe_id_sel).first()
         
-        eleves = eleves_query.all()
-
-        impayes_data = []
-        for eleve in eleves:
-            classe = classes_dict.get(eleve.classe_id) if eleve.classe_id else None
-            frais_scol = getattr(classe, 'frais_scolarite', 65000.0) or 65000.0
-            frais_inscr = getattr(classe, 'frais_inscription', 0.0) or 0.0
-            total_du = frais_scol + frais_inscr
-            
-            # Utilisation de la table Paiement comme source de vérité unique
-            paiements_eleve = db.query(Paiement).filter(Paiement.eleve_id == eleve.id).all()
-            montant_paye = sum(p.montant for p in paiements_eleve) if paiements_eleve else 0.0
-            
-            solde_restant = total_du - montant_paye
-
-            if solde_restant > 0:
-                impayes_data.append({
-                    "Élève": f"{getattr(eleve, 'nom', '')} {getattr(eleve, 'prenom', '')}".strip() or "Élève",
-                    "Classe": classe.libelle if classe else "Non assignée",
-                    "Total Dû (FCFA)": total_du,
-                    "Déjà Payé (FCFA)": montant_paye,
-                    "Reste à Payer (FCFA)": solde_restant
-                })
-
-        st.markdown(f"### Liste des Impayés — **{school_name} ({cycle_en_cours})**")
+        eleves = db.query(Eleve).filter(
+            Eleve.school_id == school_id,
+            Eleve.classe_id == classe_id_sel
+        ).all()
 
         if not eleves:
-            st.info(f"📌 Aucun élève enregistré pour le cycle **{cycle_en_cours}** dans l'établissement **{school_name}**.")
-        elif not impayes_data:
-            st.success(f"🎉 Excellent ! Aucun impayé enregistré pour le cycle **{cycle_en_cours}** dans cet établissement.")
+            st.info("Aucun élève dans cette classe.")
+            return
+
+        # Frais de la classe + COGES
+        frais_scolarite_base = float(classe_obj.frais_scolarite or 0.0)
+        frais_coges = float(getattr(classe_obj, 'frais_coges', 0.0) or 0.0)
+
+        cols = st.columns([2, 1.5, 1.5, 1.5, 1.5, 2])
+        cols[0].markdown("**Élève**")
+        cols[1].markdown("**Montant Dû**")
+        cols[2].markdown("**Réduction**")
+        cols[3].markdown("**Net à Payer**")
+        cols[4].markdown("**Total Versé**")
+        cols[5].markdown("**Solde Restant**")
+        cols[0].markdown("---")
+        cols[1].markdown("---")
+        cols[2].markdown("---")
+        cols[3].markdown("---")
+        cols[4].markdown("---")
+        cols[5].markdown("---")
+
+        for e in eleves:
+            reduction = float(e.montant_reduction or 0.0)
+            net_scolarite = max(0.0, frais_scolarite_base - reduction)
+            total_du = net_scolarite + frais_coges
+
+            # Total des versements de l'élève
+            paiements_eleve = db.query(Paiement).filter(
+                Paiement.school_id == school_id,
+                Paiement.eleve_id == e.id
+            ).all()
+            
+            total_verse = sum([float(p.montant) for p in paiements_eleve])
+            solde_restant = total_du - total_verse
+
+            c = st.columns([2, 1.5, 1.5, 1.5, 1.5, 2])
+            c[0].write(f"{e.nom} {e.prenom} ({e.matricule})")
+            c[1].write(f"{total_du:,.0f} F")
+            c[2].write(f"-{reduction:,.0f} F" if reduction > 0 else "0 F")
+            c[3].write(f"{total_du:,.0f} F")
+            c[4].write(f"{total_verse:,.0f} F")
+            
+            if solde_restant > 0:
+                c[5].markdown(f"<span style='color: red; font-weight: bold;'>{solde_restant:,.0f} F (Impayé)</span>", unsafe_allow_html=True)
+            elif solde_restant < 0:
+                c[5].markdown(f"<span style='color: orange; font-weight: bold;'>{solde_restant:,.0f} F (Trop-perçu)</span>", unsafe_allow_html=True)
+            else:
+                c[5].markdown("<span style='color: green; font-weight: bold;'>Soldé (0 F)</span>", unsafe_allow_html=True)
+
+        st.markdown("---")
+        st.markdown("### 🛠️ Gestion & Annulation des Versements Erronés")
+        
+        # Sélection d'un élève pour voir ses reçus et pouvoir supprimer les erreurs
+        options_eleves_tous = {f"{elev.nom} {elev.prenom} ({elev.matricule})": elev.id for elev in eleves}
+        eleve_a_gerer_str = st.selectbox("Sélectionner un élève pour auditer ou annuler ses reçus", list(options_eleves_tous.keys()))
+        eleve_gerer_id = options_eleves_tous[eleve_a_gerer_str]
+
+        historique_paiements = db.query(Paiement).filter(
+            Paiement.school_id == school_id,
+            Paiement.eleve_id == eleve_gerer_id
+        ).all()
+
+        if not historique_paiements:
+            st.info("Aucun versement enregistré pour cet élève.")
         else:
-            df_impayes = pd.DataFrame(impayes_data)
-            st.dataframe(df_impayes, use_container_width=True)
+            for p in historique_paiements:
+                col_p1, col_p2, col_p3, col_p4 = st.columns([2, 2, 2, 1])
+                col_p1.write(f"**Reçu :** {p.reference_recu}")
+                col_p2.write(f"**Montant :** {p.montant:,.0f} F")
+                col_p3.write(f"**Motif :** {p.motif}")
+                
+                with col_p4:
+                    if st.button("🗑️ Annuler", key=f"del_paiement_{p.id}", help="Supprimer ce reçu erroné"):
+                        db.delete(p)
+                        db.commit()
+                        st.success(f"Le reçu {p.reference_recu} a été supprimé avec succès !")
+                        st.rerun()
+                st.markdown("<hr style='margin: 0.1rem 0; border-color: rgba(255,255,255,0.05);'>", unsafe_allow_html=True)
 
     finally:
         db.close()
 
-# Alias de compatibilité exhaustive pour le routeur app.py
+# Alias de compatibilité
 afficher_soldes_impayes = afficher_soldes_impayes

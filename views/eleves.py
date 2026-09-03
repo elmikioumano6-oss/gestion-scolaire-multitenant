@@ -1,124 +1,203 @@
 import streamlit as st
-import pandas as pd
-from datetime import datetime
 from database.db_config import SessionLocal
-from database.models import Eleve, Classe, School, Paiement, ActivityLog
+from database.models import Eleve, Classe, Paiement
+from datetime import datetime
 
-def afficher_eleves():
-    st.subheader("🎓 Gestion et Inscription des Élèves")
+def afficher_eleves(niveau_actif="Collège"):
+    st.subheader("🎓 Inscription et Gestion des Élèves")
     st.markdown("Enregistrement et suivi des effectifs scolaires avec isolation multi-tenant stricte.")
     st.markdown("---")
 
     school_id = st.session_state.get("school_id")
-    is_super_admin = st.session_state.get("is_super_admin", False)
-    school_name = st.session_state.get("school_name", "Établissement")
-    cycle_en_cours = st.session_state.get("cycle_actif", "Collège")
-
-    if not school_id and not is_super_admin:
+    if not school_id:
         st.warning("⚠️ Veuillez vous connecter pour accéder à cette section.")
         return
 
     db = SessionLocal()
     try:
-        tab1, tab2 = st.tabs(["📋 Liste des Élèves", "➕ Inscrire un Élève"])
+        tab_liste, tab_ajout = st.tabs(["📋 Liste des Élèves", "➕ Inscrire un Élève"])
 
-        classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours)
-        if not is_super_admin and school_id:
-            classes_query = classes_query.filter(Classe.school_id == school_id)
-        classes_cycle = classes_query.all()
-        classes_ids = [c.id for c in classes_cycle]
+        with tab_liste:
+            st.markdown(f"### Effectifs Enregistrés — Établissement ({niveau_actif})")
+            
+            eleves = db.query(Eleve).join(Classe).filter(
+                Eleve.school_id == school_id,
+                Classe.cycle == niveau_actif
+            ).all()
 
-        with tab1:
-            st.markdown(f"### Effectifs Inscrits — **{school_name} ({cycle_en_cours})**")
-
-            if not classes_ids:
-                st.info(f"Aucune classe disponible pour le cycle **{cycle_en_cours}** dans cet établissement.")
+            if not eleves:
+                st.info(f"Aucun élève inscrit pour le cycle **{niveau_actif}**.")
             else:
-                eleves_query = db.query(Eleve).filter(Eleve.classe_id.in_(classes_ids))
-                if not is_super_admin and school_id:
-                    eleves_query = eleves_query.filter(Eleve.school_id == school_id)
-                eleves = eleves_query.all()
+                cols = st.columns([1.5, 2, 2, 1.2, 2, 1.5, 2])
+                cols[0].markdown("**Matricule**")
+                cols[1].markdown("**Nom**")
+                cols[2].markdown("**Prénom**")
+                cols[3].markdown("**Sexe**")
+                cols[4].markdown("**Classe**")
+                cols[5].markdown("**Réduction**")
+                cols[6].markdown("**Actions**")
+                st.markdown("---")
 
-                if not eleves:
-                    st.info("Aucun élève enregistré pour le moment dans ce cycle.")
-                else:
-                    data = []
-                    classes_dict = {c.id: c.libelle for c in classes_cycle}
-                    for e in eleves:
-                        data.append({
-                            "Nom": getattr(e, 'nom', ''),
-                            "Prénom": getattr(e, 'prenom', ''),
-                            "Matricule": getattr(e, 'matricule', 'N/D'),
-                            "Classe": classes_dict.get(e.classe_id, 'N/D'),
-                            "Montant Payé (FCFA)": getattr(e, 'montant_paye', 0.0) or 0.0
-                        })
-                    df = pd.DataFrame(data)
-                    st.dataframe(df, use_container_width=True)
+                for e in eleves:
+                    c = st.columns([1.5, 2, 2, 1.2, 2, 1.5, 2])
+                    c[0].write(e.matricule or "N/D")
+                    c[1].write(e.nom)
+                    c[2].write(e.prenom)
+                    c[3].write(e.sexe or "N/D")
+                    c[4].write(e.classe.libelle if e.classe else "N/D")
+                    c[5].write(f"{e.montant_reduction:,.0f} F" if e.montant_reduction else "0 F")
+                    
+                    btn_col1, btn_col2 = c[6].columns(2)
+                    with btn_col1:
+                        if st.button("✏️", key=f"edit_eleve_{e.id}", help="Modifier cet élève"):
+                            st.session_state[f"editing_eleve_{e.id}"] = True
+                    with btn_col2:
+                        if st.button("🗑️", key=f"del_eleve_{e.id}", help="Supprimer cet élève"):
+                            st.session_state[f"deleting_eleve_{e.id}"] = True
 
-        with tab2:
-            st.markdown(f"### Formulaire d'Inscription — **{school_name} ({cycle_en_cours})**")
+                    # Gestion de la suppression avec confirmation
+                    if st.session_state.get(f"deleting_eleve_{e.id}", False):
+                        st.warning(f"Voulez-vous vraiment supprimer l'élève **{e.nom} {e.prenom}** ?")
+                        c_del1, c_del2 = st.columns(2)
+                        with c_del1:
+                            if st.button("Confirmer", key=f"conf_del_el_{e.id}"):
+                                db.delete(e)
+                                db.commit()
+                                st.success("Élève supprimé avec succès !")
+                                st.session_state[f"deleting_eleve_{e.id}"] = False
+                                st.rerun()
+                        with c_del2:
+                            if st.button("Annuler", key=f"canc_del_el_{e.id}"):
+                                st.session_state[f"deleting_eleve_{e.id}"] = False
+                                st.rerun()
 
-            if not classes_cycle:
-                st.warning(f"⚠️ Veuillez d'abord créer des classes pour le cycle **{cycle_en_cours}** dans le menu 'Classes & Tarifs'.")
-            else:
-                noms_classes = {c.libelle: c.id for c in classes_cycle}
+                    # Gestion du formulaire de modification
+                    if st.session_state.get(f"editing_eleve_{e.id}", False):
+                        with st.form(key=f"form_edit_eleve_{e.id}"):
+                            st.markdown(f"**Modifier l'élève : {e.nom} {e.prenom}**")
+                            
+                            classes_dispo = db.query(Classe).filter(
+                                Classe.school_id == school_id,
+                                Classe.cycle == niveau_actif
+                            ).all()
+                            options_classes = {cl.libelle: cl.id for cl in classes_dispo}
+                            current_classe_name = e.classe.libelle if e.classe and e.classe.libelle in options_classes else list(options_classes.keys())[0] if options_classes else ""
 
-                with st.form("form_inscription_eleve"):
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        nom = st.text_input("Nom de l'élève")
-                        prenom = st.text_input("Prénom de l'élève")
-                        matricule = st.text_input("Matricule (optionnel)")
-                    with col2:
-                        classe_choisie = st.selectbox("Sélectionner la classe", list(noms_classes.keys()))
-                        montant_paye_init = st.number_input("Versement initial (FCFA)", min_value=0.0, step=5000.0)
+                            new_matricule = st.text_input("Matricule", value=e.matricule or "")
+                            new_nom = st.text_input("Nom", value=e.nom or "")
+                            new_prenom = st.text_input("Prénom", value=e.prenom or "")
+                            
+                            sexes = ["Masculin", "Féminin"]
+                            idx_sexe = sexes.index(e.sexe) if e.sexe in sexes else 0
+                            new_sexe = st.selectbox("Sexe", sexes, index=idx_sexe)
+                            
+                            class_names = list(options_classes.keys())
+                            idx_cls = class_names.index(current_classe_name) if current_classe_name in class_names else 0
+                            new_classe_nom = st.selectbox("Classe", class_names, index=idx_cls)
+                            
+                            types_red = ["Aucune", "Bourse scolaire", "Cas social", "Enfant d'enseignant", "Autre"]
+                            idx_red = types_red.index(e.type_reduction) if e.type_reduction in types_red else 0
+                            new_type_red = st.selectbox("Type de réduction", types_red, index=idx_red)
+                            
+                            new_montant_red = st.number_input("Montant de la réduction (FCFA)", value=float(e.montant_reduction or 0.0), step=1000.0)
 
-                    submitted = st.form_submit_button("Valider l'inscription")
-                    if submitted:
-                        if not nom or not prenom:
-                            st.error("⚠️ Le nom et le prénom de l'élève sont obligatoires.")
-                        else:
-                            target_school_id = school_id
-                            if is_super_admin and not target_school_id:
-                                ecole_defaut = db.query(School).first()
-                                target_school_id = ecole_defaut.id if ecole_defaut else 1
+                            sub_edit = st.form_submit_button("Enregistrer les modifications")
+                            canc_edit = st.form_submit_button("Annuler")
 
-                            nouvel_eleve = Eleve(
-                                school_id=target_school_id,
-                                classe_id=noms_classes[classe_choisie],
-                                nom=nom.strip().upper(),
-                                prenom=prenom.strip(),
-                                matricule=matricule.strip() if matricule else None,
-                                montant_paye=montant_paye_init
+                            if sub_edit:
+                                if not new_nom or not new_prenom or not new_matricule:
+                                    st.error("Le nom, le prénom et le matricule sont obligatoires.")
+                                else:
+                                    e.matricule = new_matricule.strip()
+                                    e.nom = new_nom.upper().strip()
+                                    e.prenom = new_prenom.strip()
+                                    e.sexe = new_sexe
+                                    e.classe_id = options_classes[new_classe_nom]
+                                    e.type_reduction = new_type_red
+                                    e.montant_reduction = new_montant_red
+                                    db.commit()
+                                    st.success("Informations de l'élève modifiées avec succès !")
+                                    st.session_state[f"editing_eleve_{e.id}"] = False
+                                    st.rerun()
+                            if canc_edit:
+                                st.session_state[f"editing_eleve_{e.id}"] = False
+                                st.rerun()
+                    st.markdown("<hr style='margin: 0.2rem 0; border-color: rgba(255,255,255,0.05);'>", unsafe_allow_html=True)
+
+        with tab_ajout:
+            st.markdown("### Formulaire d'Inscription")
+            
+            classes_dispo = db.query(Classe).filter(
+                Classe.school_id == school_id,
+                Classe.cycle == niveau_actif
+            ).all()
+
+            if not classes_dispo:
+                st.warning(f"⚠️ Veuillez d'abord créer des classes pour le cycle **{niveau_actif}** dans le menu 'Classes & Tarifs'.")
+                return
+
+            options_classes = {c.libelle: c.id for c in classes_dispo}
+
+            with st.form("form_inscription_eleve"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    nom_e = st.text_input("Nom de l'élève")
+                    prenom_e = st.text_input("Prénom de l'élève")
+                    classe_choisie_nom = st.selectbox("Sélectionner la classe", list(options_classes.keys()))
+                with col2:
+                    sexe_e = st.selectbox("Sexe", ["Masculin", "Féminin"])
+                    matricule_e = st.text_input("Matricule de l'élève (requis)")
+                    versement_initial = st.number_input("Versement initial / Inscription (FCFA)", min_value=0.0, value=0.0, step=5000.0)
+
+                st.markdown("#### 🏷️ Réduction sur les Frais de Scolarité (Optionnel)")
+                col_red1, col_red2 = st.columns(2)
+                with col_red1:
+                    type_reduction = st.selectbox("Type de réduction", ["Aucune", "Bourse scolaire", "Cas social", "Enfant d'enseignant", "Autre"])
+                with col_red2:
+                    montant_reduction = st.number_input("Montant de la réduction (FCFA)", min_value=0.0, value=0.0, step=5000.0)
+
+                submitted = st.form_submit_button("Valider l'inscription")
+                if submitted:
+                    if not nom_e or not prenom_e or not matricule_e:
+                        st.error("Le nom, le prénom et le matricule de l'élève sont obligatoires.")
+                    else:
+                        classe_id_sel = options_classes[classe_choisie_nom]
+                        
+                        nouvel_eleve = Eleve(
+                            school_id=school_id,
+                            nom=nom_e.upper(),
+                            prenom=prenom_e,
+                            matricule=matricule_e.strip(),
+                            sexe=sexe_e,
+                            cycle=niveau_actif,
+                            classe_id=classe_id_sel,
+                            type_reduction=type_reduction if type_reduction != "Aucune" else "Aucune",
+                            montant_reduction=montant_reduction
+                        )
+                        db.add(nouvel_eleve)
+                        db.commit()
+                        db.refresh(nouvel_eleve)
+
+                        if versement_initial > 0:
+                            import random
+                            ref_recu = f"REC-{random.randint(10000, 99999)}"
+                            nouveau_paiement = Paiement(
+                                school_id=school_id,
+                                reference_recu=ref_recu,
+                                eleve_id=nouvel_eleve.id,
+                                montant=versement_initial,
+                                mode_reglement="Espèces",
+                                motif="Versement initial / Inscription",
+                                agent_caisse=st.session_state.get("username", "admin"),
+                                date_paiement=datetime.utcnow()
                             )
-                            db.add(nouvel_eleve)
-                            db.flush() # Pour récupérer l'ID de l'élève nouvellement créé
-
-                            # Si un versement initial est effectué, on l'ajoute aussi dans la table des paiements pour la cohérence financière
-                            if montant_paye_init > 0:
-                                nouveau_paiement = Paiement(
-                                    school_id=target_school_id,
-                                    eleve_id=nouvel_eleve.id,
-                                    montant=montant_paye_init,
-                                    motif="Frais d'inscription / Versement initial",
-                                    date_paiement=datetime.utcnow()
-                                )
-                                db.add(nouveau_paiement)
-
-                            # Traçabilité dans le journal d'activité
-                            nouveau_log = ActivityLog(
-                                school_id=target_school_id,
-                                timestamp=datetime.utcnow(),
-                                username=st.session_state.get("username", "admin"),
-                                action=f"Inscription de l'élève {nom} {prenom} ({classe_choisie})",
-                                module="Inscription Élèves",
-                                statut="Succès"
-                            )
-                            db.add(nouveau_log)
-
+                            db.add(nouveau_paiement)
                             db.commit()
-                            st.success(f"✅ L'élève {nom} {prenom} a été inscrit avec succès !")
-                            st.rerun()
 
+                        st.success(f"Élève **{nom_e} {prenom_e}** (Matricule : {matricule_e}) inscrit avec succès !")
+                        st.rerun()
     finally:
         db.close()
+
+# Alias de compatibilité
+afficher_eleves = afficher_eleves
