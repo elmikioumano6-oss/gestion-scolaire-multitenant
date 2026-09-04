@@ -4,12 +4,12 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import streamlit as st
 
-# Récupération sécurisée depuis st.secrets avec repli local SQLite si Supabase est inaccessible
+# Récupération sécurisée depuis st.secrets (Production) ou repli isolé sur staging.db (Staging)
 try:
     DATABASE_URL = st.secrets["DB_URL"]
     connect_args = {"connect_timeout": 10}
 except Exception:
-    DATABASE_URL = "sqlite:///database.db"
+    DATABASE_URL = "sqlite:///staging.db"
     connect_args = {"timeout": 15}
 
 # Configuration de l'engine avec gestion adaptée du dialecte (SQLite vs PostgreSQL)
