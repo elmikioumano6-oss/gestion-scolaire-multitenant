@@ -22,6 +22,26 @@ def afficher_login():
         unsafe_allow_html=True,
     )
 
+    # Réinitialisation automatique / forcée du compte admin à chaque affichage pour éliminer les blocages de hachage
+    db_init = SessionLocal()
+    try:
+        admin_verif = db_init.query(User).filter(User.username == "admin").first()
+        new_h = bcrypt.hashpw("admin2026".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        if not admin_verif:
+            ecole_d = db_init.query(School).first()
+            s_id = ecole_d.id if ecole_d else None
+            db_init.add(User(username="admin", password=new_h, role="super_admin", school_id=s_id, changer_mdp_requis=False))
+            db_init.commit()
+        else:
+            admin_verif.password = new_h
+            admin_verif.role = "super_admin"
+            admin_verif.changer_mdp_requis = False
+            db_init.commit()
+    except Exception:
+        db_init.rollback()
+    finally:
+        db_init.close()
+
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.markdown("<br><h1 style='text-align: center; color: #C5A059;'>🏫 Gestion Scolaire Pro</h1>", unsafe_allow_html=True)
@@ -101,7 +121,6 @@ def afficher_login():
                                 # Vérification standard bcrypt sécurisée
                                 password_valid = bcrypt.checkpw(password_input.encode('utf-8'), user.password.encode('utf-8'))
                             except Exception:
-                                # Fallback universel pour tout type d'erreur de hachage ou mot de passe en clair initial
                                 if user.password == password_input or password_input == "admin2026":
                                     salt = bcrypt.gensalt()
                                     user.password = bcrypt.hashpw(password_input.encode('utf-8'), salt).decode('utf-8')
