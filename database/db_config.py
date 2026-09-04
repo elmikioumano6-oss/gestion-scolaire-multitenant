@@ -62,26 +62,32 @@ def init_db():
             except Exception:
                 conn.rollback() # Ignore si la colonne existe déjà
 
-    # 3. Initialisation du Super Administrateur et de l'établissement par défaut
+    # 3. Initialisation ou mise à jour forcée du compte admin et de l'établissement par défaut
     db = SessionLocal()
     try:
-        super_admin_existe = db.query(User).filter(User.role == 'super_admin').first()
-        if not super_admin_existe:
-            ecole_defaut = db.query(School).first()
-            if not ecole_defaut:
-                ecole_defaut = School(
-                    nom="Complexe Scolaire Privé Rahmat-FH",
-                    code="CSP-RAHMAT",
-                    devise="Excellence - Travail - Succès",
-                    adresse="Niamey, Niger",
-                    contacts="99797163"
-                )
-                db.add(ecole_defaut)
-                db.commit()
-                db.refresh(ecole_defaut)
+        ecole_defaut = db.query(School).first()
+        if not ecole_defaut:
+            ecole_defaut = School(
+                nom="Complexe Scolaire Privé Rahmat-FH",
+                code="CSP-RAHMAT",
+                devise="Excellence - Travail - Succès",
+                adresse="Niamey, Niger",
+                contacts="99797163"
+            )
+            db.add(ecole_defaut)
+            db.commit()
+            db.refresh(ecole_defaut)
 
-            hashed_pw = bcrypt.hashpw("admin2026".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-            
+        # Recherche ou création de l'utilisateur admin avec mise à jour garantie du mot de passe
+        hashed_pw = bcrypt.hashpw("admin2026".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        
+        admin_user = db.query(User).filter(User.username == "admin").first()
+        if admin_user:
+            admin_user.password = hashed_pw
+            admin_user.role = "super_admin"
+            admin_user.school_id = ecole_defaut.id
+            admin_user.changer_mdp_requis = False
+        else:
             admin_user = User(
                 username="admin",
                 password=hashed_pw,
@@ -90,6 +96,9 @@ def init_db():
                 changer_mdp_requis=False
             )
             db.add(admin_user)
-            db.commit()
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        st.error(f"Erreur lors de l'initialisation de la base de données : {e}")
     finally:
         db.close()
