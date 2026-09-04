@@ -50,6 +50,8 @@ def main():
             fonction()
         except Exception as e:
             st.error(f"Erreur lors du chargement de la page de connexion : {e}")
+            if "Invalid salt" in str(e):
+                st.warning("⚠️ L'ancien mot de passe en base utilise un format incompatible. Veuillez réinitialiser le mot de passe administrateur.")
         return
 
     # --- 2. GARDIEN DE SÉCURITÉ (GATEKEEPER) & INTERCEPTION DU MOT DE PASSE ---
@@ -306,7 +308,7 @@ def main():
         "Journal d'activité": ("views.journal_activite", "afficher_journal_activite"),
         "Messages": ("views.messages", "afficher_messages"),
         "Espace Parent": ("views.parent_space", "afficher_espace_parent"),
-        "Backup": ("views.backup", "afficher_backup"),
+        "Backup": ("views.backup", "backup"),
     }
 
     # --- 5. SÉCURITÉ DES RÔLES (RBAC STRICT) ---
@@ -322,7 +324,6 @@ def main():
             fonction = getattr(module, nom_fonction)
             sig = inspect.signature(fonction)
             
-            # Injection de 'niveau_actif' uniquement si la fonction le réclame
             if "niveau_actif" in sig.parameters and role_utilisateur not in ["inspecteur", "enseignant", "parent"] and not is_super_admin:
                 fonction(niveau_actif=niveau_actif)
             else:
