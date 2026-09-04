@@ -101,14 +101,16 @@ def main():
                             st.error("⚠️ Les mots de passe ne correspondent pas.")
                         else:
                             try:
-                                current_user.password = bcrypt.hashpw(nouveau_p.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+                                salt = bcrypt.gensalt()
+                                hashed = bcrypt.hashpw(nouveau_p.encode('utf-8'), salt)
+                                current_user.password = hashed.decode('utf-8')
                                 current_user.changer_mdp_requis = False
                                 db_sec.commit()
                                 st.success("✅ Mot de passe mis à jour avec succès ! Chargement de l'application...")
                                 st.rerun()
                             except Exception as ex:
                                 db_sec.rollback()
-                                st.error(f"Erreur lors de la mise à jour : {ex}")
+                                st.error(f"Erreur lors de la mise à jour du mot de passe : {ex}")
             db_sec.close()
             return  # Bloque totalement l'accès au reste de l'application tant que le MDP n'est pas changé
 
@@ -261,7 +263,7 @@ def main():
     # --- 4. DICTIONNAIRE DE ROUTAGE (ERP STANDARD) ---
     ROUTES = {
         # Piliers Super Admin ERP
-        "📊 Pilotage & BI": ("views.accueil", "afficher_accueil"), # L'accueil est devenu notre tableau de bord dynamique
+        "📊 Pilotage & BI": ("views.accueil", "afficher_accueil"),
         "🏢 Gestion des Tenants": ("views.super_admin", "afficher_super_admin"),
         "👥 IAM & Sécurité": ("views.gestion_utilisateurs", "afficher_gestion_utilisateurs"),
         "📜 Piste d'Audit": ("views.journal_activite", "afficher_journal_activite"),
@@ -271,7 +273,7 @@ def main():
         # Modules standards administration et autres rôles
         "Administration Globale": ("views.super_admin", "afficher_super_admin"),
         "Accueil": ("views.accueil", "afficher_accueil"),
-        "Tableau de Bord": ("views.accueil", "afficher_accueil"), # Redirige vers notre nouveau dashboard
+        "Tableau de Bord": ("views.accueil", "afficher_accueil"),
         "Année Scolaire": ("views.annee_scolaire", "afficher_annee_scolaire"),
         "Matières & Coeffs": ("views.matieres", "afficher_matieres"),
         "Classes & Tarifs": ("views.classes", "afficher_classes"),
