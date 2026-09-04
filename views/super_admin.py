@@ -5,10 +5,11 @@ import urllib.parse
 import bcrypt
 from database.db_config import SessionLocal
 from database.models import School, User
+from database.audit import log_action_erp
 
 def afficher_super_admin():
     st.subheader("🌐 Administration Globale de la Plateforme")
-    st.markdown("Pilotage centralisé des établissements partenaires, gestion des abonnements, des essais et des statuts d'accès.")
+    st.markdown("Pilotage centralisé des établissements partenaires, gestion des abonnements, des essais et des statuts d'accès avec traçabilité ERP.")
     st.markdown("---")
 
     if not st.session_state.get("is_super_admin", False):
@@ -24,6 +25,16 @@ def afficher_super_admin():
                 nb_maj = db_sec_all.query(User).filter(User.role != "super_admin").update(
                     {User.changer_mdp_requis: True}, synchronize_session=False
                 )
+                
+                # Traçabilité globale de sécurité
+                log_action_erp(
+                    module="Super Admin",
+                    action=f"Forçage global du changement de mot de passe pour {nb_maj} utilisateurs.",
+                    statut="Critique",
+                    valeur_avant="Sécurité standard",
+                    valeur_apres="Mise à jour obligatoire du mot de passe"
+                )
+                
                 db_sec_all.commit()
                 st.success(f"✅ Succès ! {nb_maj} compte(s) configuré(s) pour exiger un changement de mot de passe.")
             except Exception as ex:
@@ -110,6 +121,20 @@ def afficher_super_admin():
                     statut_texte = "✅ Actif" if getattr(ecole, 'actif', True) else "⛔ Suspendu"
                     
                     with st.expander(f"🏫 {ecole.nom} (ID: {ecole.id}) [Code: {ecole.code}] — Statut : {statut_texte}"):
+                        
+                        # --- BOUTON DE BASCULE RAPIDE POUR LA SESSION ---
+                        current_active_school = st.session_state.get("school_id")
+                        if current_active_school == ecole.id:
+                            st.success(f"🟢 Cet établissement est actuellement actif dans votre session de travail.")
+                        else:
+                            if st.button(f"🚀 Basculer vers {ecole.nom}", key=f"switch_school_{ecole.id}", type="primary"):
+                                st.session_state["school_id"] = ecole.id
+                                st.session_state["school_name"] = ecole.nom
+                                st.success(f"✅ Basculement réussi vers **{ecole.nom}** ! Redirection...")
+                                st.rerun()
+
+                        st.markdown("---")
+
                         with st.form(key=f"form_update_{ecole.id}"):
                             col1, col2 = st.columns(2)
                             
@@ -121,15 +146,17 @@ def afficher_super_admin():
                                 
                             with col2:
                                 date_exp_actuelle = getattr(ecole, 'date_expiration', None)
-                                if not date_exp_actuelle:
-                                    date_exp_actuelle = datetime.utcnow() + timedelta(days=30)
+                                statut_actuel = getattr(ecole, 'actif', True)
                                 
-                                nouveau_statut_actif = st.checkbox("Établissement Actif", value=getattr(ecole, 'actif', True), key=f"actif_{ecole.id}")
+                                if not date_exp_actuelle:
+                                    date_exp_actuelle = datetime.now() + timedelta(days=30)
+                                
+                                nouveau_statut_actif = st.checkbox("Établissement Actif", value=statut_actuel, key=f"actif_{ecole.id}")
                                 
                                 if isinstance(date_exp_actuelle, datetime):
                                     d_val = date_exp_actuelle.date()
                                 else:
-                                    d_val = datetime.utcnow().date() + timedelta(days=30)
+                                    d_val = datetime.now().date() + timedelta(days=30)
                                     
                                 nouvelle_date_exp = st.date_input("Date limite d'accès / Fin d'essai", value=d_val, key=f"exp_{ecole.id}")
                                 
@@ -145,6 +172,15 @@ def afficher_super_admin():
                                             if hasattr(u, 'actif'):
                                                 u.actif = nouveau_statut_actif
                                                 
+                                        # Traçabilité des statuts et abonnements (Diff Avant/Après)
+                                        log_action_erp(
+                                            module="Gestion des Tenants",
+                                            action=f"Mise à jour des droits pour l'établissement {ecole_maj.nom}",
+                                            statut="Critique" if not nouveau_statut_actif else "Succès",
+                                            valeur_avant=f"Actif: {statut_actuel} | Exp: {d_val}",
+                                            valeur_apres=f"Actif: {nouveau_statut_actif} | Exp: {nouvelle_date_exp}"
+                                        )
+
                                         db.commit()
                                         st.success(f"✅ Paramètres mis à jour pour {ecole_maj.nom} !")
                                         st.rerun()
@@ -177,6 +213,14 @@ def afficher_super_admin():
                                             existing_usr.password = bcrypt.hashpw(adm_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
                                             existing_usr.role = "admin"
                                             existing_usr.changer_mdp_requis = True
+                                            
+                                            log_action_erp(
+                                                module="Gestion des Tenants",
+                                                action=f"Réinitialisation du compte administrateur '{adm_username.strip()}' pour {ecole.nom}",
+                                                statut="Critique",
+                                                valeur_avant="Ancien mot de passe",
+                                                valeur_apres="Nouveau mot de passe provisoire exigé"
+                                            )
                                             db.commit()
                                             
                                             st.session_state["last_created_credentials"] = {
@@ -199,6 +243,14 @@ def afficher_super_admin():
                                             changer_mdp_requis=True
                                         )
                                         db.add(nouveau_compte)
+                                        
+                                        log_action_erp(
+                                            module="Gestion des Tenants",
+                                            action=f"Création d'un nouveau compte administrateur '{adm_username.strip()}' pour {ecole.nom}",
+                                            statut="Succès",
+                                            valeur_avant="Inexistant",
+                                            valeur_apres="Compte actif avec mot de passe provisoire"
+                                        )
                                         db.commit()
                                         
                                         st.session_state["last_created_credentials"] = {
@@ -243,7 +295,7 @@ def afficher_super_admin():
                             if user_existant:
                                 st.error(f"⚠️ L'identifiant '{admin_username.strip()}' est déjà utilisé.")
                             else:
-                                date_expiration_val = datetime.utcnow() + timedelta(days=30 * periode_essai_mois)
+                                date_expiration_val = datetime.now() + timedelta(days=30 * periode_essai_mois)
                                 nouvelle_ecole = School(
                                     code=code_nettoye,
                                     nom=nom_ecole.strip(),
@@ -266,6 +318,15 @@ def afficher_super_admin():
                                     changer_mdp_requis=True
                                 )
                                 db.add(nouvel_admin)
+                                
+                                log_action_erp(
+                                    module="Gestion des Tenants",
+                                    action=f"Création du nouvel établissement '{nom_ecole.strip()}' (Code: {code_nettoye})",
+                                    statut="Succès",
+                                    valeur_avant="Inexistant",
+                                    valeur_apres=f"Créé avec admin '{admin_username.strip()}'"
+                                )
+                                
                                 db.commit()
 
                                 st.session_state["last_created_credentials"] = {

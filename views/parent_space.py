@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from database.db_config import SessionLocal
-from database.models import Eleve, Classe, School, Paiement, User, Note, Presence, EmploiDuTemps, Matiere
+from database.models import Classe, Eleve, School, Paiement, User, Note, Presence, EmploiDuTemps, Matiere
 
 def afficher_espace_parent():
     st.subheader("👨‍👩‍👧 Espace Famille & Suivi Élève")
@@ -95,7 +95,6 @@ def afficher_espace_parent():
                     if not notes_list:
                         st.info("Bulletin non disponible (aucune note saisie).")
                     else:
-                        # Regroupement par matière pour calcul de moyenne
                         matieres_dict = {}
                         for n in notes_list:
                             mat = db.query(Matiere).filter(Matiere.id == n.matiere_id).first()
@@ -138,7 +137,7 @@ def afficher_espace_parent():
                             for ed in edt_list:
                                 edt_data.append({
                                     "Jour": ed.jour,
-     -                               "Heure": ed.heure,
+                                    "Heure": ed.heure,
                                     "Matière": ed.matiere,
                                     "Enseignant": ed.enseignant or "N/D"
                                 })
@@ -160,23 +159,36 @@ def afficher_espace_parent():
                             })
                         st.dataframe(pd.DataFrame(pres_data), use_container_width=True)
 
-                # Onglet 5 : Situation Financière
+                # Onglet 5 : Situation Financière (Corrigé avec la réduction et le net à payer)
                 with tab5:
                     st.markdown("#### Situation des Paiements de Scolarité")
-                    frais_scol = getattr(classe, 'frais_scolarite', 0.0) or 0.0 if classe else 0.0
-                    frais_inscr = getattr(classe, 'frais_inscription', 0.0) or 0.0 if classe else 0.0
-                    montant_du = frais_scol + frais_inscr
+                    frais_scol = float(getattr(classe, 'frais_scolarite', 0.0) or 0.0) if classe else 0.0
+                    frais_inscr = float(getattr(classe, 'frais_inscription', 0.0) or 0.0) if classe else 0.0
+                    frais_coges = float(getattr(classe, 'frais_coges', 0.0) or 0.0) if classe else 0.0
+                    
+                    montant_brut = (frais_scol + frais_inscr + frais_coges) if (frais_scol + frais_inscr + frais_coges) > 0 else 65000.0
+                    
+                    # Application de la réduction de l'élève
+                    reduction = float(getattr(eleve_obj, 'montant_reduction', 0.0) or 0.0)
+                    montant_du_net = max(0.0, montant_brut - reduction)
                     
                     paiements_eleve = db.query(Paiement).filter(Paiement.eleve_id == eleve_obj.id).all()
-                    montant_paye = sum(p.montant for p in paiements_eleve) if paiements_eleve else 0.0
+                    montant_paye = sum(float(p.montant) for p in paiements_eleve) if paiements_eleve else 0.0
                     
+                    solde_restant = montant_du_net - montant_paye
+
                     col1, col2, col3 = st.columns(3)
                     with col1:
-                        st.metric("Montant Total Dû", f"{montant_du:,.0f} FCFA")
+                        st.metric("Montant Net à Payer", f"{montant_du_net:,.0f} FCFA", delta=f"Réduction : -{reduction:,.0f} F" if reduction > 0 else None)
                     with col2:
                         st.metric("Montant Versé", f"{montant_paye:,.0f} FCFA")
                     with col3:
-                        st.metric("Solde Restant", f"{montant_du - montant_paye:,.0f} FCFA")
+                        if solde_restant > 0:
+                            st.metric("Solde Restant", f"{solde_restant:,.0f} FCFA", delta="Impayé", delta_color="inverse")
+                        elif solde_restant < 0:
+                            st.metric("Solde Restant", f"{abs(solde_restant):,.0f} FCFA", delta="Trop-perçu", delta_color="normal")
+                        else:
+                            st.metric("Solde Restant", "0 FCFA", delta="Soldé", delta_color="normal")
 
                     st.markdown("##### Historique des Versements")
                     if not paiements_eleve:

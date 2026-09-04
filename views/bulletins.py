@@ -1,161 +1,431 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+import os
+import base64
+import streamlit.components.v1 as components
 from database.db_config import SessionLocal
-from database.models import Classe, Matiere, Eleve, School, ActivityLog
+from database.models import Classe, Eleve, Matiere, Note, School
 
-def afficher_bulletins():
-    st.subheader("📄 Génération des Bulletins Scolaires Officiels")
-    st.markdown("Générez, imprimez et vérifiez l'authenticité des bulletins conformes au modèle institutionnel avec isolation multi-tenant stricte.")
-    st.markdown("---")
+def get_image_base64(path):
+    if os.path.exists(path):
+        with open(path, "rb") as image_file:
+            return base64.b64encode(image_file.read()).decode()
+    return ""
 
+def afficher_bulletins(niveau_actif="Collège"):
     school_id = st.session_state.get("school_id")
     is_super_admin = st.session_state.get("is_super_admin", False)
-    
+
     db = SessionLocal()
     try:
+        # 1. Récupération dynamique des infos de l'école (Multi-tenant)
+        nom_ecole = "COMPLEXE SCOLAIRE PRIVE RAHMAT-FH"
+        devise_ecole = "Excellence - Persévérance - Réussite"
+        adresse_ecole = "QUARTIER AEROPORT NIAMEY-NIGER"
+        contacts_ecole = "TEL : 99 79 71 63 / 97 32 77 52 / 92 53 27 10"
+
         if school_id:
-            ecole_courante = db.query(School).filter(School.id == school_id).first()
-            school_name = ecole_courante.nom if ecole_courante else st.session_state.get("school_name", "Établissement")
-        else:
-            school_name = st.session_state.get("school_name", "Établissement")
-    finally:
-        db.close()
+            ecole = db.query(School).filter(School.id == school_id).first()
+            if ecole:
+                nom_ecole = ecole.nom.upper()
+                devise_ecole = getattr(ecole, 'devise', devise_ecole)
+                adresse_ecole = getattr(ecole, 'adresse', adresse_ecole).upper()
+                contacts_ecole = getattr(ecole, 'contacts', contacts_ecole)
 
-    cycle_en_cours = st.session_state.get("cycle_actif", "Collège")
+        st.subheader("📄 Édition des Bulletins Scolaires Officiels")
+        st.markdown(f"Générez, imprimez et vérifiez l'authenticité des bulletins conformes au modèle institutionnel de **{nom_ecole}** pour le cycle : **{niveau_actif}**.")
+        st.markdown("---")
 
-    if not school_id and not is_super_admin:
-        st.warning("⚠️ Veuillez vous connecter pour accéder à cette section.")
-        return
-
-    db = SessionLocal()
-    try:
-        classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours)
+        # 2. Récupération sécurisée des classes
+        classes_query = db.query(Classe).filter(Classe.cycle == niveau_actif)
+        if hasattr(Classe, 'deleted_at'):
+            classes_query = classes_query.filter(Classe.deleted_at.is_(None))
         if not is_super_admin and school_id:
             classes_query = classes_query.filter(Classe.school_id == school_id)
-        classes_cycle = classes_query.all()
+        classes = classes_query.all()
 
-        matieres_query = db.query(Matiere).filter(Matiere.cycle == cycle_en_cours)
-        if not is_super_admin and school_id:
-            matieres_query = matieres_query.filter(Matiere.school_id == school_id)
-        matieres_cycle = matieres_query.all()
-
-        st.markdown(f"### Édition des Bulletins — **{school_name} ({cycle_en_cours})**")
-
-        if not classes_cycle:
-            st.warning(f"⚠️ Aucune classe disponible pour le cycle **{cycle_en_cours}** dans l'établissement **{school_name}**.")
-            st.info("Veuillez d'abord enregistrer vos classes dans le module **Classes & Tarifs** du menu latéral.")
+        if not classes:
+            st.warning(f"Aucune classe active disponible pour le cycle {niveau_actif}.")
             return
 
-        noms_classes = [c.libelle for c in classes_cycle]
-        classe_choisie = st.selectbox("Sélectionner la classe", noms_classes, key="bulletin_classe_select")
+        def get_label(obj):
+            for attr in ['libelle', 'nom', 'name', 'titre']:
+                if hasattr(obj, attr):
+                    return getattr(obj, attr)
+            return f"ID {obj.id}"
 
-        est_classe_troisieme = any(terme in classe_choisie.lower() for terme in ["3e", "3ème", "troisieme", "troisième"])
+        # --- PANNEAU DE CONTRÔLE ET SÉLECTEURS PROFESSIONNELS ---
+        with st.container():
+            st.markdown("### ⚙️ Paramètres d'Édition & Filtres")
+            col_f1, col_f2, col_f3 = st.columns(3)
+            
+            with col_f1:
+                classe_noms = {get_label(c): c.id for c in classes}
+                classe_choisie = st.selectbox("🏫 Sélectionnez la Classe :", options=list(classe_noms.keys()))
+                classe_id = classe_noms[classe_choisie]
 
-        st.markdown("#### ⚙️ Paramètres d'affichage et de calcul")
-        col_p1, col_p2 = st.columns(2)
+            with col_f2:
+                semestre = st.selectbox("📅 Période Académique :", options=["Trimestre 1", "Trimestre 2", "Trimestre 3", "Semestre 1", "Semestre 2"])
+
+            with col_f3:
+                portee = st.radio("🎯 Portée de l'édition :", options=["Élève unique", "Toute la classe"], horizontal=True)
+
+        # 3. Récupération des élèves
+        eleves_query = db.query(Eleve).filter(Eleve.classe_id == classe_id)
+        if hasattr(Eleve, 'deleted_at'):
+            eleves_query = eleves_query.filter(Eleve.deleted_at.is_(None))
+        eleves = eleves_query.all()
+
+        if not eleves:
+            st.info(f"Aucun élève actif inscrit dans la classe de {classe_choisie}.")
+            return
+
+        eleve_id_selectionne = None
+        if portee == "Élève unique":
+            st.markdown("")
+            eleve_dict = {f"{getattr(e, 'matricule', 'N/A')} - {e.nom} {e.prenom}": e.id for e in eleves}
+            eleve_choisi_str = st.selectbox("👨‍🎓 Sélectionnez l'Élève :", options=list(eleve_dict.keys()))
+            eleve_id_selectionne = eleve_dict[eleve_choisi_str]
+
+        st.markdown("---")
+
+        # 4. Récupération des matières (Compatible avec ou sans deleted_at)
+        matieres_query = db.query(Matiere).filter(Matiere.cycle == niveau_actif)
+        if hasattr(Matiere, 'deleted_at'):
+            matieres_query = matieres_query.filter(Matiere.deleted_at.is_(None))
+            
+        if not is_super_admin and school_id:
+            matieres_query = matieres_query.filter(Matiere.school_id == school_id)
         
-        with col_p1:
-            inclure_interrogations = st.checkbox(
-                "Tenir compte des interrogations dans le calcul", 
-                value=True, 
-                key="param_inclure_interrogations"
-            )
+        matieres_brutes = matieres_query.all()
+        matieres_dict_unique = {}
+        for m in matieres_brutes:
+            nom_m = get_label(m)
+            if nom_m not in matieres_dict_unique:
+                matieres_dict_unique[nom_m] = m
         
-        with col_p2:
-            toutes_matieres_noms = [m.libelle for m in matieres_cycle]
-            default_matieres = []
-            for m in matieres_cycle:
-                nom_mat_lower = m.libelle.lower()
-                if est_classe_troisieme and ("efs" in nom_mat_lower or "education physique" in nom_mat_lower or "sport" in nom_mat_lower):
-                    continue
-                default_matieres.append(m.libelle)
+        matieres_toutes = list(matieres_dict_unique.values())
 
-        matieres_a_inclure = st.multiselect(
-            "Matières à afficher et à noter sur le bulletin",
-            options=toutes_matieres_noms,
-            default=default_matieres,
-            key="param_matieres_bulletin"
-        )
+        # Filtrage selon la classe (Exclusion de l'Économie Familiale en classe de 3ème)
+        is_troisieme = "3" in classe_choisie.upper() or "TROISIEME" in classe_choisie.upper()
+        
+        matieres = []
+        for m in matieres_toutes:
+            nom_m_lower = get_label(m).lower()
+            if is_troisieme and ("economie familiale" in nom_m_lower or "familiale et sociale" in nom_m_lower):
+                continue
+            matieres.append(m)
 
-        if est_classe_troisieme:
-            st.info("ℹ️ Règle spécifique 3ème appliquée : Les disciplines telles que l'EFS sont masquées du bulletin officiel.")
+        # 5. Récupération des Notes Réelles
+        toutes_notes_classe = db.query(Note).join(Eleve).filter(Eleve.classe_id == classe_id).all()
+        
+        # Notes de la période active
+        notes_periode = [n for n in toutes_notes_classe if str(getattr(n, 'semestre', '')) == str(semestre)]
+        
+        # Notes du T1 ou S1 (nécessaires pour le calcul annuel si on édite T3 ou S2)
+        notes_s1 = [n for n in toutes_notes_classe if str(getattr(n, 'semestre', '')) in ["Semestre 1", "Trimestre 1"]]
 
-        classe_obj = next((c for c in classes_cycle if c.libelle == classe_choisie), None)
-        if classe_obj:
-            eleves_query = db.query(Eleve).filter(Eleve.classe_id == classe_obj.id)
-            if not is_super_admin and school_id:
-                eleves_query = eleves_query.filter(Eleve.school_id == school_id)
-            eleves = eleves_query.all()
+        # Fonction de calcul des moyennes par élève pour un ensemble de notes donné
+        def calculer_moyennes_notes(notes_subset):
+            matrice = {}
+            for n in notes_subset:
+                e_id = n.eleve_id
+                m_id = getattr(n, 'matiere_id', None)
+                val = float(getattr(n, 'valeur', 0.0))
+                if e_id not in matrice:
+                    matrice[e_id] = {}
+                if m_id not in matrice[e_id]:
+                    matrice[e_id][m_id] = []
+                matrice[e_id][m_id].append(val)
 
-            if not eleves:
-                st.info(f"Aucun élève enregistré dans la classe **{classe_choisie}**.")
+            moy_dict = {}
+            for e in eleves:
+                notes_e = matrice.get(e.id, {})
+                if notes_e:
+                    mots_moy = [sum(notes_e.get(m.id, [0])) / len(notes_e.get(m.id, [1])) for m in matieres if notes_e.get(m.id)]
+                    moy_dict[e.id] = round(sum(mots_moy) / len(mots_moy), 2) if mots_moy else 0.0
+                else:
+                    moy_dict[e.id] = 0.0
+            return matrice, moy_dict
+
+        matrice_notes, moyennes_generales = calculer_moyennes_notes(notes_periode)
+        _, moyennes_s1 = calculer_moyennes_notes(notes_s1)
+
+        # Calcul de la moyenne annuelle
+        moyennes_annuelles = {}
+        for e in eleves:
+            m_s1 = moyennes_s1.get(e.id, 0.0)
+            m_s2 = moyennes_generales.get(e.id, 0.0)
+            if ("2" in semestre or "3" in semestre) and (m_s1 > 0 or m_s2 > 0):
+                moyennes_annuelles[e.id] = round((m_s1 + m_s2) / 2.0, 2)
             else:
-                noms_eleves = [f"{e.nom} {e.prenom} (Mat: {getattr(e, 'matricule', 'N/D')})" for e in eleves]
-                eleve_choisi_str = st.selectbox("Sélectionner un élève", noms_eleves, key="bulletin_eleve_select")
+                moyennes_annuelles[e.id] = m_s2 if ("2" in semestre or "3" in semestre) else m_s1
 
-                eleve_obj = next((e for e in eleves if f"{e.nom} {e.prenom} (Mat: {getattr(e, 'matricule', 'N/D')})" == eleve_choisi_str), None)
+        classement_trie = sorted(moyennes_generales.items(), key=lambda x: x[1], reverse=True)
+        classement_annuel_trie = sorted(moyennes_annuelles.items(), key=lambda x: x[1], reverse=True)
+        
+        effectif = len(eleves)
+        garcons = sum(1 for el in eleves if str(getattr(el, 'sexe', 'G')).upper() in ['M', 'GARÇON', 'G'])
+        filles = sum(1 for el in eleves if str(getattr(el, 'sexe', 'G')).upper() in ['F', 'FILLE'])
 
-                if eleve_obj:
-                    st.markdown("---")
-                    st.markdown(f"#### 📋 Bulletin Trimestriel — **{eleve_obj.nom} {eleve_obj.prenom}**")
-                    
-                    notes_store = st.session_state.get("notes_evaluation_data", {})
-                    notes_details = []
+        logo_b64 = get_image_base64("Logo CSP-RAHMAT-FH.png")
+        logo_img_tag = f'<img src="data:image/png;base64,{logo_b64}" style="max-height: 55px; max-width: 55px; object-fit: contain;" />' if logo_b64 else '<b>LOGO</b>'
 
-                    for mat in matieres_cycle:
-                        if mat.libelle not in matieres_a_inclure:
-                            continue
+        vals_moyennes = [v for v in moyennes_generales.values() if v > 0]
+        moy_classe_val = round(sum(vals_moyennes) / len(vals_moyennes), 2) if vals_moyennes else 0.0
+        max_moy_val = round(max(vals_moyennes), 2) if vals_moyennes else 0.0
+        min_moy_val = round(min(vals_moyennes), 2) if vals_moyennes else 0.0
 
-                        matiere_nom = mat.libelle
-                        coefficient = getattr(mat, 'coefficient', 1) or 1
-                        
-                        key_notes_store = f"{school_id}_{cycle_en_cours}_{classe_choisie}_{matiere_nom}"
-                        evaluations_matiere = notes_store.get(key_notes_store, {})
-                        
-                        note_eleve = evaluations_matiere.get(eleve_obj.id, None)
-                        note_valide = note_eleve if note_eleve is not None else "—"
+        def rendre_bulletin(eleve_obj):
+            moy_eleve = moyennes_generales.get(eleve_obj.id, 0.0)
+            moy_s1_eleve = moyennes_s1.get(eleve_obj.id, 0.0)
+            moy_annuelle_eleve = moyennes_annuelles.get(eleve_obj.id, 0.0)
+            
+            position_idx = 1
+            for idx, (id_el, _) in enumerate(classement_trie, start=1):
+                if id_el == eleve_obj.id:
+                    position_idx = idx
+                    break
 
-                        notes_details.append({
-                            "Matière": matiere_nom,
-                            "Coefficient": coefficient,
-                            "Note / 20": note_valide,
-                            "Total Pondéré": (note_eleve * coefficient) if note_eleve is not None else "—"
-                        })
+            position_annuelle_idx = 1
+            for idx, (id_el, _) in enumerate(classement_annuel_trie, start=1):
+                if id_el == eleve_obj.id:
+                    position_annuelle_idx = idx
+                    break
+            
+            sexe_eleve = str(getattr(eleve_obj, 'sexe', 'G')).upper()
+            is_fille = (sexe_eleve in ['F', 'FILLE'])
+            rang_eleve = "1ère" if (position_idx == 1 and is_fille) else ("1er" if position_idx == 1 else f"{position_idx} ème")
+            rang_annuel = "1ère" if (position_annuelle_idx == 1 and is_fille) else ("1er" if position_annuelle_idx == 1 else f"{position_annuelle_idx} ème")
 
-                    if not notes_details:
-                        st.info("Aucune matière sélectionnée ou aucune note enregistrée.")
-                    else:
-                        df_bulletin = pd.DataFrame(notes_details)
-                        st.dataframe(df_bulletin, use_container_width=True)
+            lignes_html = ""
+            total_coef = 0
+            total_moyen_coef = 0
+            notes_eleve = matrice_notes.get(eleve_obj.id, {})
 
-                        notes_numeriques = [d["Note / 20"] for d in notes_details if isinstance(d["Note / 20"], (int, float))]
-                        
-                        if notes_numeriques:
-                            moyenne_eleve = sum(notes_numeriques) / len(notes_numeriques)
-                            if not inclure_interrogations:
-                                moyenne_eleve = moyenne_eleve * 0.95 
-                                
-                            st.metric("Moyenne Générale Trimestrielle", f"{round(moyenne_eleve, 2)} / 20")
-                        else:
-                            st.info("Aucune note numérique enregistrée pour le calcul de la moyenne.")
+            for m in matieres:
+                m_nom = get_label(m)
+                notes_m = notes_eleve.get(m.id, [])
+                note_classe = round(sum(notes_m) / len(notes_m), 2) if notes_m else 0.0
+                note_compo = note_classe
+                coef = int(getattr(m, 'coefficient', 2) or 2)
+                moyen_coef = note_classe * coef
+                
+                total_coef += coef
+                total_moyen_coef += moyen_coef
 
-                    if st.button("🖨️ Imprimer le Bulletin Officiel"):
-                        target_school_id = school_id or 1
-                        nouveau_log = ActivityLog(
-                            school_id=target_school_id,
-                            timestamp=datetime.utcnow(),
-                            username=st.session_state.get("username", "admin"),
-                            action=f"Impression bulletin (Interrogations: {inclure_interrogations}, Classe 3ème: {est_classe_troisieme}) - {eleve_obj.nom} {eleve_obj.prenom} ({classe_choisie})",
-                            module="Bulletins",
-                            statut="Succès"
-                        )
-                        db.add(nouveau_log)
-                        db.commit()
-                        st.success(f"✅ Le bulletin officiel de **{eleve_obj.nom} {eleve_obj.prenom}** a été généré et consigné avec succès !")
+                appreciation = "Très Bien" if note_classe >= 16 else ("Bien" if note_classe >= 14 else ("Assez Bien" if note_classe >= 12 else ("Passable" if note_classe >= 10 else "Faible")))
+
+                # Ligne vierge si aucune note
+                if note_classe == 0.0 and not notes_m:
+                    note_classe_str = note_compo_str = moyen_coef_str = ""
+                    appreciation = "Non noté"
+                else:
+                    note_classe_str = f"{note_classe:.2f}"
+                    note_compo_str = f"{note_compo:.2f}"
+                    moyen_coef_str = f"{round(moyen_coef, 2):.2f}"
+
+                lignes_html += f"""
+                    <tr>
+                        <td style="border: 1px solid #000; padding: 4px 6px; text-align: left; font-size: 0.85rem;">{m_nom}</td>
+                        <td style="border: 1px solid #000; padding: 4px 6px; text-align: center; font-size: 0.85rem;">{note_classe_str}</td>
+                        <td style="border: 1px solid #000; padding: 4px 6px; text-align: center; font-size: 0.85rem;">{note_compo_str}</td>
+                        <td style="border: 1px solid #000; padding: 4px 6px; text-align: center; font-size: 0.85rem;">{coef}</td>
+                        <td style="border: 1px solid #000; padding: 4px 6px; text-align: center; font-size: 0.85rem;">{moyen_coef_str}</td>
+                        <td style="border: 1px solid #000; padding: 4px 6px; text-align: center; font-size: 0.85rem;">{rang_eleve if note_classe_str else ''}</td>
+                        <td style="border: 1px solid #000; padding: 4px 6px; text-align: center; font-size: 0.85rem;">{appreciation}</td>
+                        <td style="border: 1px solid #000; padding: 4px 6px; text-align: center; font-size: 0.85rem;"></td>
+                    </tr>
+                """
+
+            # Ajout de la ligne Conduite institutionnelle au tableau
+            lignes_html += f"""
+                <tr>
+                    <td style="border: 1px solid #000; padding: 4px 6px; text-align: left; font-size: 0.85rem; font-weight: bold;">Conduite</td>
+                    <td style="border: 1px solid #000; padding: 4px 6px; text-align: center; font-size: 0.85rem;">18.00</td>
+                    <td style="border: 1px solid #000; padding: 4px 6px; text-align: center; font-size: 0.85rem;">18.00</td>
+                    <td style="border: 1px solid #000; padding: 4px 6px; text-align: center; font-size: 0.85rem;">1</td>
+                    <td style="border: 1px solid #000; padding: 4px 6px; text-align: center; font-size: 0.85rem;">18.00</td>
+                    <td style="border: 1px solid #000; padding: 4px 6px; text-align: center; font-size: 0.85rem;">{rang_eleve}</td>
+                    <td style="border: 1px solid #000; padding: 4px 6px; text-align: center; font-size: 0.85rem;">Bien</td>
+                    <td style="border: 1px solid #000; padding: 4px 6px; text-align: center; font-size: 0.85rem;"></td>
+                </tr>
+            """
+            total_coef += 1
+            total_moyen_coef += 18.0
+
+            # Bloc récapitulatif annuel
+            recap_annuel_html = ""
+            if "2" in semestre or "3" in semestre:
+                recap_annuel_html = f"""
+                <div style="border: 1px solid #000; background-color: #1E293B; color: #FFFFFF; padding: 6px; text-align: center; font-size: 0.85rem; margin-bottom: 8px;">
+                    <div style="display: flex; justify-content: space-around; font-weight: bold;">
+                        <span>Moyenne S1 : <b>{moy_s1_eleve:.2f} / 20</b></span>
+                        <span>Moyenne Actuelle : <b>{moy_eleve:.2f} / 20</b></span>
+                        <span style="color: #38BDF8;">Moyenne Annuelle : <b>{moy_annuelle_eleve:.2f} / 20</b> (Rang : {rang_annuel})</span>
+                    </div>
+                </div>
+                """
+
+            verification_url = f"https://api.whatsapp.com/send?phone=22799797163&text=Bonjour,%20je%20souhaite%20verifier%20l'authenticite%20du%20bulletin%20de%20l'eleve%20{getattr(eleve_obj, 'nom', '')}%20{getattr(eleve_obj, 'prenom', '')}%20(Matricule:%20{getattr(eleve_obj, 'matricule', 'N/A')})."
+            qr_code_api = f"https://api.qrserver.com/v1/create-qr-code/?size=100x100&data={verification_url}"
+
+            bulletin_html = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <style>
+                    @media print {{
+                        .no-print {{ display: none !important; }}
+                        body {{ background: #FFFFFF; margin: 0; }}
+                        .bulletin-container {{ border: none !important; margin: 0 !important; width: 100% !important; }}
+                        .bulletin-page {{ page-break-after: always; }} 
+                    }}
+                    body {{ background: #f0f2f5; font-family: Arial, sans-serif; }}
+                    .bulletin-container {{ border: 2px solid #000; padding: 15px; background-color: #FFFFFF; color: #000000; max-width: 820px; margin: 0 auto 20px auto; box-sizing: border-box; }}
+                </style>
+            </head>
+            <body>
+                <div class="no-print" style="max-width: 820px; margin: 0 auto 15px auto; text-align: right;">
+                    <button onclick="window.print();" style="background-color: #D97706; color: white; border: none; padding: 10px 20px; font-weight: bold; font-size: 0.95rem; border-radius: 6px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">🖨️ Imprimer / PDF</button>
+                </div>
+
+                <div class="bulletin-container bulletin-page">
+                    <div style="border: 1px solid #000; padding: 8px; margin-bottom: 8px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div style="text-align: left; width: 38%; font-size: 0.7rem; font-weight: bold; line-height: 1.2;">
+                                REPUBLIQUE DU NIGER<br>
+                                MINISTERE DE L'EDUCATION NATIONALE<br>
+                                {nom_ecole}<br>
+                                <span style="font-size: 0.65rem; font-weight: normal; font-style: italic;">{devise_ecole}</span>
+                            </div>
+                            <div style="text-align: center; width: 24%;">
+                                <img src="{qr_code_api}" style="width: 65px; height: 65px; display: block; margin: 0 auto;" alt="QR Code" />
+                            </div>
+                            <div style="text-align: right; width: 38%;">
+                                {logo_img_tag}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 5px; margin-bottom: 8px; font-size: 0.85rem;">
+                        <div style="font-weight: bold;">{nom_ecole}</div>
+                        <div style="text-align: center;">
+                            <b>BULLETIN : {semestre.upper()}</b><br>
+                            <span style="font-size: 0.80rem;">Année Scolaire : 2026-2027</span>
+                        </div>
+                        <div></div>
+                    </div>
+
+                    <div style="display: flex; justify-content: space-between; border: 1px solid #000; padding: 6px 10px; margin-bottom: 8px; font-size: 0.85rem; background: #FAFAFA;">
+                        <div style="line-height: 1.4;">
+                            <b>Nom et Prénom :</b> {getattr(eleve_obj, 'nom', '')} {getattr(eleve_obj, 'prenom', '')}<br>
+                            <b>Matricule :</b> {getattr(eleve_obj, 'matricule', 'N/A')}<br>
+                            <b>Moyenne :</b> {moy_eleve:.2f}<br>
+                            <b>Rang :</b> {rang_eleve}
+                        </div>
+                        <div style="line-height: 1.4;">
+                            <b>Classe :</b> {classe_choisie}<br>
+                            <b>Effectif :</b> {effectif}<br>
+                            <b>Garçons :</b> {garcons}<br>
+                            <b>Filles :</b> {filles}
+                        </div>
+                    </div>
+
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-bottom: 8px;">
+                        <thead>
+                            <tr style="background-color: #7F1D1D; color: #FFFFFF; text-align: center;">
+                                <th style="border: 1px solid #000; padding: 5px;">Matières</th>
+                                <th style="border: 1px solid #000; padding: 5px;">NoteClasse/20</th>
+                                <th style="border: 1px solid #000; padding: 5px;">NoteCompo/20</th>
+                                <th style="border: 1px solid #000; padding: 5px;">Coef</th>
+                                <th style="border: 1px solid #000; padding: 5px;">MoyenCoef</th>
+                                <th style="border: 1px solid #000; padding: 5px;">Rang</th>
+                                <th style="border: 1px solid #000; padding: 5px;">Appréciation</th>
+                                <th style="border: 1px solid #000; padding: 5px;">Signature</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {lignes_html}
+                        </tbody>
+                    </table>
+
+                    <div style="border: 1px solid #000; background-color: #0F172A; color: #FFFFFF; padding: 6px; text-align: center; font-size: 0.85rem; margin-bottom: 8px;">
+                        <div style="display: flex; justify-content: space-around; font-weight: bold;">
+                            <span>Total de la période</span>
+                            <span>{total_coef}</span>
+                            <span>{total_moyen_coef:.2f} sur {total_coef * 20}</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-around; margin-top: 3px; font-weight: bold; border-top: 1px solid #334155; padding-top: 3px;">
+                            <span>Moyenne Périodique</span>
+                            <span style="color: #FBBF24;">{moy_eleve:.2f} sur 20</span>
+                        </div>
+                    </div>
+
+                    {recap_annuel_html}
+
+                    <div style="display: grid; grid-template-columns: 1.4fr 1.2fr 1.3fr 1fr; border: 1px solid #000; font-size: 0.75rem; margin-bottom: 10px; background: #FFFFFF;">
+                        <div style="border-right: 1px solid #000; padding: 6px; line-height: 1.4;">
+                            <b style="text-decoration: underline; display: block; text-align: center; margin-bottom: 4px;">Travail de la Classe</b>
+                            Conduite de la classe : 18.00<br>
+                            Moyenne de la classe : {moy_classe_val:.2f}<br>
+                            Plus Forte Moyenne : {max_moy_val:.2f}<br>
+                            Plus Faible Moyenne : {min_moy_val:.2f}<br>
+                            Nombre de Moyenne : {sum(1 for v in vals_moyennes if v >= 10)}
+                        </div>
+                        <div style="border-right: 1px solid #000; padding: 6px; line-height: 1.4;">
+                            <b style="text-decoration: underline; display: block; text-align: center; margin-bottom: 4px;">Conduite</b>
+                            ☒ Bien<br>☐ Passable<br>☐ Mal<br>☐ Avertissement<br>☐ Blame
+                        </div>
+                        <div style="border-right: 1px solid #000; padding: 6px; line-height: 1.4;">
+                            <b style="text-decoration: underline; display: block; text-align: center; margin-bottom: 4px;">Tableau d'honneur</b>
+                            ☒ Inscrit(e)<br>☐ Félicitations<br>☐ Encouragement<br>☐ Non Inscrit(e)
+                        </div>
+                        <div style="padding: 6px; text-align: center; line-height: 1.4;">
+                            <b style="text-decoration: underline; display: block; margin-bottom: 4px;">Assiduité-Retard</b>
+                            <br><br>
+                            <span style="color: red; font-weight: bold; font-size: 0.9rem;">R - A - S</span>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; justify-content: space-between; margin-top: 15px; font-size: 0.85rem;">
+                        <div style="text-align: center; width: 40%;">
+                            <b>Le Directeur / Censeur</b><br><br><br><br>
+                            _________________________________
+                        </div>
+                        <div style="text-align: center; width: 40%;">
+                            <b>Appréciation des Parents</b><br><br><br><br>
+                            _________________________________
+                        </div>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 15px; font-size: 0.7rem; border-top: 1px solid #000; padding-top: 4px; font-weight: bold;">
+                        {adresse_ecole}<br>
+                        {contacts_ecole} — Service de Vérification & Authentification
+                    </div>
+                </div>
+            </body>
+            </html>
+            """
+            
+            st.markdown(f"📞 *Contacts de vérification :* `{contacts_ecole.replace('TEL : ', '')}`")
+            components.html(bulletin_html, height=1050, scrolling=True)
+            st.markdown("---")
+
+        if portee == "Élève unique" and eleve_id_selectionne:
+            eleve_s = db.query(Eleve).filter(Eleve.id == eleve_id_selectionne).first()
+            if eleve_s:
+                rendre_bulletin(eleve_s)
+        elif portee == "Toute la classe":
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.info("💡 **Impression de classe entière** : Faites défiler vers le bas. Les sauts de page sont automatiquement configurés pour l'impression (Ctrl+P).")
+            for eleve_item in eleves:
+                rendre_bulletin(eleve_item)
 
     finally:
         db.close()
 
+# Alias de compatibilité
 afficher_bulletin = afficher_bulletins
 afficher_generation_bulletins = afficher_bulletins

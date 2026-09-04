@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import datetime
 from database.db_config import SessionLocal
 from database.models import Classe, Matiere, Eleve, Note, School, ActivityLog
+from database.audit import log_action_erp
 
 def afficher_notes():
     st.subheader("📝 Saisie Globale des Notes (Mode Grille Matricielle)")
@@ -35,7 +36,7 @@ def afficher_notes():
             ecole_defaut = db.query(School).first()
             target_school_id = ecole_defaut.id if ecole_defaut else 1
 
-        classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours)
+        classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours, Classe.deleted_at.is_(None))
         if not is_super_admin and school_id:
             classes_query = classes_query.filter(Classe.school_id == school_id)
         else:
@@ -68,7 +69,7 @@ def afficher_notes():
 
         classe_obj = next((c for c in classes_cycle if c.libelle == classe_choisie), None)
         if classe_obj:
-            eleves_query = db.query(Eleve).filter(Eleve.classe_id == classe_obj.id)
+            eleves_query = db.query(Eleve).filter(Eleve.classe_id == classe_obj.id, Eleve.deleted_at.is_(None))
             if not is_super_admin and school_id:
                 eleves_query = eleves_query.filter(Eleve.school_id == school_id)
             else:
@@ -127,44 +128,54 @@ def afficher_notes():
                 )
 
                 if st.button("💾 Enregistrer toutes les notes de la classe", type="primary"):
+                    modifications_count = 0
                     for _, row in edited_df.iterrows():
                         eleve_id = row["eleve_id"]
+                        nom_eleve = row["Nom & Prénom"]
                         for mat in matieres_cycle:
                             valeur_saisie = float(row[mat.libelle])
+                            ancienne_valeur = dict_notes.get((eleve_id, mat.id), 0.0)
 
-                            note_obj = db.query(Note).filter(
-                                Note.school_id == target_school_id,
-                                Note.eleve_id == eleve_id,
-                                Note.matiere_id == mat.id,
-                                Note.semestre == semestre_choisi,
-                                Note.type_evaluation == type_eval
-                            ).first()
+                            if ancienne_valeur != valeur_saisie:
+                                note_obj = db.query(Note).filter(
+                                    Note.school_id == target_school_id,
+                                    Note.eleve_id == eleve_id,
+                                    Note.matiere_id == mat.id,
+                                    Note.semestre == semestre_choisi,
+                                    Note.type_evaluation == type_eval
+                                ).first()
 
-                            if note_obj:
-                                note_obj.valeur = valeur_saisie
-                            else:
-                                nouvelle_note = Note(
-                                    school_id=target_school_id,
-                                    eleve_id=eleve_id,
-                                    matiere_id=mat.id,
-                                    valeur=valeur_saisie,
-                                    semestre=semestre_choisi,
-                                    type_evaluation=type_eval
+                                if note_obj:
+                                    note_obj.valeur = valeur_saisie
+                                    action_desc = f"Modification de note ({type_eval} - {mat.libelle}) pour {nom_eleve}"
+                                    statut_log = "Critique"
+                                else:
+                                    note_obj = Note(
+                                        school_id=target_school_id,
+                                        eleve_id=eleve_id,
+                                        matiere_id=mat.id,
+                                        valeur=valeur_saisie,
+                                        semestre=semestre_choisi,
+                                        type_evaluation=type_eval
+                                    )
+                                    db.add(note_obj)
+                                    action_desc = f"Attribution de note ({type_eval} - {mat.libelle}) à {nom_eleve}"
+                                    statut_log = "Succès"
+
+                                modifications_count += 1
+
+                                # Traçabilité médico-légale granulaire ERP (SOC 2 / ISO 27001)
+                                log_action_erp(
+                                    module="Saisie des notes",
+                                    action=action_desc,
+                                    statut=statut_log,
+                                    valeur_avant=f"{ancienne_valeur} / 20",
+                                    valeur_apres=f"{valeur_saisie} / 20"
                                 )
-                                db.add(nouvelle_note)
 
-                    nouveau_log = ActivityLog(
-                        school_id=target_school_id,
-                        timestamp=datetime.utcnow(),
-                        username=st.session_state.get("username", "admin"),
-                        action=f"Saisie globale notes grille ({classe_choisie} - {semestre_choisi} - {type_eval})",
-                        module="Saisie des notes",
-                        statut="Succès"
-                    )
-                    db.add(nouveau_log)
                     db.commit()
 
-                    st.success("✅ Notes enregistrées avec succès ! Elles sont immédiatement disponibles dans la consultation des notes et les bulletins.")
+                    st.success(f"✅ Enregistrement réussi ! {modifications_count} modification(s) tracée(s) avec le Diff Avant/Après dans l'ERP.")
                     st.rerun()
 
     finally:

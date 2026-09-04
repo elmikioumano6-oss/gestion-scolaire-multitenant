@@ -1,7 +1,9 @@
 import streamlit as st
+import pandas as pd
+from datetime import datetime
 from database.db_config import SessionLocal
 from database.models import Eleve, Classe, Paiement
-from datetime import datetime
+from database.audit import log_action_erp
 
 def afficher_encaissement(niveau_actif="Collège"):
     st.subheader("💰 Gestion des Encaissements & Quittances")
@@ -17,7 +19,8 @@ def afficher_encaissement(niveau_actif="Collège"):
     try:
         classes = db.query(Classe).filter(
             Classe.school_id == school_id,
-            Classe.cycle == niveau_actif
+            Classe.cycle == niveau_actif,
+            Classe.deleted_at.is_(None)
         ).all()
 
         if not classes:
@@ -30,7 +33,8 @@ def afficher_encaissement(niveau_actif="Collège"):
         classe_id_sel = options_classes[choix_classe]
         eleves = db.query(Eleve).filter(
             Eleve.school_id == school_id,
-            Eleve.classe_id == classe_id_sel
+            Eleve.classe_id == classe_id_sel,
+            Eleve.deleted_at.is_(None)
         ).all()
 
         if not eleves:
@@ -83,7 +87,7 @@ def afficher_encaissement(niveau_actif="Collège"):
 
             st.markdown(f"### 💵 Montant Total Perçu : **{total_versement:,.0f} FCFA**")
 
-            submitted = st.form_submit_button("Valider l'encaissement global et éditer la quittance")
+            submitted = st.form_submit_button("Valider l'encaissement global et éditer la quittance", type="primary")
             if submitted:
                 if not ref_recu.strip():
                     st.error("Veuillez saisir la référence ou le numéro du reçu.")
@@ -122,9 +126,19 @@ def afficher_encaissement(niveau_actif="Collège"):
                             motif=motif_global,
                             nom_payeur=nom_payeur,
                             agent_caisse=st.session_state.get("username", "admin"),
-                            date_paiement=datetime.utcnow()
+                            date_paiement=datetime.now()
                         )
                         db.add(nouveau_paiement)
+                        
+                        # Traçabilité médico-légale de l'encaissement (Normes ERP - SOC 2 / ISO 27001)
+                        log_action_erp(
+                            module="Encaissement",
+                            action=f"Enregristrement du versement de {total_versement:,.0f} FCFA pour l'élève {eleve_actif.nom} {eleve_actif.prenom} (Reçu N° {ref_recu.strip()})",
+                            statut="Critique",
+                            valeur_avant="Aucun versement",
+                            valeur_apres=f"{total_versement:,.0f} FCFA ({mode_reglement})"
+                        )
+
                         db.commit()
 
                         st.success(f"Encaissement de **{total_versement:,.0f} FCFA** validé avec succès ! Reçu N° : **{ref_recu}**")

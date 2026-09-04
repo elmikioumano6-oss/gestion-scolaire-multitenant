@@ -1,10 +1,12 @@
 import streamlit as st
+from datetime import datetime
 from database.db_config import SessionLocal
 from database.models import Matiere
+from database.audit import log_action_erp
 
 def afficher_matieres(niveau_actif="Collège"):
     st.subheader("📚 Gestion des Matières & Coefficients")
-    st.markdown("Configuration du programme d'enseignement et des coefficients avec isolation multi-tenant stricte.")
+    st.markdown("Configuration du programme d'enseignement et des coefficients avec traçabilité ERP et gestion sécurisée.")
     st.markdown("---")
 
     school_id = st.session_state.get("school_id")
@@ -14,18 +16,27 @@ def afficher_matieres(niveau_actif="Collège"):
 
     db = SessionLocal()
     try:
+        # Vérification dynamique de la présence du Soft Delete (compatibilité schéma)
+        has_soft_delete = hasattr(Matiere, 'deleted_at')
+
         tab_liste, tab_ajout = st.tabs(["📋 Liste des Matières", "➕ Ajouter une Matière"])
 
         with tab_liste:
             st.markdown(f"### Programme Enregistré — Établissement ({niveau_actif})")
             
-            matieres = db.query(Matiere).filter(
+            # Construction de la requête avec gestion propre du Soft Delete
+            query = db.query(Matiere).filter(
                 Matiere.school_id == school_id,
                 Matiere.cycle == niveau_actif
-            ).all()
+            )
+            
+            if has_soft_delete:
+                query = query.filter(Matiere.deleted_at.is_(None))
+                
+            matieres = query.order_by(Matiere.libelle).all()
 
             if not matieres:
-                st.info(f"Aucune matière enregistrée pour le cycle **{niveau_actif}**.")
+                st.info(f"Aucune matière enregistrée ou active pour le cycle **{niveau_actif}**.")
             else:
                 # En-tête du tableau personnalisé
                 cols = st.columns([1.5, 3, 1.5, 1.5, 2])
@@ -49,18 +60,36 @@ def afficher_matieres(niveau_actif="Collège"):
                         if st.button("✏️", key=f"edit_{m.id}", help="Modifier cette matière"):
                             st.session_state[f"editing_matiere_{m.id}"] = True
                     with btn_col2:
-                        if st.button("🗑️", key=f"del_{m.id}", help="Supprimer cette matière"):
+                        action_label = "Archiver" if has_soft_delete else "Supprimer"
+                        if st.button("🗑️", key=f"del_{m.id}", help=f"{action_label} cette matière"):
                             st.session_state[f"deleting_matiere_{m.id}"] = True
 
-                    # Gestion de la suppression avec confirmation
+                    # --- GESTION DE LA SUPPRESSION / ARCHIVAGE ---
                     if st.session_state.get(f"deleting_matiere_{m.id}", False):
-                        st.warning(f"Voulez-vous vraiment supprimer la matière : **{m.libelle}** ?")
+                        msg_action = "archiver" if has_soft_delete else "supprimer"
+                        st.warning(f"Voulez-vous vraiment {msg_action} la matière : **{m.libelle}** ?")
                         col_conf1, col_conf2 = st.columns(2)
                         with col_conf1:
-                            if st.button("Oui, supprimer", key=f"confirm_del_{m.id}"):
-                                db.delete(m)
-                                db.commit()
-                                st.success(f"Matière {m.libelle} supprimée avec succès !")
+                            if st.button("Oui, confirmer", key=f"confirm_del_{m.id}", type="primary"):
+                                if has_soft_delete:
+                                    m.deleted_at = datetime.now()
+                                    db.commit()
+                                    action_log = f"Archivage (Soft Delete) de la matière {m.libelle}"
+                                else:
+                                    db.delete(m)
+                                    db.commit()
+                                    action_log = f"Suppression définitive de la matière {m.libelle}"
+                                
+                                # Traçabilité ERP
+                                log_action_erp(
+                                    module="Gestion des Matières",
+                                    action=action_log,
+                                    statut="Critique",
+                                    valeur_avant=f"Matière active ({m.libelle})",
+                                    valeur_apres="Désactivée / Supprimée"
+                                )
+                                
+                                st.success(f"Opération réussie sur la matière {m.libelle} !")
                                 st.session_state[f"deleting_matiere_{m.id}"] = False
                                 st.rerun()
                         with col_conf2:
@@ -68,7 +97,7 @@ def afficher_matieres(niveau_actif="Collège"):
                                 st.session_state[f"deleting_matiere_{m.id}"] = False
                                 st.rerun()
 
-                    # Gestion du formulaire de modification
+                    # --- GESTION DE LA MODIFICATION ---
                     if st.session_state.get(f"editing_matiere_{m.id}", False):
                         with st.form(key=f"form_edit_matiere_{m.id}"):
                             st.markdown(f"**Modification de la matière : {m.libelle}**")
@@ -80,16 +109,29 @@ def afficher_matieres(niveau_actif="Collège"):
                             idx_cycle = cycles_possibles.index(m.cycle) if m.cycle in cycles_possibles else 1
                             new_cycle = st.selectbox("Cycle", cycles_possibles, index=idx_cycle)
                             
-                            submit_edit = st.form_submit_button("Enregistrer")
+                            submit_edit = st.form_submit_button("Enregistrer les modifications", type="primary")
                             cancel_edit = st.form_submit_button("Annuler")
 
                             if submit_edit:
-                                m.code = new_code
+                                ancienne_valeur = f"Libellé: {m.libelle} | Coef: {m.coefficient} | Cycle: {m.cycle}"
+                                nouvelle_valeur = f"Libellé: {new_libelle} | Coef: {new_coef} | Cycle: {new_cycle}"
+                                
+                                m.code = new_code.upper()
                                 m.libelle = new_libelle
                                 m.coefficient = new_coef
                                 m.cycle = new_cycle
                                 db.commit()
-                                st.success("Matière modifiée avec succès !")
+                                
+                                # Traçabilité Diff Avant/Après
+                                log_action_erp(
+                                    module="Gestion des Matières",
+                                    action=f"Modification de la matière {new_libelle}",
+                                    statut="Critique",
+                                    valeur_avant=ancienne_valeur,
+                                    valeur_apres=nouvelle_valeur
+                                )
+                                
+                                st.success("Matière modifiée et tracée avec succès !")
                                 st.session_state[f"editing_matiere_{m.id}"] = False
                                 st.rerun()
                             if cancel_edit:
@@ -105,7 +147,7 @@ def afficher_matieres(niveau_actif="Collège"):
                 coefficient_m = st.number_input("Coefficient", min_value=0.5, value=2.0, step=0.5)
                 cycle_m = st.selectbox("Cycle d'enseignement", ["Primaire", "Collège", "Lycée"], index=["Primaire", "Collège", "Lycée"].index(niveau_actif) if niveau_actif in ["Primaire", "Collège", "Lycée"] else 1)
                 
-                submitted = st.form_submit_button("Ajouter la matière")
+                submitted = st.form_submit_button("Ajouter la matière", type="primary")
                 if submitted:
                     if not libelle_m:
                         st.error("L'intitulé de la matière est obligatoire.")
@@ -119,7 +161,17 @@ def afficher_matieres(niveau_actif="Collège"):
                         )
                         db.add(nouvelle_matiere)
                         db.commit()
-                        st.success(f"Matière '{libelle_m}' ajoutée avec succès !")
+                        
+                        # Traçabilité de la création
+                        log_action_erp(
+                            module="Gestion des Matières",
+                            action=f"Création de la matière {libelle_m} (Coef: {coefficient_m})",
+                            statut="Succès",
+                            valeur_avant="Inexistante",
+                            valeur_apres=f"Active pour le cycle {cycle_m}"
+                        )
+                        
+                        st.success(f"Matière '{libelle_m}' ajoutée et tracée avec succès !")
                         st.rerun()
     finally:
         db.close()

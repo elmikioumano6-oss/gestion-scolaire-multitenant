@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
 from database.db_config import SessionLocal
-from database.models import Eleve, Classe, User, School, Paiement
-from sqlalchemy import func
+from database.models import Eleve, Classe, User, School, Paiement, Depense, ActivityLog
+from sqlalchemy import func, desc
 
 def afficher_accueil():
     # --- 1. RÉCUPÉRATION DYNAMIQUE DE L'ÉCOLE ACTIVE ---
@@ -36,43 +36,45 @@ def afficher_accueil():
             unsafe_allow_html=True,
         )
 
-        st.subheader("📊 Tableau de Bord Général & Pilotage Exécutif")
-        st.markdown("Synthèse globale des indicateurs administratifs, pédagogiques et financiers de l'établissement.")
+        st.subheader("📊 Tableau de Bord ERP & Pilotage Exécutif")
+        st.markdown("Synthèse analytique en temps réel : indicateurs académiques, santé financière et flux d'audit de sécurité.")
         st.markdown("---")
 
-        # --- 3. FILTRAGE DES DONNÉES PAR SCHOOL_ID ---
-        if is_super_admin:
-            total_eleves = db.query(Eleve).count()
-            total_classes = db.query(Classe).count()
-            total_profs = db.query(User).filter(User.role == 'prof').count() if hasattr(User, 'role') else 0
-            total_utilisateurs = db.query(User).count()
-        else:
-            total_eleves = db.query(Eleve).filter(Eleve.school_id == school_id).count() if school_id else 0
-            total_classes = db.query(Classe).filter(Classe.school_id == school_id).count() if school_id else 0
-            total_profs = db.query(User).filter(User.school_id == school_id, User.role == 'prof').count() if school_id and hasattr(User, 'role') else 0
-            total_utilisateurs = db.query(User).filter(User.school_id == school_id).count() if school_id else 0
-
-        total_recettes = 0.0
-        total_attendu = total_eleves * 65000  
+        # --- 3. FILTRAGE DES DONNÉES (AVEC SOFT DELETE) ---
+        q_eleves = db.query(Eleve).filter(Eleve.deleted_at.is_(None))
+        q_classes = db.query(Classe).filter(Classe.deleted_at.is_(None))
+        q_users = db.query(User)
         
-        # Calcul sécurisé des recettes avec isolation multi-tenant via SQLAlchemy
-        try:
-            query_paiements = db.query(Paiement)
-            if not is_super_admin and school_id:
-                query_paiements = query_paiements.filter(Paiement.school_id == school_id)
-            
-            result_paiements = query_paiements.with_entities(func.sum(Paiement.montant)).scalar()
-            if result_paiements:
-                total_recettes = float(result_paiements)
-        except Exception:
-            total_recettes = 0.0
+        if not is_super_admin and school_id:
+            q_eleves = q_eleves.filter(Eleve.school_id == school_id)
+            q_classes = q_classes.filter(Classe.school_id == school_id)
+            q_users = q_users.filter(User.school_id == school_id)
 
+        total_eleves = q_eleves.count()
+        total_classes = q_classes.count()
+        total_utilisateurs = q_users.count()
+        total_profs = q_users.filter(User.role == 'prof').count() if hasattr(User, 'role') else 0
+
+        # --- CALCULS FINANCIERS (RECETTES, DÉPENSES, SOLDE NET) ---
+        q_paiements = db.query(Paiement)
+        q_depenses = db.query(Depense)
+        
+        if not is_super_admin and school_id:
+            q_paiements = q_paiements.filter(Paiement.school_id == school_id)
+            q_depenses = q_depenses.filter(Depense.school_id == school_id)
+
+        total_recettes = q_paiements.with_entities(func.sum(Paiement.montant)).scalar() or 0.0
+        total_depenses = q_depenses.with_entities(func.sum(Depense.montant)).scalar() or 0.0
+        solde_net = float(total_recettes) - float(total_depenses)
+        
+        # Estimation basique du total attendu
+        total_attendu = total_eleves * 65000  
         taux_recouvrement = (total_recettes / total_attendu * 100) if total_attendu > 0 else 0.0
 
         # --- 4. INDICATEURS CLÉS DE PERFORMANCE (KPIs) ---
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("👨‍🎓 Total Élèves Inscrits", f"{total_eleves}", delta="Actifs")
+            st.metric("👨‍🎓 Élèves Actifs", f"{total_eleves}", delta="Inscrits")
         with col2:
             st.metric("👩‍🏫 Corps Professoral", f"{total_profs if total_profs > 0 else 'N/D'}", delta="Enseignants")
         with col3:
@@ -82,63 +84,80 @@ def afficher_accueil():
 
         st.markdown("---")
 
-        # --- 5. SECTION FINANCIÈRE & ANALYTIQUE ---
+        # --- 5. SECTION FINANCIÈRE & RÉPARTITION ---
         col_f1, col_f2 = st.columns(2)
 
         with col_f1:
-            st.markdown("### 💰 Synthèse Trésorerie & Recouvrement")
-            st.metric("Recettes Globales Encaissées", f"{total_recettes:,.0f} FCFA", delta=f"Taux global : {taux_recouvrement:.1f}%")
+            st.markdown("### 💰 Santé Financière & Trésorerie")
+            
+            st.metric("🟢 Recettes Globales", f"{total_recettes:,.0f} FCFA")
+            st.metric("🔴 Dépenses Opérationnelles", f"- {total_depenses:,.0f} FCFA")
+            st.metric("💶 Solde Net en Caisse", f"{solde_net:,.0f} FCFA", delta="Disponible", delta_color="normal" if solde_net >= 0 else "inverse")
             
             st.markdown("Progression annuelle des encaissements :")
             st.progress(min(max(int(taux_recouvrement), 0), 100) / 100.0)
 
-            st.markdown("""
-                <div style="background: rgba(217, 119, 6, 0.1); border-left: 4px solid #D97706; padding: 12px; border-radius: 6px; margin-top: 15px;">
-                    <small style="color: #FBBF24; font-weight: 600;">ℹ️ Conseil de gestion :</small><br>
-                    <span style="color: #E2E8F0; font-size: 0.85rem;">Surveillez régulièrement le module 'Soldes & Impayés' pour maintenir un taux de recouvrement optimal au sein de l'établissement.</span>
-                </div>
-            """, unsafe_allow_html=True)
-
         with col_f2:
             st.markdown("### 📈 Répartition des Effectifs par Classe")
-            if school_id or is_super_admin:
-                query_classes = db.query(Classe)
-                if not is_super_admin and school_id:
-                    query_classes = query_classes.filter(Classe.school_id == school_id)
-                classes_list = query_classes.all()
+            classes_list = q_classes.all()
+            
+            if classes_list:
+                effectifs_data = []
+                for c in classes_list:
+                    nom_c = getattr(c, 'libelle', getattr(c, 'nom', f"Classe {c.id}"))
+                    nb_e = db.query(Eleve).filter(Eleve.classe_id == c.id, Eleve.deleted_at.is_(None)).count()
+                    effectifs_data.append({"Classe": nom_c, "Élèves": nb_e})
                 
-                if classes_list:
-                    effectifs_data = []
-                    for c in classes_list:
-                        nom_c = getattr(c, 'libelle', getattr(c, 'nom', f"Classe {c.id}"))
-                        nb_e = db.query(Eleve).filter(Eleve.classe_id == c.id).count()
-                        effectifs_data.append({"Classe": nom_c, "Élèves": nb_e})
-                    
-                    df_eff = pd.DataFrame(effectifs_data)
-                    st.bar_chart(df_eff.set_index("Classe"))
-                else:
-                    st.info("Aucune classe enregistrée pour générer le graphique.")
+                df_eff = pd.DataFrame(effectifs_data)
+                st.bar_chart(df_eff.set_index("Classe"))
             else:
-                st.info("Veuillez sélectionner un établissement.")
+                st.info("Aucune classe enregistrée pour générer le graphique.")
 
         st.markdown("---")
 
-        # --- 6. ACCÈS RAPIDE AUX MODULES STRATÉGIQUES ---
-        st.markdown("### ⚡ Raccourcis Opérationnels Fréquents")
+        # --- 6. FLUX D'AUDIT DE SÉCURITÉ & RACCOURCIS ---
+        col_a1, col_a2 = st.columns([1.5, 1])
         
-        col_r1, col_r2, col_r3, col_r4 = st.columns(4)
-        with col_r1:
+        with col_a1:
+            st.markdown("### 🛡️ Journal d'Activité (Actions Récentes)")
+            
+            q_logs = db.query(ActivityLog)
+            if not is_super_admin and school_id:
+                q_logs = q_logs.filter(ActivityLog.school_id == school_id)
+                
+            derniers_logs = q_logs.order_by(desc(ActivityLog.timestamp)).limit(5).all()
+            
+            if derniers_logs:
+                for log in derniers_logs:
+                    heure = log.timestamp.strftime("%H:%M") if log.timestamp else "N/D"
+                    couleur_statut = "#EF4444" if log.statut == "Critique" else "#10B981"
+                    
+                    st.markdown(
+                        f"""
+                        <div style="border-left: 3px solid {couleur_statut}; padding-left: 10px; margin-bottom: 8px; background-color: rgba(255,255,255,0.02); padding: 8px; border-radius: 4px;">
+                            <span style="color: #94A3B8; font-size: 0.85rem;">{heure}</span> - 
+                            <b>{log.username}</b> 
+                            <span style="color: {couleur_statut}; font-size: 0.85rem; padding: 2px 6px; border-radius: 10px; border: 1px solid {couleur_statut}40; margin-left: 5px;">{log.module}</span><br>
+                            <span style="font-size: 0.95rem;">{log.action}</span>
+                        </div>
+                        """, unsafe_allow_html=True
+                    )
+            else:
+                st.info("Aucune activité récente enregistrée dans le journal d'audit.")
+
+        with col_a2:
+            st.markdown("### ⚡ Raccourcis Opérationnels")
             if st.button("➕ Inscription Élève", use_container_width=True):
                 st.info("Utilisez le menu latéral 'Inscription Élèves'.")
-        with col_r2:
             if st.button("📝 Saisie des Notes", use_container_width=True):
                 st.info("Utilisez le menu latéral 'Saisie des notes'.")
-        with col_r3:
             if st.button("💵 Encaissement", use_container_width=True):
                 st.info("Utilisez le menu latéral 'Encaissement'.")
-        with col_r4:
-            if st.button("💬 Centre Messages", use_container_width=True):
-                st.info("Utilisez le menu latéral 'Messages'.")
+            if st.button("📉 Saisir une Dépense", use_container_width=True):
+                st.info("Utilisez le menu latéral 'Gestion des Dépenses'.")
 
     finally:
         db.close()
+
+# Alias de compatibilité
+afficher_accueil = afficher_accueil

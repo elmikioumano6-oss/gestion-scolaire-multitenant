@@ -22,6 +22,8 @@ def afficher_stats_encaissements():
     try:
         # Récupération des classes du cycle pour information/filtrage
         classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours)
+        if hasattr(Classe, 'deleted_at'):
+            classes_query = classes_query.filter(Classe.deleted_at.is_(None))
         if not is_super_admin and school_id:
             classes_query = classes_query.filter(Classe.school_id == school_id)
         classes_cycle = classes_query.all()
@@ -29,8 +31,10 @@ def afficher_stats_encaissements():
         classes_dict = {c.id: c for c in classes_cycle}
         classes_ids = list(classes_dict.keys())
 
-        # Récupération des élèves de l'école (filtrés par classes du cycle si elles existent, sinon tous les élèves de l'école)
+        # Récupération des élèves
         eleves_query = db.query(Eleve)
+        if hasattr(Eleve, 'deleted_at'):
+            eleves_query = eleves_query.filter(Eleve.deleted_at.is_(None))
         if not is_super_admin and school_id:
             eleves_query = eleves_query.filter(Eleve.school_id == school_id)
         
@@ -45,23 +49,34 @@ def afficher_stats_encaissements():
 
         for eleve in eleves:
             classe = classes_dict.get(eleve.classe_id) if eleve.classe_id else None
-            frais_scol = getattr(classe, 'frais_scolarite', 65000.0) or 65000.0
-            frais_inscr = getattr(classe, 'frais_inscription', 0.0) or 0.0
-            total_du = frais_scol + frais_inscr
             
-            # Somme des paiements réels de l'élève depuis la table Paiement
+            # Récupération des frais de la classe
+            frais_scol = float(getattr(classe, 'frais_scolarite', 0.0) or 0.0)
+            frais_inscr = float(getattr(classe, 'frais_inscription', 0.0) or 0.0)
+            frais_coges = float(getattr(classe, 'frais_coges', 0.0) or 0.0)
+            
+            # S'il n'y a pas de frais configurés sur la classe, on prend une base de secours, sinon la somme brute
+            frais_brut_total = frais_scolarite_base = (frais_scol + frais_inscr + frais_coges) if (frais_scol + frais_inscr + frais_coges) > 0 else 65000.0
+            
+            # Prise en compte de la réduction personnelle de l'élève
+            reduction = float(getattr(eleve, 'montant_reduction', 0.0) or 0.0)
+            total_du_net = max(0.0, frais_brut_total - reduction)
+            
+            # Somme des paiements réels de l'élève
             paiements_eleve = db.query(Paiement).filter(Paiement.eleve_id == eleve.id).all()
-            montant_paye = sum(p.montant for p in paiements_eleve) if paiements_eleve else 0.0
+            montant_paye = sum(float(p.montant) for p in paiements_eleve) if paiements_eleve else 0.0
             
-            total_attendu += total_du
+            total_attendu += total_du_net
             total_recouvre += montant_paye
+
+            solde_restant = total_du_net - montant_paye
 
             data.append({
                 "Élève": f"{getattr(eleve, 'nom', '')} {getattr(eleve, 'prenom', '')}".strip() or "Élève",
                 "Classe": classe.libelle if classe else "Non assignée",
-                "Montant Dû (FCFA)": total_du,
-                "Montant Payé (FCFA)": montant_paye,
-                "Solde Restant (FCFA)": max(0.0, total_du - montant_paye)
+                "Montant Dû (Net)": total_du_net,
+                "Montant Payé": montant_paye,
+                "Solde Restant": solde_restant
             })
 
         reste_a_recouvrer = max(0.0, total_attendu - total_recouvre)
@@ -89,5 +104,5 @@ def afficher_stats_encaissements():
     finally:
         db.close()
 
-# Alias de compatibilité exhaustive pour le routeur app.py
+# Alias de compatibilité
 afficher_stats_encaissements = afficher_stats_encaissements

@@ -2,7 +2,8 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from database.db_config import SessionLocal
-from database.models import School, ActivityLog
+from database.models import School
+from database.audit import log_action_erp
 
 def afficher_gestion_utilisateurs():
     st.subheader("👥 Gestion des Comptes Utilisateurs & Rôles")
@@ -62,7 +63,7 @@ def afficher_gestion_utilisateurs():
                     role_attribue = st.selectbox("Rôle / Fonction", ["directeur", "enseignant", "econome", "surveillant", "super_admin"])
                     cycle_associe = st.selectbox("Cycle d'affectation", ["Collège", "Lycée", "Tous les cycles"])
 
-                submitted_user = st.form_submit_button("💾 Créer le Compte Utilisateur")
+                submitted_user = st.form_submit_button("💾 Créer le Compte Utilisateur", type="primary")
                 if submitted_user:
                     if not nouveau_user or not mot_de_passe:
                         st.error("⚠️ Veuillez renseigner l'identifiant et le mot de passe.")
@@ -80,17 +81,16 @@ def afficher_gestion_utilisateurs():
                                 st.session_state["users_data"][key_store] = []
                             st.session_state["users_data"][key_store].append(nouveau_compte)
 
-                            target_school_id = school_id or 1
-                            db.add(ActivityLog(
-                                school_id=target_school_id,
-                                timestamp=datetime.utcnow(),
-                                username=st.session_state.get("username", "admin"),
-                                action=f"Création de compte utilisateur : {nouveau_user} ({role_attribue})",
+                            # Traçabilité médico-légale ERP (SOC 2 / ISO 27001) via l'utilitaire centralisé
+                            log_action_erp(
                                 module="Gestion Comptes",
-                                statut="Succès"
-                            ))
-                            db.commit()
-                            st.success(f"✅ Le compte de **{nouveau_user}** avec le rôle **{role_attribue}** a été créé avec succès !")
+                                action=f"Création de compte utilisateur : {nouveau_user} (Rôle: {role_attribue}, Cycle: {cycle_associe})",
+                                statut="Critique",
+                                valeur_avant="Inexistant",
+                                valeur_apres=f"Compte actif [{role_attribue}]"
+                            )
+
+                            st.success(f"✅ Le compte de **{nouveau_user}** avec le rôle **{role_attribue}** a été créé et tracé avec succès !")
 
     finally:
         db.close()

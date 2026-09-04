@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, Boolean, Date, DateTime
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, Boolean, Date, DateTime, Text
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from database.db_config import Base
@@ -15,6 +15,7 @@ class School(Base):
     logo = Column(String(255), nullable=True)
     
     actif = Column(Boolean, default=True)
+    deleted_at = Column(DateTime, nullable=True)  # Soft Delete ERP
     date_expiration = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
 
@@ -53,6 +54,8 @@ class Classe(Base):
     frais_cantine = Column(Float, default=0.0)
     frais_coges = Column(Float, default=0.0)
     
+    deleted_at = Column(DateTime, nullable=True)  # Soft Delete ERP
+
     school = relationship("School", back_populates="classes")
     eleves = relationship("Eleve", back_populates="classe", cascade="all, delete-orphan")
 
@@ -81,6 +84,8 @@ class Eleve(Base):
     montant_reduction = Column(Float, default=0.0)
     document_justificatif = Column(String, nullable=True)
     parent_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    deleted_at = Column(DateTime, nullable=True)  # Soft Delete ERP
 
     school = relationship("School", back_populates="eleves")
     classe = relationship("Classe", back_populates="eleves")
@@ -99,6 +104,7 @@ class User(Base):
     
     derniere_activite = Column(DateTime, nullable=True)
     changer_mdp_requis = Column(Boolean, default=True)
+    deleted_at = Column(DateTime, nullable=True)  # Soft Delete ERP
 
     enseignant_id = Column(Integer, ForeignKey("enseignants.id"), nullable=True)
     eleve_id = Column(Integer, ForeignKey("eleves.id"), nullable=True)
@@ -254,7 +260,7 @@ class PlanificationEvaluation(Base):
     matiere = relationship("Matiere")
 
 class ActivityLog(Base):
-    __tablename__ = "activity_logs"
+    __tablename__ = "journal_activites"
     
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=True)
@@ -263,8 +269,23 @@ class ActivityLog(Base):
     action = Column(String, nullable=True)
     module = Column(String, nullable=True)
     statut = Column(String, default="Succès")
+    
+    ip_address = Column(String(50), default="127.0.0.1")
+    session_id = Column(String(100), default="SES-PROD-01")
+    valeur_avant = Column(Text, nullable=True)
+    valeur_apres = Column(Text, nullable=True)
 
 JournalActivite = ActivityLog
+
+class SystemLog(Base):
+    __tablename__ = "system_logs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(DateTime, default=datetime.now)
+    level = Column(String(50), default="ERROR")
+    source = Column(String(100), nullable=True)
+    message = Column(Text, nullable=False)
+    stacktrace = Column(Text, nullable=True)
 
 class Paiement(Base):
     __tablename__ = "paiements"

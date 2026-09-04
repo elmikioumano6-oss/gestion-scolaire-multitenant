@@ -41,6 +41,12 @@ def afficher_espace_inspection():
             classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours)
             matieres_query = db.query(Matiere).filter(Matiere.cycle == cycle_en_cours)
             
+            # Prise en compte optionnelle du Soft Delete si présent dans le modèle
+            if hasattr(Classe, 'deleted_at'):
+                classes_query = classes_query.filter(Classe.deleted_at.is_(None))
+            if hasattr(Matiere, 'deleted_at'):
+                matieres_query = matieres_query.filter(Matiere.deleted_at.is_(None))
+
             if not is_super_admin and school_id:
                 classes_query = classes_query.filter(Classe.school_id == school_id)
                 matieres_query = matieres_query.filter(Matiere.school_id == school_id)
@@ -137,9 +143,19 @@ def afficher_espace_inspection():
             else:
                 data_global = []
                 for ecole in ecoles:
-                    nb_classes = db.query(Classe).filter(Classe.school_id == ecole.id, Classe.cycle == cycle_en_cours).count()
-                    classes_ids = [c.id for c in db.query(Classe).filter(Classe.school_id == ecole.id, Classe.cycle == cycle_en_cours).all()]
-                    nb_eleves = db.query(Eleve).filter(Eleve.school_id == ecole.id, Eleve.classe_id.in_(classes_ids)).count() if classes_ids else 0
+                    q_c = db.query(Classe).filter(Classe.school_id == ecole.id, Classe.cycle == cycle_en_cours)
+                    if hasattr(Classe, 'deleted_at'):
+                        q_c = q_c.filter(Classe.deleted_at.is_(None))
+                    classes_ids = [c.id for c in q_c.all()]
+                    nb_classes = len(classes_ids)
+
+                    q_e = db.query(Eleve).filter(Eleve.school_id == ecole.id)
+                    if hasattr(Eleve, 'deleted_at'):
+                        q_e = q_e.filter(Eleve.deleted_at.is_(None))
+                    if classes_ids:
+                        nb_eleves = q_e.filter(Eleve.classe_id.in_(classes_ids)).count()
+                    else:
+                        nb_eleves = 0
 
                     data_global.append({
                         "Établissement": getattr(ecole, 'nom', 'École'),
@@ -166,8 +182,6 @@ def afficher_espace_inspection():
     finally:
         db.close()
 
-# Définition explicite des alias pour garantir la compatibilité avec le routeur app.py
+# Définition explicite des alias pour garantir une compatibilité totale avec le routeur app.py
 def afficher_espace_inspection_academique():
     afficher_espace_inspection()
-
-afficher_espace_inspection = afficher_espace_inspection

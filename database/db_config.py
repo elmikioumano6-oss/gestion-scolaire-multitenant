@@ -1,4 +1,5 @@
-from sqlalchemy import create_engine
+import os
+from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import streamlit as st
@@ -6,10 +7,8 @@ import streamlit as st
 # Récupération sécurisée depuis st.secrets avec repli local SQLite si Supabase est inaccessible
 try:
     DATABASE_URL = st.secrets["DB_URL"]
-    # Pour PostgreSQL/Supabase, on utilise connect_timeout
     connect_args = {"connect_timeout": 10}
 except Exception:
-    # Repli automatique sur SQLite local en cas de coupure 3G ou d'absence de secrets
     DATABASE_URL = "sqlite:///database.db"
     connect_args = {"timeout": 15}
 
@@ -33,12 +32,37 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 def init_db():
-    # Importation explicite de tous les modèles (y compris ActivityLog) pour la création des tables
-    from database.models import School, User, ActivityLog
+    # Importation explicite de tous les modèles pour la création des tables
+    from database.models import (
+        School, User, Classe, Eleve, Matiere, CahierTexte, 
+        Programme, Presence, Note, Enseignant, Affectation, 
+        EmploiDuTemps, EcheancePaiement, PlanificationEvaluation, 
+        ActivityLog, SystemLog, Paiement, Depense
+    )
     import bcrypt
     
+    # 1. Création initiale des tables de la base de données
     Base.metadata.create_all(bind=engine)
     
+    # 2. Migrations automatiques exécutées AVANT toute requête ORM (évite les erreurs de colonnes manquantes)
+    migrations = [
+        "ALTER TABLE users ADD COLUMN changer_mdp_requis BOOLEAN DEFAULT 1;",
+        "ALTER TABLE cahiers_texte ADD COLUMN duree FLOAT DEFAULT 1.0;",
+        "ALTER TABLE users ADD COLUMN deleted_at TIMESTAMP;",
+        "ALTER TABLE schools ADD COLUMN deleted_at TIMESTAMP;",
+        "ALTER TABLE classes ADD COLUMN deleted_at TIMESTAMP;",
+        "ALTER TABLE eleves ADD COLUMN deleted_at TIMESTAMP;"
+    ]
+
+    with engine.connect() as conn:
+        for mig in migrations:
+            try:
+                conn.execute(text(mig))
+                conn.commit()
+            except Exception:
+                conn.rollback() # Ignore si la colonne existe déjà
+
+    # 3. Initialisation du Super Administrateur et de l'établissement par défaut
     db = SessionLocal()
     try:
         super_admin_existe = db.query(User).filter(User.role == 'super_admin').first()
@@ -62,7 +86,8 @@ def init_db():
                 username="admin",
                 password=hashed_pw,
                 role="super_admin",
-                school_id=ecole_defaut.id
+                school_id=ecole_defaut.id,
+                changer_mdp_requis=False
             )
             db.add(admin_user)
             db.commit()

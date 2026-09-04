@@ -1,10 +1,12 @@
 import streamlit as st
+from datetime import datetime
 from database.db_config import SessionLocal
 from database.models import Classe
+from database.audit import log_action_erp
 
 def afficher_classes(niveau_actif="Collège"):
     st.subheader("🏫 Gestion des Classes & Grilles Tarifs")
-    st.markdown("Configuration des classes et des frais associés avec isolation multi-tenant stricte.")
+    st.markdown("Configuration des classes et des frais associés avec traçabilité ERP et archivage sécurisé.")
     st.markdown("---")
 
     school_id = st.session_state.get("school_id")
@@ -19,13 +21,15 @@ def afficher_classes(niveau_actif="Collège"):
         with tab_liste:
             st.markdown(f"### Classes et Grilles Tarifs — Établissement ({niveau_actif})")
             
+            # Filtre pour exclure les classes supprimées logiquement (Soft Delete)
             classes = db.query(Classe).filter(
                 Classe.school_id == school_id,
-                Classe.cycle == niveau_actif
-            ).all()
+                Classe.cycle == niveau_actif,
+                Classe.deleted_at.is_(None)
+            ).order_by(Classe.libelle).all()
 
             if not classes:
-                st.info(f"Aucune classe enregistrée pour le cycle **{niveau_actif}** dans cet établissement.")
+                st.info(f"Aucune classe enregistrée ou active pour le cycle **{niveau_actif}** dans cet établissement.")
             else:
                 cols = st.columns([1.8, 1.2, 1.3, 1.3, 1.3, 1.3, 1.3, 2])
                 cols[0].markdown("**Classe**")
@@ -50,20 +54,32 @@ def afficher_classes(niveau_actif="Collège"):
                     
                     btn_col1, btn_col2 = col[7].columns(2)
                     with btn_col1:
-                        if st.button("✏️", key=f"edit_classe_{c.id}", help="Modifier"):
+                        if st.button("✏️", key=f"edit_classe_{c.id}", help="Modifier les tarifs"):
                             st.session_state[f"editing_classe_{c.id}"] = True
                     with btn_col2:
-                        if st.button("🗑️", key=f"del_classe_{c.id}", help="Supprimer"):
+                        if st.button("🗑️", key=f"del_classe_{c.id}", help="Archiver (Soft Delete)"):
                             st.session_state[f"deleting_classe_{c.id}"] = True
 
+                    # --- GESTION DU SOFT DELETE ---
                     if st.session_state.get(f"deleting_classe_{c.id}", False):
-                        st.warning(f"Supprimer la classe **{c.libelle}** ?")
+                        st.warning(f"Archiver la classe **{c.libelle}** ? (Elle n'apparaîtra plus mais ses données historiques seront conservées)")
                         c_del1, c_del2 = st.columns(2)
                         with c_del1:
-                            if st.button("Confirmer", key=f"conf_del_cls_{c.id}"):
-                                db.delete(c)
+                            if st.button("Confirmer l'archivage", key=f"conf_del_cls_{c.id}", type="primary"):
+                                # Application du Soft Delete au lieu d'une suppression brute
+                                c.deleted_at = datetime.now()
                                 db.commit()
-                                st.success("Classe supprimée !")
+                                
+                                # Traçabilité
+                                log_action_erp(
+                                    module="Gestion des Classes",
+                                    action=f"Archivage (Soft Delete) de la classe {c.libelle}",
+                                    statut="Critique",
+                                    valeur_avant="Active",
+                                    valeur_apres="Archivée"
+                                )
+                                
+                                st.success("Classe archivée avec succès !")
                                 st.session_state[f"deleting_classe_{c.id}"] = False
                                 st.rerun()
                         with c_del2:
@@ -71,9 +87,10 @@ def afficher_classes(niveau_actif="Collège"):
                                 st.session_state[f"deleting_classe_{c.id}"] = False
                                 st.rerun()
 
+                    # --- GESTION DE LA MODIFICATION TARIFAIRE ---
                     if st.session_state.get(f"editing_classe_{c.id}", False):
                         with st.form(key=f"form_edit_cls_{c.id}"):
-                            st.markdown(f"**Modifier : {c.libelle}**")
+                            st.markdown(f"**Modifier la grille tarifaire : {c.libelle}**")
                             new_lib = st.text_input("Nom de la classe", value=c.libelle)
                             new_cap = st.number_input("Capacité", value=int(c.capacite or 30))
                             new_scol = st.number_input("Scolarité", value=float(c.frais_scolarite or 0.0))
@@ -82,10 +99,13 @@ def afficher_classes(niveau_actif="Collège"):
                             new_cant = st.number_input("Cantine", value=float(c.frais_cantine or 0.0))
                             new_coges = st.number_input("COGES", value=float(getattr(c, 'frais_coges', 0.0)))
                             
-                            sub_edit = st.form_submit_button("Enregistrer")
+                            sub_edit = st.form_submit_button("Enregistrer les modifications", type="primary")
                             canc_edit = st.form_submit_button("Annuler")
 
                             if sub_edit:
+                                ancienne_valeur = f"Scol:{c.frais_scolarite}F | Insc:{c.frais_inscription}F | Transp:{c.frais_transport}F"
+                                nouvelle_valeur = f"Scol:{new_scol}F | Insc:{new_insc}F | Transp:{new_trans}F"
+                                
                                 c.libelle = new_lib
                                 c.capacite = new_cap
                                 c.frais_scolarite = new_scol
@@ -94,7 +114,17 @@ def afficher_classes(niveau_actif="Collège"):
                                 c.frais_cantine = new_cant
                                 c.frais_coges = new_coges
                                 db.commit()
-                                st.success("Modifications enregistrées !")
+                                
+                                # Traçabilité financière stricte du Diff Avant/Après
+                                log_action_erp(
+                                    module="Gestion des Classes",
+                                    action=f"Modification des tarifs pour la classe {new_lib}",
+                                    statut="Critique",
+                                    valeur_avant=ancienne_valeur,
+                                    valeur_apres=nouvelle_valeur
+                                )
+                                
+                                st.success("Modifications tarifaires enregistrées et tracées !")
                                 st.session_state[f"editing_classe_{c.id}"] = False
                                 st.rerun()
                             if canc_edit:
@@ -113,7 +143,7 @@ def afficher_classes(niveau_actif="Collège"):
                 cant_c = st.number_input("Frais de cantine", min_value=0.0, value=0.0, step=1000.0)
                 coges_c = st.number_input("Frais COGES", min_value=0.0, value=0.0, step=500.0)
                 
-                submitted = st.form_submit_button("Ajouter la classe")
+                submitted = st.form_submit_button("Ajouter la classe", type="primary")
                 if submitted:
                     if not libelle_c:
                         st.error("Le nom de la classe est obligatoire.")
@@ -132,7 +162,17 @@ def afficher_classes(niveau_actif="Collège"):
                         )
                         db.add(nouvelle_classe)
                         db.commit()
-                        st.success(f"Classe '{libelle_c}' ajoutée avec succès !")
+                        
+                        # Traçabilité de création
+                        log_action_erp(
+                            module="Gestion des Classes",
+                            action=f"Création de la classe {libelle_c} (Capacité: {capacite_c})",
+                            statut="Succès",
+                            valeur_avant="Inexistante",
+                            valeur_apres=f"Scolarité fixée à {scol_c:,.0f} F"
+                        )
+                        
+                        st.success(f"Classe '{libelle_c}' ajoutée et tracée avec succès !")
                         st.rerun()
     finally:
         db.close()

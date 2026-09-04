@@ -1,11 +1,12 @@
 import streamlit as st
+from datetime import datetime
 from database.db_config import SessionLocal
 from database.models import Eleve, Classe, Paiement
-from datetime import datetime
+from database.audit import log_action_erp
 
 def afficher_eleves(niveau_actif="Collège"):
     st.subheader("🎓 Inscription et Gestion des Élèves")
-    st.markdown("Enregistrement et suivi des effectifs scolaires avec isolation multi-tenant stricte.")
+    st.markdown("Enregistrement et suivi des effectifs scolaires avec isolation multi-tenant stricte et traçabilité ERP.")
     st.markdown("---")
 
     school_id = st.session_state.get("school_id")
@@ -20,9 +21,11 @@ def afficher_eleves(niveau_actif="Collège"):
         with tab_liste:
             st.markdown(f"### Effectifs Enregistrés — Établissement ({niveau_actif})")
             
+            # Exclusion des élèves supprimés logiquement (Soft Delete)
             eleves = db.query(Eleve).join(Classe).filter(
                 Eleve.school_id == school_id,
-                Classe.cycle == niveau_actif
+                Classe.cycle == niveau_actif,
+                Eleve.deleted_at.is_(None)
             ).all()
 
             if not eleves:
@@ -52,18 +55,29 @@ def afficher_eleves(niveau_actif="Collège"):
                         if st.button("✏️", key=f"edit_eleve_{e.id}", help="Modifier cet élève"):
                             st.session_state[f"editing_eleve_{e.id}"] = True
                     with btn_col2:
-                        if st.button("🗑️", key=f"del_eleve_{e.id}", help="Supprimer cet élève"):
+                        if st.button("🗑️", key=f"del_eleve_{e.id}", help="Archiver (Soft Delete) cet élève"):
                             st.session_state[f"deleting_eleve_{e.id}"] = True
 
-                    # Gestion de la suppression avec confirmation
+                    # Gestion de la suppression logique (Soft Delete) avec confirmation
                     if st.session_state.get(f"deleting_eleve_{e.id}", False):
-                        st.warning(f"Voulez-vous vraiment supprimer l'élève **{e.nom} {e.prenom}** ?")
+                        st.warning(f"Voulez-vous vraiment archiver l'élève **{e.nom} {e.prenom}** ?")
                         c_del1, c_del2 = st.columns(2)
                         with c_del1:
-                            if st.button("Confirmer", key=f"conf_del_el_{e.id}"):
-                                db.delete(e)
+                            if st.button("Confirmer l'archivage", key=f"conf_del_el_{e.id}", type="primary"):
+                                # Application du Soft Delete au lieu de db.delete(e)
+                                e.deleted_at = datetime.now()
                                 db.commit()
-                                st.success("Élève supprimé avec succès !")
+
+                                # Traçabilité médico-légale ERP
+                                log_action_erp(
+                                    module="Inscription Élèves",
+                                    action=f"Archivage (Soft Delete) de l'élève {e.nom} {e.prenom} (Mat: {e.matricule})",
+                                    statut="Critique",
+                                    valeur_avant="Actif",
+                                    valeur_apres="Archivé / Supprimé logiquement"
+                                )
+
+                                st.success("Élève archivé avec succès !")
                                 st.session_state[f"deleting_eleve_{e.id}"] = False
                                 st.rerun()
                         with c_del2:
@@ -78,7 +92,8 @@ def afficher_eleves(niveau_actif="Collège"):
                             
                             classes_dispo = db.query(Classe).filter(
                                 Classe.school_id == school_id,
-                                Classe.cycle == niveau_actif
+                                Classe.cycle == niveau_actif,
+                                Classe.deleted_at.is_(None)
                             ).all()
                             options_classes = {cl.libelle: cl.id for cl in classes_dispo}
                             current_classe_name = e.classe.libelle if e.classe and e.classe.libelle in options_classes else list(options_classes.keys())[0] if options_classes else ""
@@ -101,13 +116,15 @@ def afficher_eleves(niveau_actif="Collège"):
                             
                             new_montant_red = st.number_input("Montant de la réduction (FCFA)", value=float(e.montant_reduction or 0.0), step=1000.0)
 
-                            sub_edit = st.form_submit_button("Enregistrer les modifications")
+                            sub_edit = st.form_submit_button("Enregistrer les modifications", type="primary")
                             canc_edit = st.form_submit_button("Annuler")
 
                             if sub_edit:
                                 if not new_nom or not new_prenom or not new_matricule:
                                     st.error("Le nom, le prénom et le matricule sont obligatoires.")
                                 else:
+                                    ancienne_valeurs = f"Nom: {e.nom}, Prénom: {e.prenom}, Mat: {e.matricule}"
+                                    
                                     e.matricule = new_matricule.strip()
                                     e.nom = new_nom.upper().strip()
                                     e.prenom = new_prenom.strip()
@@ -116,7 +133,19 @@ def afficher_eleves(niveau_actif="Collège"):
                                     e.type_reduction = new_type_red
                                     e.montant_reduction = new_montant_red
                                     db.commit()
-                                    st.success("Informations de l'élève modifiées avec succès !")
+
+                                    nouvelles_valeurs = f"Nom: {e.nom}, Prénom: {e.prenom}, Mat: {e.matricule}"
+
+                                    # Traçabilité médico-légale ERP (Diff Avant / Après)
+                                    log_action_erp(
+                                        module="Inscription Élèves",
+                                        action=f"Modification des informations de l'élève ID {e.id}",
+                                        statut="Critique",
+                                        valeur_avant=ancienne_valeurs,
+                                        valeur_apres=nouvelles_valeurs
+                                    )
+
+                                    st.success("Informations de l'élève modifiées et tracées avec succès !")
                                     st.session_state[f"editing_eleve_{e.id}"] = False
                                     st.rerun()
                             if canc_edit:
@@ -129,7 +158,8 @@ def afficher_eleves(niveau_actif="Collège"):
             
             classes_dispo = db.query(Classe).filter(
                 Classe.school_id == school_id,
-                Classe.cycle == niveau_actif
+                Classe.cycle == niveau_actif,
+                Classe.deleted_at.is_(None)
             ).all()
 
             if not classes_dispo:
@@ -156,7 +186,7 @@ def afficher_eleves(niveau_actif="Collège"):
                 with col_red2:
                     montant_reduction = st.number_input("Montant de la réduction (FCFA)", min_value=0.0, value=0.0, step=5000.0)
 
-                submitted = st.form_submit_button("Valider l'inscription")
+                submitted = st.form_submit_button("Valider l'inscription", type="primary")
                 if submitted:
                     if not nom_e or not prenom_e or not matricule_e:
                         st.error("Le nom, le prénom et le matricule de l'élève sont obligatoires.")
@@ -189,12 +219,21 @@ def afficher_eleves(niveau_actif="Collège"):
                                 mode_reglement="Espèces",
                                 motif="Versement initial / Inscription",
                                 agent_caisse=st.session_state.get("username", "admin"),
-                                date_paiement=datetime.utcnow()
+                                date_paiement=datetime.now()
                             )
                             db.add(nouveau_paiement)
                             db.commit()
 
-                        st.success(f"Élève **{nom_e} {prenom_e}** (Matricule : {matricule_e}) inscrit avec succès !")
+                        # Traçabilité médico-légale de l'inscription ERP
+                        log_action_erp(
+                            module="Inscription Élèves",
+                            action=f"Inscription de l'élève {nom_e.upper()} {prenom_e} (Mat: {matricule_e.strip()})",
+                            statut="Succès",
+                            valeur_avant="Inexistant",
+                            valeur_apres=f"Inscrit en classe {classe_choisie_nom}"
+                        )
+
+                        st.success(f"Élève **{nom_e} {prenom_e}** (Matricule : {matricule_e}) inscrit et tracé avec succès !")
                         st.rerun()
     finally:
         db.close()

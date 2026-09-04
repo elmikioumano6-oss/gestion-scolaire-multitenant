@@ -2,11 +2,12 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from database.db_config import SessionLocal
-from database.models import School, Depense, ActivityLog
+from database.models import School, Depense
+from database.audit import log_action_erp
 
 def afficher_depenses():
     st.subheader("📉 Gestion des Dépenses")
-    st.markdown("Suivi des charges opérationnelles et budgétaires par établissement et par cycle.")
+    st.markdown("Suivi des charges opérationnelles et budgétaires par établissement et par cycle avec traçabilité ERP.")
     st.markdown("---")
 
     school_id = st.session_state.get("school_id")
@@ -37,7 +38,7 @@ def afficher_depenses():
                 ])
                 date_depense = st.date_input("Date de la dépense", value=datetime.now())
 
-            submitted = st.form_submit_button("💾 Enregistrer la dépense")
+            submitted = st.form_submit_button("💾 Enregistrer la dépense", type="primary")
             if submitted:
                 if not libelle_depense.strip() or montant <= 0:
                     st.error("⚠️ Veuillez renseigner un libellé valide et un montant supérieur à zéro.")
@@ -56,18 +57,17 @@ def afficher_depenses():
                     )
                     db.add(nouvelle_depense)
                     
-                    # Traçabilité dans le journal d'activité
-                    db.add(ActivityLog(
-                        school_id=target_school_id,
-                        timestamp=datetime.utcnow(),
-                        username=st.session_state.get("username", "admin"),
-                        action=f"Enregistrement dépense : {libelle_depense} ({montant:,.0f} FCFA)",
+                    # Traçabilité médico-légale centralisée (Normes ERP - SOC 2 / ISO 27001)
+                    log_action_erp(
                         module="Gestion des Dépenses",
-                        statut="Succès"
-                    ))
+                        action=f"Enregistrement dépense [{categorie}] : {libelle_depense.strip()} ({montant:,.0f} FCFA)",
+                        statut="Critique",
+                        valeur_avant="0 FCFA",
+                        valeur_apres=f"{montant:,.0f} FCFA"
+                    )
                     
                     db.commit()
-                    st.success(f"✅ Dépense de {montant:,.0f} FCFA ('{libelle_depense}') enregistrée avec succès pour le cycle {cycle_en_cours} !")
+                    st.success(f"✅ Dépense de {montant:,.0f} FCFA ('{libelle_depense}') enregistrée et tracée avec succès pour le cycle {cycle_en_cours} !")
                     st.rerun()
 
         st.markdown("---")

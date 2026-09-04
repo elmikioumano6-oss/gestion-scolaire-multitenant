@@ -8,7 +8,6 @@ import streamlit as st
 import bcrypt
 from streamlit_option_menu import option_menu
 
-
 def main():
     st.set_page_config(
         page_title="Gestion Scolaire Pro - Plateforme Multi-Tenant",
@@ -17,27 +16,8 @@ def main():
         initial_sidebar_state="expanded",
     )
 
+    # --- INITIALISATION ET MIGRATIONS AUTOMATIQUES ---
     init_db()
-
-    # --- MIGRATION AUTOMATIQUE DE SÉCURITÉ ---
-    try:
-        from database.db_config import engine
-        import sqlalchemy as sa
-        with engine.connect() as conn:
-            conn.execute(sa.text("ALTER TABLE users ADD COLUMN changer_mdp_requis BOOLEAN DEFAULT 1;"))
-            conn.commit()
-    except Exception:
-        pass  # La colonne existe déjà
-
-    # --- MIGRATION AUTOMATIQUE DE LA DURÉE DU CAHIER DE TEXTE ---
-    try:
-        from database.db_config import engine
-        import sqlalchemy as sa
-        with engine.connect() as conn:
-            conn.execute(sa.text("ALTER TABLE cahiers_texte ADD COLUMN duree FLOAT DEFAULT 1.0;"))
-            conn.commit()
-    except Exception:
-        pass  # La colonne existe déjà
 
     # --- INITIALISATION DE L'ÉTAT DE SESSION ---
     if "authenticated" not in st.session_state:
@@ -53,9 +33,8 @@ def main():
     if "is_super_admin" not in st.session_state:
         st.session_state["is_super_admin"] = False
 
-    # --- 1. GESTION DE LA DÉCONNEXION OU DE L'ÉTATS NON AUTHENTIFIÉ ---
+    # --- 1. GESTION DE LA DÉCONNEXION OU DE L'ÉTAT NON AUTHENTIFIÉ ---
     if not st.session_state.get("authenticated") or not st.session_state.get("username"):
-        # Nettoyage des paramètres d'URL pour empêcher tout accès non autorisé
         st.query_params.clear()
         st.markdown(
             """
@@ -85,13 +64,13 @@ def main():
             st.session_state.clear()
             st.rerun()
 
-        # Vérification si l'école est suspendue (sauf super admin)
+        # Vérification si l'établissement a été suspendu par le Super Admin
         if current_user.school_id and not is_super_admin:
             ecole_verif = db_sec.query(School).filter(School.id == current_user.school_id).first()
             if ecole_verif and not getattr(ecole_verif, 'actif', True):
                 db_sec.close()
                 st.session_state.clear()
-                st.error(f"⛔ L'établissement '{ecole_verif.nom}' a été suspendu.")
+                st.error(f"⛔ L'établissement '{ecole_verif.nom}' a été suspendu. Veuillez contacter l'administrateur de la plateforme.")
                 st.stop()
 
         # 🔒 INTERCEPTION OBLIGATOIRE SI CHANGEMENT DE MOT DE PASSE REQUIS
@@ -131,9 +110,9 @@ def main():
                                 db_sec.rollback()
                                 st.error(f"Erreur lors de la mise à jour : {ex}")
             db_sec.close()
-            return  # Bloque totalement l'accès au reste de l'application
+            return  # Bloque totalement l'accès au reste de l'application tant que le MDP n'est pas changé
 
-        # Mise à jour de la dernière activité
+        # Mise à jour de la dernière activité (pour l'audit)
         current_user.derniere_activite = datetime.now()
         db_sec.commit()
     except Exception:
@@ -174,18 +153,17 @@ def main():
 
         niveau_actif = "Collège"
 
+        # --- DÉFINITION DES MENUS SELON LE RÔLE ---
         if is_super_admin:
-            st.markdown("#### 🌐 Super Administrateur")
+            st.markdown("#### 🏛️ Gouvernance ERP")
             st.info(f"Connecté : **{nom_utilisateur}**")
-
-            options_menu = ["Administration Globale", "Accueil", "Paramètres", "Journal d'activité", "Backup"]
-            icons_menu = ["globe", "house", "gear", "clock-history", "database"]
-            menu_key_val = "menu_super_admin"
+            options_menu = ["📊 Pilotage & BI", "🏢 Gestion des Tenants", "👥 IAM & Sécurité", "📜 Piste d'Audit", "💾 Infrastructure & Backup", "⚙️ Paramètres Système"]
+            icons_menu = ["speedometer2", "globe", "shield-lock", "clock-history", "database", "gear"]
+            menu_key_val = "menu_super_admin_erp"
 
         elif role_utilisateur == "inspecteur":
             st.markdown("#### 🔍 Portail Inspecteur")
             st.info(f"Connecté : **{nom_utilisateur}**")
-
             options_menu = ["Accueil", "Tableau de Bord", "Espace Inspection", "Suivi des Programmes", "Supervision cahier", "Journal d'activité", "Messages"]
             icons_menu = ["house", "speedometer2", "clipboard-check", "graph-up", "eye", "clock-history", "chat-dots"]
             menu_key_val = "menu_inspecteur"
@@ -193,34 +171,16 @@ def main():
         elif role_utilisateur == "censeur":
             st.markdown("#### 📐 Portail Censeur")
             st.info(f"Connecté : **{nom_utilisateur}**")
-
-            niveau_actif = st.selectbox(
-                "Cycle d'enseignement actif",
-                options=["Primaire", "Collège", "Lycée"],
-                index=1,
-                key="global_niveau_actif_censeur",
-            )
+            niveau_actif = st.selectbox("Cycle actif", ["Primaire", "Collège", "Lycée"], index=1, key="global_niveau_actif_censeur")
             st.session_state["cycle_actif"] = niveau_actif
-
             st.markdown("<hr style='margin: 0.5rem 0 0.5rem 0; border-color: rgba(255,255,255,0.1);'>", unsafe_allow_html=True)
-
-            options_menu = [
-                "Accueil", "Tableau de Bord", "Matières & Coeffs", "Classes & Tarifs",
-                "Emploi du temps", "Planification des évaluations", "Cahier de Texte",
-                "Supervision cahier", "Présence", "Conseil de classe", "Bulletins",
-                "Alerte Performance", "Suivi des Programmes", "Enseignants", "Paramètres", "Messages"
-            ]
-            icons_menu = [
-                "house", "speedometer2", "book", "grid", "calendar-week", "clock",
-                "journal-text", "eye", "check-circle", "award", "journal-richtext",
-                "exclamation-triangle", "graph-up", "person-badge", "gear", "chat-dots"
-            ]
+            options_menu = ["Accueil", "Tableau de Bord", "Matières & Coeffs", "Classes & Tarifs", "Emploi du temps", "Planification des évaluations", "Cahier de Texte", "Supervision cahier", "Présence", "Conseil de classe", "Bulletins", "Alerte Performance", "Suivi des Programmes", "Enseignants", "Paramètres", "Messages"]
+            icons_menu = ["house", "speedometer2", "book", "grid", "calendar-week", "clock", "journal-text", "eye", "check-circle", "award", "journal-richtext", "exclamation-triangle", "graph-up", "person-badge", "gear", "chat-dots"]
             menu_key_val = "menu_censeur"
 
         elif role_utilisateur == "enseignant":
             st.markdown("#### 👨‍🏫 Portail Enseignant")
             st.info(f"Connecté : **{nom_utilisateur}**")
-
             options_menu = ["Espace Enseignants", "Cahier de Texte", "Saisie des notes"]
             icons_menu = ["person-video3", "journal-text", "pencil-square"]
             menu_key_val = "menu_enseignant"
@@ -228,23 +188,15 @@ def main():
         elif role_utilisateur == "parent":
             st.markdown("#### 👨‍👩‍👧 Portail Famille")
             st.info(f"Connecté : **{nom_utilisateur}**")
-
             options_menu = ["Espace Parent", "Messages"]
             icons_menu = ["house-heart", "chat-dots"]
             menu_key_val = "menu_parent"
 
-        else:
-            st.markdown("#### 🏫 Pilotage par Cycle")
-            niveau_actif = st.selectbox(
-                "Cycle d'enseignement actif",
-                options=["Primaire", "Collège", "Lycée"],
-                index=1,
-                key="global_niveau_actif",
-            )
+        else: # Administrateur de l'école (Tenant Admin)
+            st.markdown("#### 🏫 Pilotage Administratif")
+            niveau_actif = st.selectbox("Cycle d'enseignement actif", ["Primaire", "Collège", "Lycée"], index=1, key="global_niveau_actif")
             st.session_state["cycle_actif"] = niveau_actif
-
             st.markdown("<hr style='margin: 0.5rem 0 0.5rem 0; border-color: rgba(255,255,255,0.1);'>", unsafe_allow_html=True)
-
             options_menu = [
                 "Accueil", "Tableau de Bord", "Année Scolaire", "Matières & Coeffs", "Classes & Tarifs",
                 "Inscription Élèves", "Cartes Scolaires", "Emploi du temps", "Planification des évaluations",
@@ -265,11 +217,7 @@ def main():
             menu_key_val = "menu_principal_admin"
 
         page_demandee = st.query_params.get("page", options_menu[0])
-        default_idx = 0
-        if page_demandee in options_menu:
-            default_idx = options_menu.index(page_demandee)
-        elif role_utilisateur in ["admin", "administrateur"]:
-            default_idx = 1 if "Tableau de Bord" in options_menu else 0
+        default_idx = options_menu.index(page_demandee) if page_demandee in options_menu else 0
 
         menu_option = option_menu(
             menu_title=None,
@@ -310,11 +258,20 @@ def main():
             st.success("Déconnexion réussie !")
             st.rerun()
 
-    # --- 4. DICTIONNAIRE DE ROUTAGE ---
+    # --- 4. DICTIONNAIRE DE ROUTAGE (ERP STANDARD) ---
     ROUTES = {
+        # Piliers Super Admin ERP
+        "📊 Pilotage & BI": ("views.accueil", "afficher_accueil"), # L'accueil est devenu notre tableau de bord dynamique
+        "🏢 Gestion des Tenants": ("views.super_admin", "afficher_super_admin"),
+        "👥 IAM & Sécurité": ("views.gestion_utilisateurs", "afficher_gestion_utilisateurs"),
+        "📜 Piste d'Audit": ("views.journal_activite", "afficher_journal_activite"),
+        "💾 Infrastructure & Backup": ("views.backup", "afficher_backup"),
+        "⚙️ Paramètres Système": ("views.parametres", "afficher_parametres"),
+        
+        # Modules standards administration et autres rôles
         "Administration Globale": ("views.super_admin", "afficher_super_admin"),
         "Accueil": ("views.accueil", "afficher_accueil"),
-        "Tableau de Bord": ("views.tableau_de_bord", "afficher_tableau_de_bord"),
+        "Tableau de Bord": ("views.accueil", "afficher_accueil"), # Redirige vers notre nouveau dashboard
         "Année Scolaire": ("views.annee_scolaire", "afficher_annee_scolaire"),
         "Matières & Coeffs": ("views.matieres", "afficher_matieres"),
         "Classes & Tarifs": ("views.classes", "afficher_classes"),
@@ -350,46 +307,26 @@ def main():
         "Backup": ("views.backup", "afficher_backup"),
     }
 
-    # --- 5. SÉCURITÉ DES RÔLES ---
-    if is_super_admin:
-        if menu_option not in ["Administration Globale", "Accueil", "Paramètres", "Journal d'activité", "Backup"]:
-            st.warning("⛔ Accès restreint pour le Super Administrateur.")
-            return
-    elif role_utilisateur not in ["admin", "administrateur", "censeur"] and menu_option not in ["Messages"]:
-        if role_utilisateur == "inspecteur" and menu_option not in ["Accueil", "Tableau de Bord", "Espace Inspection", "Suivi des Programmes", "Supervision cahier", "Journal d'activité", "Messages"]:
-            st.warning("⛔ Accès non autorisé à cette section.")
-            return
-        elif role_utilisateur == "censeur" and menu_option not in [
-            "Accueil", "Tableau de Bord", "Matières & Coeffs", "Classes & Tarifs",  
-            "Emploi du temps", "Planification des évaluations", "Cahier de Texte",  
-            "Supervision cahier", "Présence", "Conseil de classe", "Bulletins",  
-            "Alerte Performance", "Suivi des Programmes", "Enseignants", "Paramètres", "Messages"
-        ]:
-            st.warning("⛔ Accès non autorisé à cette section.")
-            return
-        elif role_utilisateur == "enseignant" and menu_option not in ["Espace Enseignants", "Cahier de Texte", "Saisie des notes"]:
-            st.warning("⛔ Accès non autorisé à cette section.")
-            return
-        elif role_utilisateur == "parent" and menu_option not in ["Espace Parent", "Messages"]:
-            st.warning("⛔ Accès non autorisé à cette section.")
-            return
+    # --- 5. SÉCURITÉ DES RÔLES (RBAC STRICT) ---
+    if menu_option not in options_menu:
+        st.warning("⛔ Accès non autorisé à cette section.")
+        st.stop()
 
-    # --- 6. EXÉCUTION DE LA VUE ---
+    # --- 6. EXÉCUTION DE LA VUE DYNAMIQUE ---
     if menu_option in ROUTES:
         module_path, nom_fonction = ROUTES[menu_option]
         try:
             module = importlib.import_module(module_path)
             fonction = getattr(module, nom_fonction)
             sig = inspect.signature(fonction)
-            if "niveau_actif" in sig.parameters and role_utilisateur not in [
-                "inspecteur", "enseignant", "parent",
-            ] and not is_super_admin:
+            
+            # Injection de 'niveau_actif' uniquement si la fonction le réclame
+            if "niveau_actif" in sig.parameters and role_utilisateur not in ["inspecteur", "enseignant", "parent"] and not is_super_admin:
                 fonction(niveau_actif=niveau_actif)
             else:
                 fonction()
         except (ImportError, AttributeError) as e:
-            st.error(f"Erreur de chargement pour la vue **{menu_option}** : {e}")
-
+            st.error(f"⚠️ Le module pour la vue **{menu_option}** est en cours de développement ou n'a pas été trouvé. ({e})")
 
 if __name__ == "__main__":
     main()

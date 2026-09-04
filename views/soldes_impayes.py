@@ -38,28 +38,26 @@ def afficher_soldes_impayes(niveau_actif="Collège"):
             st.info("Aucun élève dans cette classe.")
             return
 
-        # Frais de la classe + COGES
+        # Frais de base de la classe + COGES
         frais_scolarite_base = float(classe_obj.frais_scolarite or 0.0)
         frais_coges = float(getattr(classe_obj, 'frais_coges', 0.0) or 0.0)
+        total_brut_classe = frais_scolarite_base + frais_coges
 
         cols = st.columns([2, 1.5, 1.5, 1.5, 1.5, 2])
         cols[0].markdown("**Élève**")
-        cols[1].markdown("**Montant Dû**")
+        cols[1].markdown("**Montant Brut**")
         cols[2].markdown("**Réduction**")
         cols[3].markdown("**Net à Payer**")
         cols[4].markdown("**Total Versé**")
         cols[5].markdown("**Solde Restant**")
-        cols[0].markdown("---")
-        cols[1].markdown("---")
-        cols[2].markdown("---")
-        cols[3].markdown("---")
-        cols[4].markdown("---")
-        cols[5].markdown("---")
+        for i in range(6):
+            cols[i].markdown("---")
 
         for e in eleves:
             reduction = float(e.montant_reduction or 0.0)
-            net_scolarite = max(0.0, frais_scolarite_base - reduction)
-            total_du = net_scolarite + frais_coges
+            
+            # Calcul du Net à Payer (Montant Brut - Réduction, plancher à 0)
+            net_a_payer = max(0.0, total_brut_classe - reduction)
 
             # Total des versements de l'élève
             paiements_eleve = db.query(Paiement).filter(
@@ -68,26 +66,27 @@ def afficher_soldes_impayes(niveau_actif="Collège"):
             ).all()
             
             total_verse = sum([float(p.montant) for p in paiements_eleve])
-            solde_restant = total_du - total_verse
+            
+            # Le solde restant se base sur le Net à Payer et non sur le brut !
+            solde_restant = net_a_payer - total_verse
 
             c = st.columns([2, 1.5, 1.5, 1.5, 1.5, 2])
             c[0].write(f"{e.nom} {e.prenom} ({e.matricule})")
-            c[1].write(f"{total_du:,.0f} F")
+            c[1].write(f"{total_brut_classe:,.0f} F")
             c[2].write(f"-{reduction:,.0f} F" if reduction > 0 else "0 F")
-            c[3].write(f"{total_du:,.0f} F")
+            c[3].write(f"{net_a_payer:,.0f} F")
             c[4].write(f"{total_verse:,.0f} F")
             
             if solde_restant > 0:
                 c[5].markdown(f"<span style='color: red; font-weight: bold;'>{solde_restant:,.0f} F (Impayé)</span>", unsafe_allow_html=True)
             elif solde_restant < 0:
-                c[5].markdown(f"<span style='color: orange; font-weight: bold;'>{solde_restant:,.0f} F (Trop-perçu)</span>", unsafe_allow_html=True)
+                c[5].markdown(f"<span style='color: orange; font-weight: bold;'>{abs(solde_restant):,.0f} F (Trop-perçu)</span>", unsafe_allow_html=True)
             else:
                 c[5].markdown("<span style='color: green; font-weight: bold;'>Soldé (0 F)</span>", unsafe_allow_html=True)
 
         st.markdown("---")
         st.markdown("### 🛠️ Gestion & Annulation des Versements Erronés")
         
-        # Sélection d'un élève pour voir ses reçus et pouvoir supprimer les erreurs
         options_eleves_tous = {f"{elev.nom} {elev.prenom} ({elev.matricule})": elev.id for elev in eleves}
         eleve_a_gerer_str = st.selectbox("Sélectionner un élève pour auditer ou annuler ses reçus", list(options_eleves_tous.keys()))
         eleve_gerer_id = options_eleves_tous[eleve_a_gerer_str]
