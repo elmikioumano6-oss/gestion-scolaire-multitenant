@@ -48,7 +48,8 @@ def afficher_login():
                             username_cible = st.session_state.get("pending_username")
                             user_obj = db.query(User).filter(User.username == username_cible).first()
                             if user_obj:
-                                user_obj.password = bcrypt.hashpw(nouveau_p.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+                                salt = bcrypt.gensalt()
+                                user_obj.password = bcrypt.hashpw(nouveau_p.encode('utf-8'), salt).decode('utf-8')
                                 user_obj.changer_mdp_requis = False
                                 db.commit()
                                 
@@ -93,8 +94,21 @@ def afficher_login():
                     db = SessionLocal()
                     try:
                         user = db.query(User).filter(User.username == username_input.strip()).first()
-                        if user and bcrypt.checkpw(password_input.encode('utf-8'), user.password.encode('utf-8')):
-                            
+                        
+                        password_valid = False
+                        if user and user.password:
+                            try:
+                                # Vérification standard bcrypt sécurisée
+                                password_valid = bcrypt.checkpw(password_input.encode('utf-8'), user.password.encode('utf-8'))
+                            except ValueError:
+                                # Fallback de secours si l'ancien hachage en base était corrompu ou en clair
+                                if user.password == password_input:
+                                    salt = bcrypt.gensalt()
+                                    user.password = bcrypt.hashpw(password_input.encode('utf-8'), salt).decode('utf-8')
+                                    db.commit()
+                                    password_valid = True
+
+                        if user and password_valid:
                             # Vérification du statut actif de l'école (sauf pour super_admin)
                             role_db = str(user.role or "").strip().lower()
                             is_super = (role_db == "super_admin")
