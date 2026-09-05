@@ -62,7 +62,7 @@ def init_db():
             except Exception:
                 conn.rollback() # Ignore si la colonne existe déjà
 
-    # 3. Initialisation ou mise à jour forcée du compte admin et de l'établissement par défaut
+    # 3. Initialisation ou mise à jour forcée des comptes et de l'établissement par défaut
     db = SessionLocal()
     try:
         ecole_defaut = db.query(School).first()
@@ -78,9 +78,9 @@ def init_db():
             db.commit()
             db.refresh(ecole_defaut)
 
-        # Recherche ou création de l'utilisateur admin avec mise à jour garantie du mot de passe
         hashed_pw = bcrypt.hashpw("admin2026".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
         
+        # --- Gestion du Super Admin Global ---
         admin_user = db.query(User).filter(User.username == "admin").first()
         if admin_user:
             admin_user.password = hashed_pw
@@ -96,6 +96,23 @@ def init_db():
                 changer_mdp_requis=False
             )
             db.add(admin_user)
+
+        # --- Gestion garantie de l'Administrateur local du CSP Rahmat-FH ---
+        admin_rahmat = db.query(User).filter(User.username == "admin_rahmat").first()
+        if admin_rahmat:
+            admin_rahmat.role = "directeur"
+            admin_rahmat.school_id = ecole_defaut.id
+            admin_rahmat.changer_mdp_requis = False
+        else:
+            admin_rahmat = User(
+                username="admin_rahmat",
+                password=hashed_pw,
+                role="directeur",
+                school_id=ecole_defaut.id,
+                changer_mdp_requis=False
+            )
+            db.add(admin_rahmat)
+
         db.commit()
     except Exception as e:
         db.rollback()

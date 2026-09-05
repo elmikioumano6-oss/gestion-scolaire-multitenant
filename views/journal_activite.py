@@ -4,7 +4,11 @@ from datetime import datetime, date, time, timedelta
 import io
 from database.db_config import SessionLocal, engine
 import sqlalchemy as sa
-from database.models import School, JournalActivite
+from database.models import School, JournalActivite, User
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
 
 def afficher_journal_activite():
     st.subheader("📜 Journal d'Activité & Piste d'Audit (Normes ERP - SOC 2 / ISO 27001)")
@@ -43,6 +47,12 @@ def afficher_journal_activite():
     school_id = st.session_state.get("school_id")
     is_super_admin = st.session_state.get("is_super_admin", False)
     school_name = st.session_state.get("school_name", "Établissement")
+    username_connecte = st.session_state.get("username", "")
+    role_connecte = st.session_state.get("role", "").lower()
+
+    # 🔒 Confinement strict de l'admin Rahmat
+    if username_connecte and "rahmat" in username_connecte.lower():
+        is_super_admin = False
 
     if not school_id and not is_super_admin:
         st.warning("⚠️ Veuillez vous connecter pour accéder à cette section.")
@@ -50,7 +60,7 @@ def afficher_journal_activite():
 
     db = SessionLocal()
     try:
-        # --- 1. SÉLECTION DE L'ÉTABLISSEMENT (POUR SUPER ADMIN) ---
+        # --- 1. SÉLECTION DE L'ÉTABLISSEMENT (RESTRICTION STRICTE MULTI-TENANT) ---
         if is_super_admin:
             st.markdown("### 🌐 Vue Globale Super Administrateur")
             ecoles = db.query(School).all()
@@ -81,11 +91,33 @@ def afficher_journal_activite():
 
             recherche_user = st.text_input("Rechercher par nom d'utilisateur (Username)", placeholder="Ex: admin, censeur...", key="audit_user_search")
 
-        # --- 3. REQUÊTE ET FILTRAGE EN BASE DE DONNÉES ---
+        # --- 3. REQUÊTE ET FILTRAGE EN BASE DE DONNÉES (HIÉRARCHIE STRICTE RBAC) ---
         query = db.query(JournalActivite)
         
-        if selected_school_id is not None:
-            query = query.filter(JournalActivite.school_id == selected_school_id)
+        if is_super_admin:
+            # Le Super Admin voit tout (avec filtre optionnel par selectbox)
+            if selected_school_id is not None:
+                query = query.filter(JournalActivite.school_id == selected_school_id)
+        else:
+            # Vérification exacte du rôle de l'utilisateur en base ou session
+            user_obj = db.query(User).filter(User.username == username_connecte).first()
+            user_role = getattr(user_obj, 'role', '').lower() if user_obj else role_connecte
+            is_school_admin = user_role in ["admin", "directeur", "proviseur", "censeur"] or "admin" in username_connecte.lower()
+            
+            if school_id:
+                if is_school_admin:
+                    # L'administrateur de l'école voit tous les logs de son école, sans les actions globales du super admin "admin"
+                    query = query.filter(
+                        sa.and_(
+                            JournalActivite.username != "admin",
+                            JournalActivite.school_id == school_id
+                        )
+                    )
+                else:
+                    # Un utilisateur standard ne voit QUE ses propres actions
+                    query = query.filter(JournalActivite.username == username_connecte)
+            else:
+                query = query.filter(JournalActivite.username == username_connecte)
         
         if date_debut and date_fin:
             dt_debut = datetime.combine(date_debut, time.min)
@@ -141,8 +173,9 @@ def afficher_journal_activite():
 
             df_logs = pd.DataFrame(data_logs)
 
-            # --- 5. BOUTONS D'EXPORT CERTIFIÉ (CSV & EXCEL) ---
+            # --- 5. BOUTONS D'EXPORT CERTIFIÉ (CSV & PDF) ---
             col_exp1, col_exp2, _ = st.columns([1, 1, 2])
+            
             with col_exp1:
                 csv_data = df_logs.to_csv(index=False).encode('utf-8')
                 st.download_button(
@@ -152,16 +185,52 @@ def afficher_journal_activite():
                     mime="text/csv",
                     use_container_width=True
                 )
+            
             with col_exp2:
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    df_logs.drop(columns=["Valeur Avant", "Valeur Après"]).to_excel(writer, index=False, sheet_name='Audit Trail')
-                excel_data = output.getvalue()
+                pdf_buffer = io.BytesIO()
+                doc = SimpleDocTemplate(pdf_buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+                story = []
+                styles = getSampleStyleSheet()
+                
+                title_style = ParagraphStyle(
+                    'TitleStyle',
+                    parent=styles['Heading1'],
+                    fontSize=14,
+                    textColor=colors.HexColor('#0d1b2a'),
+                    spaceAfter=10
+                )
+                
+                story.append(Paragraph(f"Piste d'Audit - {school_name}", title_style))
+                story.append(Paragraph(f"Généré le : {datetime.now().strftime('%d/%m/%Y %H:%M')}", styles['Normal']))
+                story.append(Spacer(1, 15))
+                
+                table_data = [["Date", "Utilisateur", "Module", "Statut", "Action"]]
+                for l in logs[:50]:
+                    dt_s = l.timestamp.strftime("%d/%m/%Y %H:%M") if l.timestamp else ""
+                    table_data.append([dt_s, str(l.username), str(l.module), str(l.statut), str(l.action)[:40]])
+                
+                t = Table(table_data, colWidths=[80, 70, 80, 60, 250])
+                t.setStyle(TableStyle([
+                    ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#0d1b2a')),
+                    ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+                    ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+                    ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0,0), (-1,0), 9),
+                    ('BOTTOMPADDING', (0,0), (-1,0), 6),
+                    ('BACKGROUND', (0,1), (-1,-1), colors.HexColor('#f8f9fa')),
+                    ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#dee2e6')),
+                    ('FONTSIZE', (0,1), (-1,-1), 8),
+                ]))
+                
+                story.append(t)
+                doc.build(story)
+                pdf_data = pdf_buffer.getvalue()
+
                 st.download_button(
-                    label="📊 Exporter en Excel (Rapport)",
-                    data=excel_data,
-                    file_name=f"audit_trail_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    label="📄 Exporter en PDF (Rapport)",
+                    data=pdf_data,
+                    file_name=f"audit_trail_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                    mime="application/pdf",
                     use_container_width=True
                 )
 
@@ -189,7 +258,6 @@ def afficher_journal_activite():
                     st.markdown("---")
                     st.markdown(f"**Description complète de l'action :** {action_text}")
                     
-                    # Affichage conditionnel de la traçabilité des écarts (Diff Avant / Après)
                     if item['Valeur Avant'] or item['Valeur Après']:
                         st.markdown("**Analyse des Écarts (Diff Avant / Après) :**")
                         col_diff1, col_diff2 = st.columns(2)

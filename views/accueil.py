@@ -1,13 +1,18 @@
 import streamlit as st
 import pandas as pd
 from database.db_config import SessionLocal
-from database.models import Eleve, Classe, User, School, Paiement, Depense, ActivityLog
-from sqlalchemy import func, desc
+from database.models import Eleve, Classe, User, School, Paiement, Depense, JournalActivite
+from sqlalchemy import func, desc, or_, and_
 
 def afficher_accueil():
     # --- 1. RÉCUPÉRATION DYNAMIQUE DE L'ÉCOLE ACTIVE ---
     school_id = st.session_state.get("school_id")
     is_super_admin = st.session_state.get("is_super_admin", False)
+    username = st.session_state.get("username", "")
+
+    # 🔒 Confinement strict de l'admin Rahmat
+    if username and "rahmat" in username.lower():
+        is_super_admin = False
 
     db = SessionLocal()
     try:
@@ -67,7 +72,6 @@ def afficher_accueil():
         total_depenses = q_depenses.with_entities(func.sum(Depense.montant)).scalar() or 0.0
         solde_net = float(total_recettes) - float(total_depenses)
         
-        # Estimation basique du total attendu
         total_attendu = total_eleves * 65000  
         taux_recouvrement = (total_recettes / total_attendu * 100) if total_attendu > 0 else 0.0
 
@@ -121,16 +125,37 @@ def afficher_accueil():
         with col_a1:
             st.markdown("### 🛡️ Journal d'Activité (Actions Récentes)")
             
-            q_logs = db.query(ActivityLog)
-            if not is_super_admin and school_id:
-                q_logs = q_logs.filter(ActivityLog.school_id == school_id)
+            q_logs = db.query(JournalActivite)
+            
+            # 🔒 HIÉRARCHIE RBAC & MULTI-TENANT STRICTE :
+            # 1. Super Admin : Voit tout.
+            # 2. Admin d'école (ex: admin_rahmat) : Voit tous les logs de son école (tous ses utilisateurs rattachés), 
+            #    mais les utilisateurs subordonnés ne voient que leurs propres actions.
+            if is_super_admin:
+                pass 
+            else:
+                user_obj = db.query(User).filter(User.username == username).first()
+                user_role = getattr(user_obj, 'role', '').lower() if user_obj else ''
+                is_school_admin = user_role in ["admin", "directeur", "proviseur", "censeur"] or "admin" in username.lower()
                 
-            derniers_logs = q_logs.order_by(desc(ActivityLog.timestamp)).limit(5).all()
+                if is_school_admin and school_id:
+                    # L'admin de l'école voit toute l'activité de son établissement, sans les logs globaux du super admin
+                    q_logs = q_logs.filter(
+                        and_(
+                            JournalActivite.username != "admin",
+                            JournalActivite.school_id == school_id
+                        )
+                    )
+                else:
+                    # Un utilisateur standard ne voit que ses propres actions
+                    q_logs = q_logs.filter(JournalActivite.username == username)
+                
+            derniers_logs = q_logs.order_by(desc(JournalActivite.timestamp)).limit(5).all()
             
             if derniers_logs:
                 for log in derniers_logs:
                     heure = log.timestamp.strftime("%H:%M") if log.timestamp else "N/D"
-                    couleur_statut = "#EF4444" if log.statut == "Critique" else "#10B981"
+                    couleur_statut = "#EF4444" if getattr(log, 'statut', '') in ["Critique", "Avertissement"] else "#10B981"
                     
                     st.markdown(
                         f"""
@@ -143,7 +168,7 @@ def afficher_accueil():
                         """, unsafe_allow_html=True
                     )
             else:
-                st.info("Aucune activité récente enregistrée dans le journal d'audit.")
+                st.info("Aucune activité récente enregistrée dans le journal d'audit pour cet établissement.")
 
         with col_a2:
             st.markdown("### ⚡ Raccourcis Opérationnels")

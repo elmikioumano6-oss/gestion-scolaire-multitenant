@@ -10,7 +10,14 @@ def afficher_classes(niveau_actif="Collège"):
     st.markdown("---")
 
     school_id = st.session_state.get("school_id")
-    if not school_id:
+    is_super_admin = st.session_state.get("is_super_admin", False)
+    username = st.session_state.get("username", "")
+
+    # 🔒 Confinement strict de l'admin Rahmat
+    if username and "rahmat" in username.lower():
+        is_super_admin = False
+
+    if not school_id and not is_super_admin:
         st.warning("⚠️ Veuillez vous connecter pour accéder à cette section.")
         return
 
@@ -18,15 +25,35 @@ def afficher_classes(niveau_actif="Collège"):
     try:
         tab_liste, tab_ajout = st.tabs(["📋 Liste des Classes", "➕ Ajouter une Classe"])
 
+        # --- REQUÊTE COMMUNE AVEC ISOLATION MULTI-TENANT ---
+        query = db.query(Classe).filter(
+            Classe.cycle == niveau_actif,
+            Classe.deleted_at.is_(None)
+        )
+
+        if not is_super_admin and school_id:
+            query = query.filter(Classe.school_id == school_id)
+
+        classes = query.order_by(Classe.libelle).all()
+
         with tab_liste:
             st.markdown(f"### Classes et Grilles Tarifs — Établissement ({niveau_actif})")
-            
-            # Filtre pour exclure les classes supprimées logiquement (Soft Delete)
-            classes = db.query(Classe).filter(
-                Classe.school_id == school_id,
-                Classe.cycle == niveau_actif,
-                Classe.deleted_at.is_(None)
-            ).order_by(Classe.libelle).all()
+
+            # --- TABLEAU DE BORD / KPIS FINANCIERS ---
+            if classes:
+                total_classes = len(classes)
+                capacite_totale = sum(c.capacite or 0 for c in classes)
+                scolarite_moyenne = sum(c.frais_scolarite or 0 for c in classes) / total_classes if total_classes > 0 else 0
+
+                kpi1, kpi2, kpi3 = st.columns(3)
+                with kpi1:
+                    st.metric("Total Classes Actives", total_classes)
+                with kpi2:
+                    st.metric("Capacité Totale d'Accueil", f"{capacite_totale} Places")
+                with kpi3:
+                    st.metric("Scolarité Moyenne", f"{f'{scolarite_moyenne:,.0f}'.replace(',', ' ')} FCFA")
+                
+                st.markdown("---")
 
             if not classes:
                 st.info(f"Aucune classe enregistrée ou active pour le cycle **{niveau_actif}** dans cet établissement.")
@@ -43,14 +70,22 @@ def afficher_classes(niveau_actif="Collège"):
                 st.markdown("---")
 
                 for c in classes:
+                    # Formatage francophone des montants (séparateur de milliers par espace)
+                    scol_str = f"{c.frais_scolarite:,.0f}".replace(",", " ") if c.frais_scolarite else "0"
+                    insc_str = f"{c.frais_inscription:,.0f}".replace(",", " ") if c.frais_inscription else "0"
+                    trans_str = f"{c.frais_transport:,.0f}".replace(",", " ") if c.frais_transport else "0"
+                    cant_str = f"{c.frais_cantine:,.0f}".replace(",", " ") if c.frais_cantine else "0"
+                    coges_val = getattr(c, 'frais_coges', 0.0)
+                    coges_str = f"{coges_val:,.0f}".replace(",", " ") if coges_val else "0"
+
                     col = st.columns([1.8, 1.2, 1.3, 1.3, 1.3, 1.3, 1.3, 2])
                     col[0].write(c.libelle)
                     col[1].write(c.capacite)
-                    col[2].write(f"{c.frais_scolarite:,.0f} F")
-                    col[3].write(f"{c.frais_inscription:,.0f} F")
-                    col[4].write(f"{c.frais_transport:,.0f} F")
-                    col[5].write(f"{c.frais_cantine:,.0f} F")
-                    col[6].write(f"{getattr(c, 'frais_coges', 0.0):,.0f} F")
+                    col[2].write(f"{scol_str} F")
+                    col[3].write(f"{insc_str} F")
+                    col[4].write(f"{trans_str} F")
+                    col[5].write(f"{cant_str} F")
+                    col[6].write(f"{coges_str} F")
                     
                     btn_col1, btn_col2 = col[7].columns(2)
                     with btn_col1:
@@ -66,11 +101,9 @@ def afficher_classes(niveau_actif="Collège"):
                         c_del1, c_del2 = st.columns(2)
                         with c_del1:
                             if st.button("Confirmer l'archivage", key=f"conf_del_cls_{c.id}", type="primary"):
-                                # Application du Soft Delete au lieu d'une suppression brute
                                 c.deleted_at = datetime.now()
                                 db.commit()
                                 
-                                # Traçabilité
                                 log_action_erp(
                                     module="Gestion des Classes",
                                     action=f"Archivage (Soft Delete) de la classe {c.libelle}",
@@ -93,11 +126,11 @@ def afficher_classes(niveau_actif="Collège"):
                             st.markdown(f"**Modifier la grille tarifaire : {c.libelle}**")
                             new_lib = st.text_input("Nom de la classe", value=c.libelle)
                             new_cap = st.number_input("Capacité", value=int(c.capacite or 30))
-                            new_scol = st.number_input("Scolarité", value=float(c.frais_scolarite or 0.0))
-                            new_insc = st.number_input("Inscription", value=float(c.frais_inscription or 0.0))
-                            new_trans = st.number_input("Transport", value=float(c.frais_transport or 0.0))
-                            new_cant = st.number_input("Cantine", value=float(c.frais_cantine or 0.0))
-                            new_coges = st.number_input("COGES", value=float(getattr(c, 'frais_coges', 0.0)))
+                            new_scol = st.number_input("Scolarité", value=float(c.frais_scolarite or 0.0), step=5000.0)
+                            new_insc = st.number_input("Inscription", value=float(c.frais_inscription or 0.0), step=1000.0)
+                            new_trans = st.number_input("Transport", value=float(c.frais_transport or 0.0), step=1000.0)
+                            new_cant = st.number_input("Cantine", value=float(c.frais_cantine or 0.0), step=1000.0)
+                            new_coges = st.number_input("Frais COGES", value=float(getattr(c, 'frais_coges', 0.0)), step=500.0)
                             
                             sub_edit = st.form_submit_button("Enregistrer les modifications", type="primary")
                             canc_edit = st.form_submit_button("Annuler")
@@ -115,7 +148,6 @@ def afficher_classes(niveau_actif="Collège"):
                                 c.frais_coges = new_coges
                                 db.commit()
                                 
-                                # Traçabilité financière stricte du Diff Avant/Après
                                 log_action_erp(
                                     module="Gestion des Classes",
                                     action=f"Modification des tarifs pour la classe {new_lib}",
@@ -148,32 +180,42 @@ def afficher_classes(niveau_actif="Collège"):
                     if not libelle_c:
                         st.error("Le nom de la classe est obligatoire.")
                     else:
-                        nouvelle_classe = Classe(
-                            school_id=school_id,
-                            libelle=libelle_c,
-                            niveau=libelle_c,
-                            cycle=niveau_actif,
-                            capacite=capacite_c,
-                            frais_scolarite=scol_c,
-                            frais_inscription=insc_c,
-                            frais_transport=trans_c,
-                            frais_cantine=cant_c,
-                            frais_coges=coges_c
-                        )
-                        db.add(nouvelle_classe)
-                        db.commit()
-                        
-                        # Traçabilité de création
-                        log_action_erp(
-                            module="Gestion des Classes",
-                            action=f"Création de la classe {libelle_c} (Capacité: {capacite_c})",
-                            statut="Succès",
-                            valeur_avant="Inexistante",
-                            valeur_apres=f"Scolarité fixée à {scol_c:,.0f} F"
-                        )
-                        
-                        st.success(f"Classe '{libelle_c}' ajoutée et tracée avec succès !")
-                        st.rerun()
+                        doublon = db.query(Classe).filter(
+                            Classe.school_id == school_id,
+                            Classe.libelle == libelle_c,
+                            Classe.cycle == niveau_actif,
+                            Classe.deleted_at.is_(None)
+                        ).first()
+
+                        if doublon:
+                            st.error(f"⚠️ Une classe nommée '{libelle_c}' existe déjà pour ce cycle dans cet établissement.")
+                        else:
+                            nouvelle_classe = Classe(
+                                school_id=school_id,
+                                libelle=libelle_c,
+                                niveau=libelle_c,
+                                cycle=niveau_actif,
+                                capacite=capacite_c,
+                                frais_scolarite=scol_c,
+                                frais_inscription=insc_c,
+                                frais_transport=trans_c,
+                                frais_cantine=cant_c,
+                                frais_coges=coges_c
+                            )
+                            db.add(nouvelle_classe)
+                            db.commit()
+                            
+                            scol_formatted = f"{scol_c:,.0f}".replace(",", " ")
+                            log_action_erp(
+                                module="Gestion des Classes",
+                                action=f"Création de la classe {libelle_c} (Capacité: {capacite_c})",
+                                statut="Succès",
+                                valeur_avant="Inexistante",
+                                valeur_apres=f"Scolarité fixée à {scol_formatted} F"
+                            )
+                            
+                            st.success(f"Classe '{libelle_c}' ajoutée et tracée avec succès !")
+                            st.rerun()
     finally:
         db.close()
 

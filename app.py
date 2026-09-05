@@ -59,10 +59,16 @@ def main():
     role_utilisateur = str(st.session_state.get("role", "")).lower()
     is_super_admin = st.session_state.get("is_super_admin", False)
 
+    # 🔒 CONFINEMENT MULTI-TENANT STRICT : admin_rahmat ne doit jamais être super admin global
+    if nom_utilisateur and "rahmat" in nom_utilisateur.lower():
+        is_super_admin = False
+        st.session_state["is_super_admin"] = False
+
     db_sec = SessionLocal()
     try:
         current_user = db_sec.query(User).filter(User.username == nom_utilisateur).first()
         if not current_user:
+            db_sec.close()
             st.session_state.clear()
             st.rerun()
 

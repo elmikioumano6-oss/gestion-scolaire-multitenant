@@ -80,6 +80,9 @@ class Eleve(Base):
     classe_id = Column(Integer, ForeignKey("classes.id"), nullable=True)
     tuteur = Column(String, nullable=True)
     
+    # 📸 Ajout de la colonne photo pour stocker l'image en Base64 ou son chemin sécurisé
+    photo = Column(Text, nullable=True)
+    
     type_reduction = Column(String, default="Aucune")
     montant_reduction = Column(Float, default=0.0)
     document_justificatif = Column(String, nullable=True)
