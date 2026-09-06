@@ -1,187 +1,390 @@
-import streamlit as st
-import pandas as pd
 from datetime import datetime
+from io import BytesIO
 from database.db_config import SessionLocal
-from database.models import School, Classe, Eleve, Matiere, CahierTexte, ActivityLog
+from database.models import ActivityLog, Classe, Eleve, Matiere, Note, School
+import pandas as pd
+import streamlit as st
 
-def afficher_espace_inspection():
-    st.subheader("🏛️ Espace Inspection Académique & Suivi du Cahier de Texte")
-    st.markdown("Portail d'inspection : consultation par classe, matière et date du cahier de texte, avec formulation d'observations pédagogiques.")
-    st.markdown("---")
 
-    school_id = st.session_state.get("school_id")
-    is_super_admin = st.session_state.get("is_super_admin", False)
-    role_utilisateur = str(st.session_state.get("role", "")).lower()
-    username = st.session_state.get("username", "inspecteur")
-    cycle_en_cours = st.session_state.get("cycle_actif", "Collège")
+def afficher_consultation_notes():
+  st.subheader("📊 Consultation Détaillée des Notes & Résultats")
+  st.markdown(
+      "Recherche, classement par ordre de mérite et préparation de l'export"
+      " officiel format Excel (.xlsx) pour l'affichage et l'administration."
+  )
+  st.markdown("---")
 
-    # Autorisation d'accès (Inspecteur, Super Admin ou Administration)
-    if not is_super_admin and role_utilisateur not in ["inspecteur", "admin", "administrateur", "censeur"]:
-        st.warning("⚠️ Cet espace est réservé aux autorités de l'inspection académique et aux administrateurs.")
-        return
+  school_id = st.session_state.get("school_id")
+  is_super_admin = st.session_state.get("is_super_admin", False)
 
-    db = SessionLocal()
-    try:
-        target_school_id = school_id
-        if is_super_admin and not target_school_id:
-            ecole_defaut = db.query(School).first()
-            target_school_id = ecole_defaut.id if ecole_defaut else 1
+  db = SessionLocal()
+  try:
+    if school_id:
+      ecole_courante = (
+          db.query(School).filter(School.id == school_id).first()
+      )
+      school_name = (
+          ecole_courante.nom
+          if ecole_courante
+          else st.session_state.get("school_name", "Établissement")
+      )
+    else:
+      school_name = st.session_state.get("school_name", "Établissement")
+  finally:
+    db.close()
 
-        if school_id:
-            ecole_courante = db.query(School).filter(School.id == school_id).first()
-            school_name = ecole_courante.nom if ecole_courante else st.session_state.get("school_name", "Établissement")
+  cycle_en_cours = st.session_state.get("cycle_actif", "Collège")
+
+  if not school_id and not is_super_admin:
+    st.warning("⚠️ Veuillez vous connecter pour accéder à cette section.")
+    return
+
+  db = SessionLocal()
+  try:
+    target_school_id = school_id
+    if is_super_admin and not target_school_id:
+      ecole_defaut = db.query(School).first()
+      target_school_id = ecole_defaut.id if ecole_defaut else 1
+
+    classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours)
+    matieres_query = db.query(Matiere).filter(Matiere.cycle == cycle_en_cours)
+
+    if not is_super_admin and school_id:
+      classes_query = classes_query.filter(Classe.school_id == school_id)
+      matieres_query = matieres_query.filter(Matiere.school_id == school_id)
+    else:
+      classes_query = classes_query.filter(
+          Classe.school_id == target_school_id
+      )
+      matieres_query = matieres_query.filter(
+          Matiere.school_id == target_school_id
+      )
+
+    classes_cycle = classes_query.all()
+    matieres_cycle = matieres_query.all()
+
+    st.markdown(
+        f"### Consultation des Notes — **{school_name} ({cycle_en_cours})**"
+    )
+
+    if not classes_cycle:
+      st.warning(
+          f"⚠️ Aucune classe disponible pour le cycle **{cycle_en_cours}** dans"
+          f" l'établissement **{school_name}**."
+      )
+      return
+
+    noms_classes = [c.libelle for c in classes_cycle]
+
+    col_c1, col_c2, col_c3 = st.columns(3)
+    with col_c1:
+      classe_choisie = st.selectbox(
+          "Sélectionner la classe", noms_classes, key="consult_notes_classe"
+      )
+    with col_c2:
+      semestre_choisi = st.selectbox(
+          "Semestre / Période",
+          [
+              "Semestre 1",
+              "Semestre 2",
+              "Trimestre 1",
+              "Trimestre 2",
+              "Trimestre 3",
+          ],
+          key="consult_notes_semestre",
+      )
+    with col_c3:
+      type_vue = st.selectbox(
+          "Type d'affichage / Évaluation",
+          [
+              "Interro 1",
+              "Interro 2",
+              "Devoir 1",
+              "Devoir 2",
+              "Compo",
+              "Moyen-S1",
+              "Moyen-S2",
+              "Moyen-an",
+          ],
+          key="consult_notes_vue",
+      )
+
+    classe_obj = next(
+        (c for c in classes_cycle if c.libelle == classe_choisie), None
+    )
+    if classe_obj:
+      eleves_query = db.query(Eleve).filter(Eleve.classe_id == classe_obj.id)
+      if not is_super_admin and school_id:
+        eleves_query = eleves_query.filter(Eleve.school_id == school_id)
+      else:
+        eleves_query = eleves_query.filter(
+            Eleve.school_id == target_school_id
+        )
+      eleves = eleves_query.order_by(Eleve.nom).all()
+
+      if not eleves:
+        st.info(
+            f"Aucun élève enregistré dans la classe de **{classe_choisie}**."
+        )
+      else:
+        st.success(
+            f"Résultats affichés pour la classe de **{classe_choisie}** — Vue"
+            f" : **{type_vue}** ({semestre_choisi}) [{len(eleves)} élèves]."
+        )
+
+        # Fonction de génération d'un vrai fichier Excel (.xlsx) en mémoire
+        def to_excel_buffer(df):
+          output = BytesIO()
+          with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="Resultats")
+          return output.getvalue()
+
+        # --- 1. AFFICHAGE DES NOTES PAR ÉVALUATION ---
+        if type_vue in [
+            "Interro 1",
+            "Interro 2",
+            "Devoir 1",
+            "Devoir 2",
+            "Compo",
+        ]:
+          notes_db = (
+              db.query(Note)
+              .join(Eleve)
+              .filter(
+                  Note.school_id == target_school_id,
+                  Eleve.classe_id == classe_obj.id,
+                  Note.semestre == semestre_choisi,
+                  Note.type_evaluation == type_vue,
+              )
+              .all()
+          )
+
+          dict_notes = {
+              (n.eleve_id, n.matiere_id): n.valeur for n in notes_db
+          }
+          dict_coeffs = {m.id: m.coefficient for m in matieres_cycle}
+
+          data_avec_moyenne = []
+          for e in eleves:
+            total_pts = 0.0
+            total_c = 0.0
+            notes_ligne = {}
+            for mat in matieres_cycle:
+              val = dict_notes.get((e.id, mat.id), None)
+              notes_ligne[mat.libelle] = val if val is not None else "—"
+              if isinstance(val, (int, float)):
+                c_val = dict_coeffs.get(mat.id, 1.0)
+                total_pts += val * c_val
+                total_c += c_val
+
+            moy_eval = round(total_pts / total_c, 2) if total_c > 0 else None
+
+            data_avec_moyenne.append({
+                "eleve_id": e.id,
+                "Matricule": e.matricule,
+                "Nom & Prénom": f"{e.nom} {e.prenom}",
+                "Moyenne": (
+                    f"{moy_eval:.2f}" if moy_eval is not None else "—"
+                ),
+                "moy_brute": moy_eval if moy_eval is not None else -1.0,
+                **notes_ligne,
+            })
+
+          data_avec_moyenne.sort(key=lambda x: x["moy_brute"], reverse=True)
+
+          tableau_merite = []
+          for idx, item in enumerate(data_avec_moyenne):
+            moy_val = item["moy_brute"]
+            rang_str = f"{idx + 1}e" if moy_val >= 0 else "En attente"
+
+            ligne_affichage = {
+                "Matricule": item["Matricule"],
+                "Nom & Prénom": item["Nom & Prénom"],
+            }
+            for mat in matieres_cycle:
+              ligne_affichage[mat.libelle] = item[mat.libelle]
+
+            # Moyenne et Rang positionnées en dernière position
+            ligne_affichage["Moyenne"] = item["Moyenne"]
+            ligne_affichage["Rang"] = rang_str
+
+            tableau_merite.append(ligne_affichage)
+
+          df_merite = pd.DataFrame(tableau_merite)
+          st.markdown(
+              f"#### 🏆 Classement par Ordre de Mérite & Synthèse — {type_vue}"
+              f" ({semestre_choisi})"
+          )
+          st.dataframe(df_merite, use_container_width=True)
+
+          excel_bytes = to_excel_buffer(df_merite)
+          st.download_button(
+              label=(
+                  f"📥 Télécharger le PV Excel officiel (.xlsx) — {type_vue}"
+              ),
+              data=excel_bytes,
+              file_name=(
+                  f"PV_resultats_{classe_choisie}_{type_vue}_"
+                  f"{semestre_choisi.replace(' ', '')}.xlsx"
+              ),
+              mime=(
+                  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              ),
+          )
+
+          st.markdown("### 📈 Indicateurs & Synthèse Pédagogique")
+          stats_matieres = []
+          for mat in matieres_cycle:
+            notes_mat = [
+                dict_notes.get((e.id, mat.id))
+                for e in eleves
+                if isinstance(dict_notes.get((e.id, mat.id)), (int, float))
+            ]
+            if notes_mat:
+              moy_mat = round(sum(notes_mat) / len(notes_mat), 2)
+              max_mat = max(notes_mat)
+              min_mat = min(notes_mat)
+            else:
+              moy_mat, max_mat, min_mat = "—", "—", "—"
+
+            stats_matieres.append({
+                "Matière": mat.libelle,
+                "Moyenne de classe": moy_mat,
+                "Note Max": max_mat,
+                "Note Min": min_mat,
+            })
+
+          df_stats = pd.DataFrame(stats_matieres)
+          st.dataframe(df_stats, use_container_width=True)
+
+        # --- 2. AFFICHAGE DES MOYENNES GLOBALES ---
         else:
-            school_name = st.session_state.get("school_name", "Établissement")
+          if type_vue == "Moyen-S1":
+            semestres_cibles = ["Semestre 1", "Trimestre 1", "Trimestre 2"]
+          elif type_vue == "Moyen-S2":
+            semestres_cibles = ["Semestre 2", "Trimestre 3"]
+          else:
+            semestres_cibles = None
 
-        tab_insp1, tab_insp2 = st.tabs(["🔍 Inspection du Cahier de Texte", "📊 Tableau de Bord Global & Effectifs"])
+          query_notes = (
+              db.query(Note)
+              .join(Eleve)
+              .filter(
+                  Note.school_id == target_school_id,
+                  Eleve.classe_id == classe_obj.id,
+              )
+          )
+          if semestres_cibles:
+            query_notes = query_notes.filter(
+                Note.semestre.in_(semestres_cibles)
+            )
 
-        with tab_insp1:
-            st.markdown(f"### Consultation du Cahier de Texte — **{school_name} ({cycle_en_cours})**")
+          toutes_notes = query_notes.all()
 
-            classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours)
-            matieres_query = db.query(Matiere).filter(Matiere.cycle == cycle_en_cours)
-            
-            # Prise en compte optionnelle du Soft Delete si présent dans le modèle
-            if hasattr(Classe, 'deleted_at'):
-                classes_query = classes_query.filter(Classe.deleted_at.is_(None))
-            if hasattr(Matiere, 'deleted_at'):
-                matieres_query = matieres_query.filter(Matiere.deleted_at.is_(None))
+          stats_eleves = {}
+          for e in eleves:
+            stats_eleves[e.id] = {
+                "total_points": 0.0,
+                "total_coeffs": 0.0,
+                "nb_notes": 0,
+            }
 
-            if not is_super_admin and school_id:
-                classes_query = classes_query.filter(Classe.school_id == school_id)
-                matieres_query = matieres_query.filter(Matiere.school_id == school_id)
+          dict_coeffs = {m.id: m.coefficient for m in matieres_cycle}
+
+          for n in toutes_notes:
+            if n.eleve_id in stats_eleves:
+              coeff = dict_coeffs.get(n.matiere_id, 1.0)
+              stats_eleves[n.eleve_id]["total_points"] += n.valeur * coeff
+              stats_eleves[n.eleve_id]["total_coeffs"] += coeff
+              stats_eleves[n.eleve_id]["nb_notes"] += 1
+
+          data_moyennes = []
+          for e in eleves:
+            st_el = stats_eleves[e.id]
+            if st_el["total_coeffs"] > 0:
+              moyenne = round(
+                  st_el["total_points"] / st_el["total_coeffs"], 2
+              )
             else:
-                classes_query = classes_query.filter(Classe.school_id == target_school_id)
-                matieres_query = matieres_query.filter(Matiere.school_id == target_school_id)
+              moyenne = None
 
-            classes_cycle = classes_query.all()
-            matieres_cycle = matieres_query.all()
+            data_moyennes.append({
+                "eleve_id": e.id,
+                "Matricule": e.matricule,
+                "Nom & Prénom": f"{e.nom} {e.prenom}",
+                "Moyenne": moyenne,
+            })
 
-            if not classes_cycle or not matieres_cycle:
-                st.warning(f"⚠️ Veuillez configurer les classes et les matières pour le cycle **{cycle_en_cours}**.")
+          data_moyennes.sort(
+              key=lambda x: x["Moyenne"] if x["Moyenne"] is not None else -1.0,
+              reverse=True,
+          )
+
+          tableau_final = []
+          for idx, item in enumerate(data_moyennes):
+            moy_val = item["Moyenne"]
+            moy_str = f"{moy_val:.2f}" if moy_val is not None else "—"
+            rang = f"{idx + 1}e" if moy_val is not None else "En attente"
+
+            if moy_val is not None:
+              if moy_val >= 16:
+                mention = "Très Bien"
+              elif moy_val >= 14:
+                mention = "Bien"
+              elif moy_val >= 12:
+                mention = "Assez Bien"
+              elif moy_val >= 10:
+                mention = "Passable"
+              else:
+                mention = "Insuffisant"
             else:
-                noms_classes = [c.libelle for c in classes_cycle]
-                noms_matieres = [m.libelle for m in matieres_cycle]
+              mention = "—"
 
-                # Filtres d'inspection par Classe, Matière et Date
-                col_i1, col_i2, col_i3 = st.columns(3)
-                with col_i1:
-                    classe_insp = st.selectbox("Sélectionner la classe", noms_classes, key="insp_cahier_classe")
-                with col_i2:
-                    matiere_insp = st.selectbox("Sélectionner la matière", noms_matieres, key="insp_cahier_matiere")
-                with col_i3:
-                    date_insp = st.date_input("Date du cours", value=datetime.now().date(), key="insp_cahier_date")
+            tableau_final.append({
+                "Matricule": item["Matricule"],
+                "Nom & Prénom": item["Nom & Prénom"],
+                "Moyenne Périodique": moy_str,
+                "Mention": mention,
+                "Rang": rang,
+            })
 
-                classe_obj = next((c for c in classes_cycle if c.libelle == classe_insp), None)
-                matiere_obj = next((m for m in matieres_cycle if m.libelle == matiere_insp), None)
+          df_moy = pd.DataFrame(tableau_final)
+          st.dataframe(df_moy, use_container_width=True)
 
-                if classe_obj and matiere_obj:
-                    # Recherche des entrées du cahier de texte correspondantes
-                    entrees_db = db.query(CahierTexte).filter(
-                        CahierTexte.school_id == target_school_id,
-                        CahierTexte.classe_id == classe_obj.id,
-                        CahierTexte.matiere_id == matiere_obj.id
-                    ).all()
+          excel_bytes_moy = to_excel_buffer(df_moy)
+          st.download_button(
+              label=(
+                  "📥 Télécharger le procès-verbal Excel des moyennes (.xlsx)"
+              ),
+              data=excel_bytes_moy,
+              file_name=(
+                  f"PV_moyennes_{classe_choisie}_{type_vue}_"
+                  f"{semestre_choisi.replace(' ', '')}.xlsx"
+              ),
+              mime=(
+                  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              ),
+          )
 
-                    # Filtrage exact sur la date sélectionnée
-                    entrees_jour = [
-                        e for e in entrees_db 
-                        if e.date and e.date.date() == date_insp
-                    ]
+        nouveau_log = ActivityLog(
+            school_id=target_school_id,
+            timestamp=datetime.utcnow(),
+            username=st.session_state.get("username", "admin"),
+            action=(
+                f"Consultation des notes ({type_vue} - {semestre_choisi}) -"
+                f" Classe {classe_choisie}"
+            ),
+            module="Consultation des notes",
+            statut="Succès",
+        )
+        db.add(nouveau_log)
+        db.commit()
 
-                    st.markdown("---")
-                    st.markdown(f"#### 📖 Enregistrement pour **{classe_insp}** en **{matiere_insp}** le **{date_insp.strftime('%d/%m/%Y')}**")
+  finally:
+    db.close()
 
-                    if not entrees_jour:
-                        st.info(f"⚠️ Aucun cours n'a été enregistré pour cette classe et cette matière à la date du **{date_insp.strftime('%d/%m/%Y')}**.")
-                    else:
-                        for idx, ent in enumerate(entrees_jour):
-                            with st.container():
-                                st.markdown(f"**Séance #{idx + 1}** | Enseignant : `{ent.enseignant_username or 'Administration'}` | Durée : `{getattr(ent, 'duree', 1.0)}h`")
-                                st.info(ent.contenu_realise or "Aucun contenu détaillé.")
-                                if ent.difficultees:
-                                    st.warning(f"**Difficultés / Remarques enseignant :** {ent.difficultees}")
 
-                        # --- FORMULAIRE D'OBSERVATION DE L'INSPECTEUR ---
-                        st.markdown("---")
-                        with st.form("form_obs_inspecteur_cahier"):
-                            st.markdown("#### ✍️ Formuler une Observation / Visa de l'Inspecteur")
-                            st.markdown("Cette observation sera enregistrée et transmise à l'administration dans le journal de supervision du cahier de texte.")
-
-                            texte_observation = st.text_area(
-                                "Observations pédagogiques et instructions *",
-                                placeholder="Ex: Cours conforme aux attentes pédagogiques, veiller à l'illustration graphique..."
-                            )
-
-                            submitted_obs = st.form_submit_button("Envoyer l'observation à l'administration", type="primary")
-                            if submitted_obs:
-                                if not texte_observation.strip():
-                                    st.error("⚠️ Veuillez rédiger votre observation.")
-                                else:
-                                    action_log = f"Observation Inspection [{classe_insp} - {matiere_insp} du {date_insp.strftime('%d/%m/%Y')}] par {username} : {texte_observation.strip()}"
-                                    
-                                    nouveau_log = ActivityLog(
-                                        school_id=target_school_id,
-                                        timestamp=datetime.utcnow(),
-                                        username=username,
-                                        action=action_log,
-                                        module="Supervision cahier",
-                                        statut="Observation Validée"
-                                    )
-                                    db.add(nouveau_log)
-                                    db.commit()
-
-                                    st.success("✅ Observation enregistrée et transmise avec succès à l'administration !")
-                                    st.rerun()
-
-        with tab_insp2:
-            st.markdown(f"### Tableau de Bord Global des Établissements ({cycle_en_cours})")
-            ecoles = db.query(School).all()
-
-            if not ecoles:
-                st.info("Aucun établissement enregistré dans la plateforme multi-écoles.")
-            else:
-                data_global = []
-                for ecole in ecoles:
-                    q_c = db.query(Classe).filter(Classe.school_id == ecole.id, Classe.cycle == cycle_en_cours)
-                    if hasattr(Classe, 'deleted_at'):
-                        q_c = q_c.filter(Classe.deleted_at.is_(None))
-                    classes_ids = [c.id for c in q_c.all()]
-                    nb_classes = len(classes_ids)
-
-                    q_e = db.query(Eleve).filter(Eleve.school_id == ecole.id)
-                    if hasattr(Eleve, 'deleted_at'):
-                        q_e = q_e.filter(Eleve.deleted_at.is_(None))
-                    if classes_ids:
-                        nb_eleves = q_e.filter(Eleve.classe_id.in_(classes_ids)).count()
-                    else:
-                        nb_eleves = 0
-
-                    data_global.append({
-                        "Établissement": getattr(ecole, 'nom', 'École'),
-                        "Cycle Actif": cycle_en_cours,
-                        "Nombre de Classes": nb_classes,
-                        "Effectif Total Élèves": nb_eleves,
-                        "Statut Conformité": "Conforme"
-                    })
-
-                df_global = pd.DataFrame(data_global)
-                st.dataframe(df_global, use_container_width=True)
-
-                nouveau_log = ActivityLog(
-                    school_id=target_school_id,
-                    timestamp=datetime.utcnow(),
-                    username=username,
-                    action=f"Consultation du tableau de bord global d'inspection ({cycle_en_cours})",
-                    module="Espace Inspection",
-                    statut="Succès"
-                )
-                db.add(nouveau_log)
-                db.commit()
-
-    finally:
-        db.close()
-
-# Définition explicite des alias pour garantir une compatibilité totale avec le routeur app.py
-def afficher_espace_inspection_academique():
-    afficher_espace_inspection()
+# Alias de compatibilité complète pour le routeur
+afficher_consultation_notes = afficher_consultation_notes
+afficher_consultation_des_notes = afficher_consultation_notes
+afficher_consultations_notes = afficher_consultation_notes
