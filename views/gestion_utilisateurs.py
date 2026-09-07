@@ -76,7 +76,6 @@ def afficher_gestion_utilisateurs():
             # Détermination du statut en ligne (actif il y a moins de 5 minutes)
             statut_connexion = "🔴 Hors ligne"
             if hasattr(u, "derniere_activite") and u.derniere_activite:
-              # Gestion de la différence de temps
               diff = maintenant - u.derniere_activite
               if diff < timedelta(minutes=5):
                 statut_connexion = "🟢 En ligne"
@@ -145,8 +144,8 @@ def afficher_gestion_utilisateurs():
 
         role_descriptions = {
             "directeur": (
-                "Accès complet à la gestion administrative, financière et"
-                " aux paramètres de l'école."
+                "Accès complet à la gestion administrative, financière et aux"
+                " paramètres de l'école."
             ),
             "enseignant": (
                 "Saisie des notes, émargement du cahier de texte et suivi de"
@@ -160,7 +159,10 @@ def afficher_gestion_utilisateurs():
                 "Gestion des absences, retours de discipline et cahier de"
                 " correspondance."
             ),
-            "inspecteur": "Supervision pédagogique et audit des notes.",
+            "inspecteur": (
+                "Supervision pédagogique, apposition de visas et audit des"
+                " notes (Portail Inspecteur dédié)."
+            ),
             "parent": (
                 "Accès restreint au portail famille pour le suivi exclusif de"
                 " l'enfant."
@@ -237,7 +239,9 @@ def afficher_gestion_utilisateurs():
               )
 
               if contact_tel.strip():
-                clean_num = "".join(filter(str.isdigit, contact_tel.strip()))
+                clean_num = "".join(
+                    filter(str.isdigit, contact_tel.strip())
+                )
                 if len(clean_num) == 8:
                   clean_num = "227" + clean_num
                 msg = (

@@ -2,7 +2,7 @@ from datetime import datetime
 import io
 from database.audit import log_action_erp
 from database.db_config import SessionLocal
-from database.models import ActivityLog, Classe, Eleve, Paiement, School
+from database.models import ActivityLog, Classe, Depense, Eleve, Paiement, School
 import pandas as pd
 import streamlit as st
 
@@ -12,7 +12,7 @@ def afficher_tableau_finances():
   st.markdown(
       "Vue macroscopique incluant la ventilation des cotisations par classe,"
       " cycle et établissement avec prise en compte stricte des frais de"
-      " scolarité, des frais COGES et des réductions nominatives."
+      " scolarité, des frais COGES, des réductions nominatives, des salaires et des charges opérationnelles."
   )
   st.markdown("---")
 
@@ -93,6 +93,15 @@ def afficher_tableau_finances():
       )
       total_encaisse += montant_paye
 
+    # Récupération et calcul des dépenses et salaires pour le cycle/école active
+    depenses_query = db.query(Depense).filter(
+        Depense.school_id == ecole_active_id,
+        Depense.cycle == cycle_en_cours
+    )
+    depenses_list = depenses_query.all()
+    total_depenses = sum(float(d.montant or 0.0) for d in depenses_list)
+    solde_net_caisse = total_encaisse - total_depenses
+
     taux = (
         (total_encaisse / budget_attendu * 100) if budget_attendu > 0 else 0.0
     )
@@ -102,7 +111,7 @@ def afficher_tableau_finances():
         f"### Tableau Financier Global — **{school_name} ({cycle_en_cours})**"
     )
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
       st.metric("Classes Actives", total_classes)
     with col2:
@@ -114,6 +123,13 @@ def afficher_tableau_finances():
           "Total Encaissé",
           f"{total_encaisse:,.0f} FCFA",
           delta=f"{taux:.1f}% réalisé",
+      )
+    with col5:
+      st.metric(
+          "Solde Net en Caisse",
+          f"{solde_net_caisse:,.0f} FCFA",
+          delta="Disponible" if solde_net_caisse >= 0 else "Déficit",
+          delta_color="normal" if solde_net_caisse >= 0 else "inverse",
       )
 
     st.markdown("---")

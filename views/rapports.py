@@ -10,9 +10,9 @@ import streamlit as st
 def afficher_rapports():
   st.subheader("📑 Rapports & Bilan Financier Consolidé")
   st.markdown(
-      "Synthèse macroscopique des flux de trésorerie, suivi consolidé par"
-      " établissement, par cycle et par poste de recette avec indicateurs de"
-      " recouvrement."
+      "Synthèse macroscopique des flux de trésorerie avec ventilation"
+      " analytique des salaires (fixes et vacations horaires) et des charges"
+      " opérationnelles."
   )
   st.markdown("---")
 
@@ -60,14 +60,34 @@ def afficher_rapports():
           sum(p.montant for p in paiements_eleves) if paiements_eleves else 0.0
       )
 
-    # Calcul des dépenses réelles
+    # Récupération et ventilation analytique des dépenses et salaires
     depenses_query = db.query(Depense).filter(Depense.cycle == cycle_en_cours)
     if not is_super_admin and school_id:
       depenses_query = depenses_query.filter(Depense.school_id == school_id)
     depenses_list = depenses_query.all()
-    total_depenses = (
-        sum(d.montant for d in depenses_list) if depenses_list else 0.0
-    )
+
+    total_depenses = 0.0
+    total_salaires_fixes = 0.0
+    total_salaires_vacations = 0.0
+    total_charges_classiques = 0.0
+
+    for d in depenses_list:
+      montant_d = float(d.montant or 0.0)
+      total_depenses += montant_d
+      cat = str(getattr(d, "categorie", "")).lower()
+      lib = str(getattr(d, "libelle", "")).lower()
+
+      if "fixe" in cat or "fixe" in lib or "salaires fixes" in cat:
+        total_salaires_fixes += montant_d
+      elif (
+          "vacation" in cat
+          or "vacation" in lib
+          .lower()
+          or "salaires & vacations" in cat
+      ):
+        total_salaires_vacations += montant_d
+      else:
+        total_charges_classiques += montant_d
 
     resultat_net = total_recettes - total_depenses
 
@@ -104,7 +124,7 @@ def afficher_rapports():
       with col1:
         st.metric("Total Recettes Encaissées", f"{total_recettes:,.0f} FCFA")
       with col2:
-        st.metric("Total Dépenses Sorties", f"{total_depenses:,.0f} FCFA")
+        st.metric("Total Sorties (Charges & Paie)", f"{total_depenses:,.0f} FCFA")
       with col3:
         st.metric(
             "Résultat Net de Trésorerie",
@@ -116,6 +136,16 @@ def afficher_rapports():
         st.metric(
             "Taux de Recouvrement", f"{taux_recouvrement_global:.1f}%"
         )
+
+      st.markdown("---")
+      st.markdown("#### 💳 Analyse Analytique des Sorties de Trésorerie")
+      col_a1, col_a2, col_a3 = st.columns(3)
+      with col_a1:
+        st.metric("Salaires Fixes (Permanents/Admin)", f"{total_salaires_fixes:,.0f} FCFA")
+      with col_a2:
+        st.metric("Salaires Vacations (Horaires)", f"{total_salaires_vacations:,.0f} FCFA")
+      with col_a3:
+        st.metric("Charges Opérationnelles Classiques", f"{total_charges_classiques:,.0f} FCFA")
 
       st.markdown("---")
       st.markdown(
@@ -144,7 +174,6 @@ def afficher_rapports():
                 sum(p.montant for p in p_classe) if p_classe else 0.0
             )
 
-          # Calcul du net attendu pour cette classe
           frais_base_classe = float(classe.frais_scolarite or 0.0) + float(
               getattr(classe, "frais_coges", 0.0) or 0.0
           )
@@ -168,7 +197,6 @@ def afficher_rapports():
         df_rapport = pd.DataFrame(rapport_data)
         st.dataframe(df_rapport, use_container_width=True)
 
-        # Bouton d'exportation Excel du Bilan Consolidé
         output_io = io.BytesIO()
         with pd.ExcelWriter(output_io, engine="openpyxl") as writer:
           df_rapport.to_excel(
