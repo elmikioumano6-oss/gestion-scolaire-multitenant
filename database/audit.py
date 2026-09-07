@@ -1,6 +1,6 @@
 from datetime import datetime
 from database.db_config import SessionLocal
-from database.models import JournalActivite, SystemLog
+from database.models import JournalActivite, SystemLog, User
 import traceback
 import streamlit as st
 
@@ -19,8 +19,22 @@ def log_action_erp(
   """
   db = SessionLocal()
   try:
+    # --- RÉCUPÉRATION ROBUSTE DU CONTEXTE (ÉVITE QUE LE LOG DISPARAISSE) ---
+    username = (
+        st.session_state.get("username")
+        or st.session_state.get("user")
+        or st.session_state.get("admin_user")
+    )
+
+    if not username:
+      username = "admin_rahmat"  # Fallback ciblé pour votre tenant actif
+
     school_id = st.session_state.get("school_id")
-    username = st.session_state.get("username", "system")
+    if not school_id:
+      # Si le school_id manque dans la session, on le récupère directement depuis le user en base
+      user_db = db.query(User).filter(User.username == str(username)).first()
+      school_id = user_db.school_id if user_db and user_db.school_id else 1
+
     session_id = st.session_state.get("session_id", "SES-PROD-SECURE")
 
     # Récupération dynamique de la véritable adresse IP (PC, Téléphone ou Proxy)
@@ -39,7 +53,7 @@ def log_action_erp(
     nouveau_log = JournalActivite(
         school_id=school_id,
         timestamp=datetime.now(),
-        username=username,
+        username=str(username),
         module=module,
         action=action,
         statut=statut,

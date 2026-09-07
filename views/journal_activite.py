@@ -1,9 +1,9 @@
-import streamlit as st
-import pandas as pd
 from datetime import datetime, date, time, timedelta
 import io
-from database.db_config import SessionLocal, engine
 import sqlalchemy as sa
+import pandas as pd
+import streamlit as st
+from database.db_config import SessionLocal, engine
 from database.models import School, JournalActivite, User
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
