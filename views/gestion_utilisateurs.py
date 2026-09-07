@@ -1,7 +1,11 @@
 from datetime import datetime
+import urllib.parse
+import random
+import string
+import bcrypt
 from database.audit import log_action_erp
 from database.db_config import SessionLocal
-from database.models import Enseignant, School
+from database.models import Enseignant, School, User
 import pandas as pd
 import streamlit as st
 
@@ -46,108 +50,196 @@ def afficher_gestion_utilisateurs():
         "➕ Nouvel Utilisateur",
     ])
 
-    if "users_data" not in st.session_state:
-      st.session_state["users_data"] = {
-          "CSP Rahmat-FH": [
-              {
-                  "Nom d'utilisateur": "admin_rahmat",
-                  "Rôle / Fonction": "directeur",
-                  "Cycle d'affectation": "Tous les cycles",
-                  "Dernière activité": "2026-09-02 13:57:54.358633",
-              }
-          ]
-      }
-
-    key_store = school_name
-    utilisateurs_ecole = st.session_state["users_data"].get(key_store, [])
-
     with tab_liste:
       st.markdown(
           f"### Utilisateurs Actifs — **{school_name} ({cycle_en_cours})**"
       )
-      if not utilisateurs_ecole:
+      users_query = db.query(User)
+      if not is_super_admin and school_id:
+        users_query = users_query.filter(User.school_id == school_id)
+      
+      utilisateurs_db = users_query.all()
+      if not utilisateurs_db:
         st.info("Aucun utilisateur enregistré dans cet établissement.")
       else:
-        df_users = pd.DataFrame(utilisateurs_ecole)
+        data_u = []
+        for u in utilisateurs_db:
+          data_u.append({
+              "Nom d'utilisateur": u.username,
+              "Rôle / Fonction": getattr(u, 'role', 'N/D'),
+              "Mot de passe à changer": "Oui" if getattr(u, 'changer_mdp_requis', False) else "Non"
+          })
+        df_users = pd.DataFrame(data_u)
         st.dataframe(df_users, use_container_width=True)
 
     with tab_ajout:
       st.markdown(
           f"### Création d'un Nouveau Compte Utilisateur — **{school_name}**"
       )
-      
-      # Récupération de la liste des enseignants pour liaison éventuelle
-      enseignants_db = db.query(Enseignant).filter(Enseignant.school_id == (school_id or 1)).all()
+
+      # Gestion d'un mot de passe généré automatiquement en session
+      if "temp_gen_pwd" not in st.session_state:
+        st.session_state["temp_gen_pwd"] = ""
+
+      col_g1, col_g2 = st.columns([3, 1])
+      with col_g2:
+        if st.button("🎲 Générer un MDP sécurisé"):
+          chars = string.ascii_letters + string.digits + "@#$%&!"
+          st.session_state["temp_gen_pwd"] = "".join(
+              random.choice(chars) for _ in range(8)
+          )
+          st.rerun()
+
+      enseignants_db = (
+          db.query(Enseignant)
+          .filter(Enseignant.school_id == (school_id or 1))
+          .all()
+      )
       noms_enseignants = [f"{e.nom} {e.prenom}" for e in enseignants_db]
 
       with st.form("form_creation_compte"):
         col1, col2 = st.columns(2)
         with col1:
           nouveau_user = st.text_input("Nom d'utilisateur (Identifiant)")
-          mot_de_passe = st.text_input("Mot de passe provisoire", type="password")
+          mot_de_passe = st.text_input(
+              "Mot de passe provisoire",
+              value=st.session_state["temp_gen_pwd"],
+              type="password",
+          )
         with col2:
+          role_options = {
+              "directeur": "Directeur / Administrateur",
+              "enseignant": "Enseignant / Professeur",
+              "econome": "Économe / Finances",
+              "surveillant": "Surveillant Général",
+              "inspecteur": "Inspecteur",
+              "parent": "Parent d'élève",
+          }
           role_attribue = st.selectbox(
-              "Rôle / Fonction",
-              [
-                  "directeur",
-                  "enseignant",
-                  "econome",
-                  "surveillant",
-                  "inspecteur",
-                  "parent",
-              ],
+              "Rôle / Fonction", options=list(role_options.keys())
           )
           cycle_associe = st.selectbox(
               "Cycle d'affectation",
               ["Collège", "Lycée", "Tous les cycles"],
           )
 
-        # Liaison conditionnelle si le rôle est enseignant
+        # Aide contextuelle dynamique selon le rôle
+        role_descriptions = {
+            "directeur": (
+                "Accès complet à la gestion administrative, financière et"
+                " aux paramètres de l'école."
+            ),
+            "enseignant": (
+                "Saisie des notes, émargement du cahier de texte et suivi de"
+                " classe."
+            ),
+            "econome": (
+                "Gestion de la trésorerie, encaissements de scolarité et suivi"
+                " des dépenses."
+            ),
+            "surveillant": (
+                "Gestion des absences, retours de discipline et cahier de"
+                " correspondance."
+            ),
+            "inspecteur": "Supervision pédagogique et audit des notes.",
+            "parent": (
+                "Accès restreint au portail famille pour le suivi exclusif de"
+                " l'enfant."
+            ),
+        }
+        st.markdown(
+            f"<div style='background-color: rgba(217, 119, 6, 0.1); padding: 8px 12px; border-radius: 6px; border-left: 3px solid #D97706; font-size: 0.85rem; color: #E2E8F0; margin-bottom: 10px;'>ℹ️ <b>Permission :</b> {role_descriptions.get(role_attribue, 'Accès standard')}</div>",
+            unsafe_allow_html=True,
+        )
+
         prof_lie = None
         if role_attribue == "enseignant" and noms_enseignants:
-          prof_lie = st.selectbox("Lier à un enseignant enregistré", ["Aucun"] + noms_enseignants)
+          prof_lie = st.selectbox(
+              "Lier à un enseignant enregistré", ["Aucun"] + noms_enseignants
+          )
+
+        contact_tel = st.text_input(
+            "Numéro de téléphone (WhatsApp optionnel pour notification)",
+            placeholder="Ex: 90123456",
+        )
 
         submitted_user = st.form_submit_button(
-            "💾 Créer le Compte Utilisateur", type="primary"
+            "💾 Créer et Sécuriser le Compte Utilisateur", type="primary"
         )
         if submitted_user:
           if not nouveau_user or not mot_de_passe:
             st.error("⚠️ Veuillez renseigner l'identifiant et le mot de passe.")
+          elif len(mot_de_passe) < 6:
+            st.error("⚠️ Le mot de passe doit contenir au moins 6 caractères.")
           else:
-            existe_deja = any(
-                u["Nom d'utilisateur"] == nouveau_user for u in utilisateurs_ecole
+            existe_deja = (
+                db.query(User)
+                .filter(User.username == nouveau_user.strip())
+                .first()
             )
             if existe_deja:
               st.error(
-                  f"⚠️ Un utilisateur portant l'identifiant '{nouveau_user}' existe déjà."
+                  f"⚠️ Un utilisateur portant l'identifiant '{nouveau_user}'"
+                  " existe déjà."
               )
             else:
-              nouveau_compte = {
-                  "Nom d'utilisateur": nouveau_user,
-                  "Rôle / Fonction": role_attribue,
-                  "Cycle d'affectation": cycle_associe,
-                  "Enseignant lié": prof_lie if prof_lie and prof_lie != "Aucun" else "—",
-                  "Dernière activité": str(datetime.utcnow()),
-              }
-              if key_store not in st.session_state["users_data"]:
-                st.session_state["users_data"][key_store] = []
-              st.session_state["users_data"][key_store].append(nouveau_compte)
+              hashed = bcrypt.hashpw(
+                  mot_de_passe.encode("utf-8"), bcrypt.gensalt()
+              ).decode("utf-8")
+              nouveau_compte = User(
+                  school_id=school_id if school_id else 1,
+                  username=nouveau_user.strip(),
+                  password=hashed,
+                  role=role_attribue,
+                  changer_mdp_requis=True,
+              )
+              db.add(nouveau_compte)
 
               log_action_erp(
-                  module="Gestion Comptes",
+                  module="IAM & Sécurité",
                   action=(
-                      f"Création de compte utilisateur : {nouveau_user} (Rôle:"
-                      f" {role_attribue}, Cycle: {cycle_associe})"
+                      f"Création du compte utilisateur : {nouveau_user.strip()}"
+                      f" (Rôle: {role_attribue}, Cycle: {cycle_associe})"
                   ),
                   statut="Critique",
                   valeur_avant="Inexistant",
                   valeur_apres=f"Compte actif [{role_attribue} - {cycle_associe}]",
               )
 
+              db.commit()
+
+              if "temp_gen_pwd" in st.session_state:
+                st.session_state["temp_gen_pwd"] = ""
+
               st.success(
-                  f"✅ Le compte de **{nouveau_user}** ({role_attribue}) a"
-                  f" été créé avec succès pour le cycle **{cycle_associe}** !"
+                  f"✅ Le compte de **{nouveau_user.strip()}** ({role_attribue})"
+                  f" a été créé avec succès ! Un changement de mot de passe"
+                  f" sera exigé à sa première connexion."
               )
+
+              if contact_tel.strip():
+                clean_num = "".join(filter(str.isdigit, contact_tel.strip()))
+                if len(clean_num) == 8:
+                  clean_num = "227" + clean_num
+                msg = (
+                    f"Bonjour, votre compte {role_attribue} pour"
+                    f" l'établissement {school_name} est créé.\n👤 Identifiant"
+                    f" : {nouveau_user.strip()}\n🔑 Mot de passe provisoire :"
+                    f" {mot_de_passe}\n⚠️ Modification obligatoire à la"
+                    f" connexion."
+                )
+                wa_url = (
+                    f"https://wa.me/{clean_num}?text="
+                    + urllib.parse.quote(msg)
+                )
+                st.markdown(
+                    f"""
+                            <a href="{wa_url}" target="_blank" style="display:inline-block;background-color:#25D366;color:white;padding:8px 16px;border-radius:5px;text-decoration:none;font-weight:bold;margin-top:10px;">
+                                📲 Envoyer les accès par WhatsApp
+                            </a>
+                            """,
+                    unsafe_allow_html=True,
+                )
 
   finally:
     db.close()
