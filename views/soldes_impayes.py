@@ -11,8 +11,8 @@ def afficher_soldes_impayes(niveau_actif="Collège"):
   st.subheader("📊 Soldes & Suivi des Impayés")
   st.markdown(
       "Suivi des encaissements, des réductions et des soldes restants par élève"
-      " avec prise en compte des quittances saisies par la comptabilité,"
-      " conformité comptable (contre-passation) et gouvernance RBAC stricte."
+      " avec gestion des contre-passations basées sur les reçus saisis par la"
+      " comptabilité."
   )
   st.markdown("---")
 
@@ -190,9 +190,9 @@ def afficher_soldes_impayes(niveau_actif="Collège"):
     st.markdown("---")
     st.markdown("### 🛠️ Gestion & Contre-Passation des Versements Erronés")
     st.markdown(
-        "Conformément aux normes comptables internationales, la suppression"
-        " physique est remplacée par une écriture de contre-passation (Avoir /"
-        " Régularisation) pour garantir l'immutabilité du grand livre."
+        "Conformément aux normes comptables, la suppression physique est"
+        " remplacée par une écriture de contre-passation. La référence affichée"
+        " ci-dessous est celle saisie par la comptable lors de l'encaissement."
     )
 
     if not profil_autorise_annulation:
@@ -224,58 +224,95 @@ def afficher_soldes_impayes(niveau_actif="Collège"):
         st.info("Aucun versement enregistré pour cet élève.")
       else:
         for p in historique_paiements:
-          col_p1, col_p2, col_p3, col_p4 = st.columns([2, 2, 2, 1])
-          col_p1.write(f"**Reçu :** {p.reference_recu}")
-          col_p2.write(f"**Montant :** {p.montant:,.0f} F")
-          col_p3.write(f"**Motif :** {p.motif}")
+          # On affiche strictement ce qui a été saisi, sans aucune invention automatique
+          ref_saisie = str(getattr(p, "reference_recu", "") or "").strip()
+          affichage_ref = ref_saisie if ref_saisie else "Aucune référence saisie"
 
-          with col_p4:
-            if st.button(
-                "🔄 Contre-passer",
-                key=f"contrepasser_paiement_{p.id}",
-                help="Émettre une écriture de régularisation (Avoir)",
-            ):
-              montant_annule = float(p.montant)
-              ref_orig = p.reference_recu
-              motif_orig = p.motif
-
-              paiement_avoir = Paiement(
-                  school_id=school_id,
-                  eleve_id=eleve_gerer_id,
-                  montant=-montant_annule,
-                  motif=(
-                      f"CONTRE-PASSATION (Avoir) - Réf: {ref_orig}"
-                      f" ({motif_orig})"
-                  ),
-                  mode_reglement="Régularisation Comptable",
-                  reference_recu=f"AVOIR-{ref_orig}",
-                  agent_caisse=username_connecte,
-                  date_paiement=datetime.utcnow(),
-              )
-              db.add(paiement_avoir)
-
-              db.add(
-                  ActivityLog(
-                      school_id=school_id,
-                      timestamp=datetime.utcnow(),
-                      username=username_connecte,
-                      action=(
-                          f"Contre-passation de {montant_annule:,.0f} F sur la"
-                          f" quittance {ref_orig} (Élève ID: {eleve_gerer_id})"
-                      ),
-                      module="Soldes & Impayés",
-                      statut="Succès",
-                  )
-              )
-              db.commit()
-              st.success(
-                  f"✅ Écriture de contre-passation (Avoir) générée avec succès"
-                  f" pour le reçu {ref_orig} !"
-              )
-              st.rerun()
           st.markdown(
-              "<hr style='margin: 0.1rem 0;"
-              " border-color: rgba(255,255,255,0.05);'>",
+              f"**N° de Reçu (Saisi) :** `{affichage_ref}` | **Montant :**"
+              f" `{p.montant:,.0f} F` | **Motif :** {p.motif}"
+          )
+
+          with st.form(key=f"form_contrepasser_{p.id}"):
+            # Laisse la comptable saisir librement le numéro de son reçu d'avoir papier
+            ref_avoir_saisie = st.text_input(
+                "N° de Reçu d'Avoir / Quittance de Régularisation (Saisie libre"
+                " obligatoire)",
+                value="",
+                placeholder="Ex: AVOIR-001 ou numéro du carnet papier",
+                help=(
+                    "Saisissez le numéro exact de votre quittance papier"
+                    " d'avoir."
+                ),
+            )
+
+            submitted_cp = st.form_submit_button(
+                "🔄 Valider la Contre-Passation", type="primary"
+            )
+
+            if submitted_cp:
+              ref_avoir_finale = ref_avoir_saisie.strip()
+              if not ref_avoir_finale:
+                st.error("⚠️ Le numéro de reçu d'avoir est obligatoire.")
+              else:
+                doublon_avoir = (
+                    db.query(Paiement)
+                    .filter(
+                        Paiement.school_id == school_id,
+                        Paiement.reference_recu == ref_avoir_finale,
+                    )
+                    .first()
+                )
+
+                if doublon_avoir:
+                  st.error(
+                      f"⚠️ La référence '{ref_avoir_finale}' existe déjà dans"
+                      " le système."
+                  )
+                else:
+                  montant_annule = float(p.montant)
+                  ref_orig = ref_saisie if ref_saisie else "Sans Réf"
+                  motif_orig = p.motif
+
+                  paiement_avoir = Paiement(
+                      school_id=school_id,
+                      eleve_id=eleve_gerer_id,
+                      montant=-montant_annule,
+                      motif=(
+                          f"CONTRE-PASSATION (Avoir) - Réf: {ref_orig}"
+                          f" ({motif_orig})"
+                      ),
+                      mode_reglement="Régularisation Comptable",
+                      reference_recu=ref_avoir_finale,
+                      agent_caisse=username_connecte,
+                      date_paiement=datetime.utcnow(),
+                  )
+                  db.add(paiement_avoir)
+
+                  db.add(
+                      ActivityLog(
+                          school_id=school_id,
+                          timestamp=datetime.utcnow(),
+                          username=username_connecte,
+                          action=(
+                              f"Contre-passation de {montant_annule:,.0f} F"
+                              f" (Reçu d'avoir: {ref_avoir_finale}) pour la"
+                              f" quittance {ref_orig}"
+                          ),
+                          module="Soldes & Impayés",
+                          statut="Succès",
+                      )
+                  )
+                  db.commit()
+                  st.success(
+                      "✅ Contre-passation enregistrée avec succès sous la"
+                      f" référence **{ref_avoir_finale}** !"
+                  )
+                  st.rerun()
+
+          st.markdown(
+              "<hr style='margin: 0.5rem 0;"
+              " border-color: rgba(255,255,255,0.1);'>",
               unsafe_allow_html=True,
           )
 
@@ -295,6 +332,6 @@ def afficher_soldes_impayes(niveau_actif="Collège"):
     db.close()
 
 
-# Alias de compatibilité indispensable pour le routeur
+# Alias de compatibilité
 afficher_soldes_impayes = afficher_soldes_impayes
 afficher_soldes_et_impayes = afficher_soldes_impayes
