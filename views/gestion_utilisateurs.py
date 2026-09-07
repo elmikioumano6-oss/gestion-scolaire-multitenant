@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import urllib.parse
 import random
 import string
@@ -14,7 +14,8 @@ def afficher_gestion_utilisateurs():
   st.subheader("👥 Gestion des Comptes Utilisateurs & Rôles")
   st.markdown(
       "Administration sécurisée des accès, des comptes et des rôles du"
-      " personnel avec isolation multi-tenant stricte."
+      " personnel avec isolation multi-tenant stricte et suivi des statuts en"
+      " temps réel."
   )
   st.markdown("---")
 
@@ -54,21 +55,41 @@ def afficher_gestion_utilisateurs():
       st.markdown(
           f"### Utilisateurs Actifs — **{school_name} ({cycle_en_cours})**"
       )
+
+      # FILTRAGE STRICT PAR ÉCOLE ACTIVE
       users_query = db.query(User)
-      if not is_super_admin and school_id:
+      if school_id:
         users_query = users_query.filter(User.school_id == school_id)
-      
+
       utilisateurs_db = users_query.all()
       if not utilisateurs_db:
         st.info("Aucun utilisateur enregistré dans cet établissement.")
       else:
         data_u = []
+        noms_vus = set()
+        maintenant = datetime.now()
+
         for u in utilisateurs_db:
-          data_u.append({
-              "Nom d'utilisateur": u.username,
-              "Rôle / Fonction": getattr(u, 'role', 'N/D'),
-              "Mot de passe à changer": "Oui" if getattr(u, 'changer_mdp_requis', False) else "Non"
-          })
+          if u.username not in noms_vus:
+            noms_vus.add(u.username)
+
+            # Détermination du statut en ligne (actif il y a moins de 5 minutes)
+            statut_connexion = "🔴 Hors ligne"
+            if hasattr(u, "derniere_activite") and u.derniere_activite:
+              # Gestion de la différence de temps
+              diff = maintenant - u.derniere_activite
+              if diff < timedelta(minutes=5):
+                statut_connexion = "🟢 En ligne"
+
+            data_u.append({
+                "Nom d'utilisateur": u.username,
+                "Rôle / Fonction": getattr(u, "role", "N/D"),
+                "Statut Actuel": statut_connexion,
+                "Mot de passe à changer": (
+                    "Oui" if getattr(u, "changer_mdp_requis", False) else "Non"
+                ),
+            })
+
         df_users = pd.DataFrame(data_u)
         st.dataframe(df_users, use_container_width=True)
 
@@ -77,7 +98,6 @@ def afficher_gestion_utilisateurs():
           f"### Création d'un Nouveau Compte Utilisateur — **{school_name}**"
       )
 
-      # Gestion d'un mot de passe généré automatiquement en session
       if "temp_gen_pwd" not in st.session_state:
         st.session_state["temp_gen_pwd"] = ""
 
@@ -123,7 +143,6 @@ def afficher_gestion_utilisateurs():
               ["Collège", "Lycée", "Tous les cycles"],
           )
 
-        # Aide contextuelle dynamique selon le rôle
         role_descriptions = {
             "directeur": (
                 "Accès complet à la gestion administrative, financière et"
