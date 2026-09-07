@@ -306,8 +306,11 @@ def afficher_super_admin():
                             "#### 👤 Gestion des Comptes Administrateurs / Censeurs"
                         )
 
+                        # CORRECTION MULTI-TENANT STRICT ICI : Filtrage par ecole.id
                         utilisateurs_ecole = (
-                            db.query(User).filter(User.school_id == ecole.id).all()
+                            db.query(User)
+                            .filter(User.school_id == ecole.id)
+                            .all()
                         )
                         if utilisateurs_ecole:
                             for u in utilisateurs_ecole:
