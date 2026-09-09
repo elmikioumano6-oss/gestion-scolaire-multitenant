@@ -9,6 +9,42 @@ import bcrypt
 from streamlit_option_menu import option_menu
 
 
+def init_tenant_context():
+    """Détecte le tenant par sous-domaine ou initialise l'école par défaut en session."""
+    if "school_id" in st.session_state and st.session_state["school_id"]:
+        return
+
+    db = SessionLocal()
+    try:
+        subdomain = "default"
+        try:
+            host = st.context.headers.get("Host", "") or st.context.headers.get("X-Forwarded-Host", "")
+            if host and "localhost" not in host and "127.0.0.1" not in host:
+                parts = host.split(".")
+                if len(parts) > 2:
+                    subdomain = parts[0].lower()
+        except Exception:
+            pass
+
+        school = None
+        if subdomain != "default":
+            school = db.query(School).filter(School.subdomain == subdomain).first()
+        
+        # Fallback sur la première école si aucun sous-domaine ne correspond
+        if not school:
+            school = db.query(School).first()
+
+        if school:
+            st.session_state["school_id"] = school.id
+            st.session_state["school_name"] = school.nom
+            st.session_state["school_code"] = school.code
+        else:
+            st.session_state["school_id"] = 1
+            st.session_state["school_name"] = "Default School"
+    finally:
+        db.close()
+
+
 def main():
     st.set_page_config(
         page_title="Gestion Scolaire Pro - Plateforme Multi-Tenant",
@@ -19,37 +55,9 @@ def main():
 
     # --- INITIALISATION ET MIGRATIONS AUTOMATIQUES ---
     init_db()
-
-    # --- EXTRACTION DU SOUS-DOMAINE MULTI-TENANT ---
-    host = ""
-    try:
-        host = st.context.headers.get("Host", "") or st.context.headers.get(
-            "X-Forwarded-Host", ""
-        )
-    except Exception:
-        pass
-
-    # Isolation du sous-domaine (ex: ecole1.gestionscolairepro.com -> ecole1)
-    subdomain = None
-    if host and "localhost" not in host and "127.0.0.1" not in host:
-        parts = host.split(".")
-        if len(parts) > 2:
-            subdomain = parts[0].lower()
-
-    # Liaison automatique avec l'école correspondante en base de données
-    if subdomain and not st.session_state.get("school_id"):
-        db_tenant = SessionLocal()
-        try:
-            school_obj = (
-                db_tenant.query(School).filter(School.subdomain == subdomain).first()
-            )
-            if school_obj:
-                st.session_state["school_id"] = school_obj.id
-                st.session_state["school_name"] = school_obj.nom
-        except Exception:
-            pass
-        finally:
-            db_tenant.close()
+    
+    # --- INITIALISATION DU CONTEXTE MULTI-TENANT ---
+    init_tenant_context()
 
     # --- INITIALISATION DE L'ÉTAT DE SESSION ---
     if "authenticated" not in st.session_state:
