@@ -1,7 +1,7 @@
 import os
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, Session
 import streamlit as st
 
 # Récupération sécurisée depuis st.secrets (Production) ou repli isolé sur staging.db (Staging)
@@ -28,7 +28,28 @@ else:
         connect_args=connect_args
     )
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+class TenantSession(Session):
+    """Session SQLAlchemy personnalisée qui isole automatiquement les données par school_id."""
+    def query(self, *entities, **kwargs):
+        query = super().query(*entities, **kwargs)
+        
+        # Si on est dans Streamlit et qu'un tenant est actif (et pas super admin)
+        try:
+            school_id = st.session_state.get("school_id")
+            is_super = st.session_state.get("is_super_admin", False)
+            
+            if school_id and not is_super:
+                for entity in entities:
+                    # On vérifie si l'entité possède un attribut/colonne school_id
+                    if hasattr(entity, "school_id"):
+                        query = query.filter(entity.school_id == school_id)
+        except Exception:
+            pass # Hors contexte Streamlit ou session non initialisée
+            
+        return query
+
+# Utilisation de notre classe de session cloisonnée pour le multi-tenancy
+SessionLocal = sessionmaker(class_=TenantSession, autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 def init_db():
