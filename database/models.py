@@ -10,6 +10,7 @@ class School(Base):
     id = Column(Integer, primary_key=True, index=True)
     nom = Column(String(150), nullable=False)
     code = Column(String(50), unique=True, nullable=False)
+    subdomain = Column(String(100), unique=True, index=True, nullable=True)
     devise = Column(String(255), default="Excellence - Persévérance - Réussite")
     adresse = Column(String(255), default="Quartier, Niamey - Niger")
     contacts = Column(String(255), default="N/D")
@@ -19,6 +20,10 @@ class School(Base):
     deleted_at = Column(DateTime, nullable=True)  # Soft Delete ERP
     date_expiration = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
+
+    # Nouveaux champs pour la gestion des comptes Démo / Essai
+    is_trial = Column(Boolean, default=False)
+    trial_expires_at = Column(DateTime, nullable=True)
 
     annees = relationship("AnneeScolaire", back_populates="school", cascade="all, delete-orphan")
     classes = relationship("Classe", back_populates="school", cascade="all, delete-orphan")
