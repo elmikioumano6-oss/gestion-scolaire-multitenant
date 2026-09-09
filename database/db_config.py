@@ -50,6 +50,7 @@ def init_db():
         "ALTER TABLE cahiers_texte ADD COLUMN duree FLOAT DEFAULT 1.0;",
         "ALTER TABLE users ADD COLUMN deleted_at TIMESTAMP;",
         "ALTER TABLE schools ADD COLUMN deleted_at TIMESTAMP;",
+        "ALTER TABLE schools ADD COLUMN subdomain VARCHAR;",
         "ALTER TABLE classes ADD COLUMN deleted_at TIMESTAMP;",
         "ALTER TABLE eleves ADD COLUMN deleted_at TIMESTAMP;"
     ]
