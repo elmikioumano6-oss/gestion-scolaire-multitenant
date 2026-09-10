@@ -104,9 +104,8 @@ def afficher_super_admin():
             cred = st.session_state["last_created_credentials"]
             st.success(f"✅ Compte généré avec succès pour **{cred['school_name']}** !")
 
-            lien_plateforme = (
-                "https://gestion-scolaire-multitenant-fcdbzcspet6krxvurgmfny.streamlit.app"
-            )
+            # L'URL corrigée pointe désormais vers votre domaine de production officiel
+            lien_plateforme = "https://app.gestionscolairepro.com"
 
             msg = (
                 f"Bonjour, votre espace de gestion pour l'établissement"
@@ -191,7 +190,6 @@ def afficher_super_admin():
                         "✅ Actif" if getattr(ecole, "actif", True) else "⛔ Suspendu"
                     )
                     
-                    # Indicateur visuel pour les comptes d'essai (Trial/Demo)
                     badge_essai = " 🧪 [ESSAI]" if getattr(ecole, "is_trial", False) else ""
 
                     nb_eleves_ecole = (
