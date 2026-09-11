@@ -239,21 +239,31 @@ def afficher_login():
                                 ).strip().lower()
                                 is_super = role_db == "super_admin"
 
+                                # --- CONTRÔLE D'ABONNEMENT ET D'ESSAI ---
                                 if user.school_id and not is_super:
                                     ecole = (
                                         db.query(School)
                                         .filter(School.id == user.school_id)
                                         .first()
                                     )
-                                    if ecole and not getattr(
-                                        ecole, "actif", True
-                                    ):
-                                        st.error(
-                                            f"⛔ L'établissement '{ecole.nom}' a"
-                                            " été suspendu."
-                                        )
-                                        db.close()
-                                        return
+                                    if ecole:
+                                        # 1. Vérification de la suspension manuelle
+                                        if not getattr(ecole, "actif", True):
+                                            st.error(
+                                                f"⛔ L'établissement '{ecole.nom}' a"
+                                                " été suspendu par l'administration."
+                                            )
+                                            db.close()
+                                            return
+
+                                        # 2. Vérification de l'expiration de la période d'essai (is_trial)
+                                        if getattr(ecole, "is_trial", False) and ecole.trial_expires_at:
+                                            if datetime.now() > ecole.trial_expires_at:
+                                                st.error(
+                                                    f"🔒 Période d'essai expirée : La période d'essai de 14 jours pour l'établissement '{ecole.nom}' est arrivée à terme. Veuillez contacter le support pour activer votre abonnement."
+                                                )
+                                                db.close()
+                                                return
 
                                 if getattr(
                                     user, "changer_mdp_requis", False

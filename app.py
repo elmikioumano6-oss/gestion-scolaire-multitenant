@@ -119,21 +119,33 @@ def main():
       st.session_state.clear()
       st.rerun()
 
-    # Vérification si l'établissement a été suspendu par le Super Admin
+    # Vérification si l'établissement a été suspendu ou si l'essai est expiré
     if current_user.school_id and not is_super_admin:
       ecole_verif = (
           db_sec.query(School)
           .filter(School.id == current_user.school_id)
           .first()
       )
-      if ecole_verif and not getattr(ecole_verif, "actif", True):
-        db_sec.close()
-        st.session_state.clear()
-        st.error(
-            f"⛔ L'établissement '{ecole_verif.nom}' a été suspendu. Veuillez"
-            " contacter l'administrateur de la plateforme."
-        )
-        st.stop()
+      if ecole_verif:
+        # 1. Vérification de la suspension manuelle
+        if not getattr(ecole_verif, "actif", True):
+          db_sec.close()
+          st.session_state.clear()
+          st.error(
+              f"⛔ L'établissement '{ecole_verif.nom}' a été suspendu. Veuillez"
+              " contacter l'administrateur de la plateforme."
+          )
+          st.stop()
+
+        # 2. Vérification de l'expiration de la période d'essai (is_trial)
+        if getattr(ecole_verif, "is_trial", False) and ecole_verif.trial_expires_at:
+          if datetime.now() > ecole_verif.trial_expires_at:
+            db_sec.close()
+            st.session_state.clear()
+            st.error(
+                f"🔒 Période d'essai expirée : La période d'essai de 14 jours pour l'établissement '{ecole_verif.nom}' est arrivée à terme. Veuillez contacter le support pour activer votre abonnement."
+            )
+            st.stop()
 
     # 🔒 INTERCEPTION OBLIGATOIRE SI CHANGEMENT DE MOT DE PASSE REQUIS
     if not is_super_admin and getattr(
