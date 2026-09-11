@@ -3,14 +3,21 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 import streamlit as st
+from dotenv import load_dotenv
 
-# Récupération sécurisée depuis st.secrets (Production) ou repli isolé sur staging.db (Staging)
-try:
-    DATABASE_URL = st.secrets["DB_URL"]
-    connect_args = {"connect_timeout": 10}
-except Exception:
-    DATABASE_URL = "sqlite:///staging.db"
-    connect_args = {"timeout": 15}
+# Charger les variables d'environnement depuis le fichier .env (si présent)
+load_dotenv()
+
+# Récupération sécurisée : Priorité au fichier .env (VPS), puis st.secrets (Cloud/Local), sinon SQLite (Local isolé)
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not DATABASE_URL:
+    try:
+        DATABASE_URL = st.secrets["DB_URL"]
+    except Exception:
+        DATABASE_URL = "sqlite:///staging.db"
+
+connect_args = {"connect_timeout": 10} if not DATABASE_URL.startswith("sqlite") else {"timeout": 15}
 
 # Configuration de l'engine avec gestion adaptée du dialecte (SQLite vs PostgreSQL)
 if DATABASE_URL.startswith("sqlite"):
