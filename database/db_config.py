@@ -5,10 +5,10 @@ from sqlalchemy.orm import sessionmaker, Session
 import streamlit as st
 from dotenv import load_dotenv
 
-# Charger les variables d'environnement depuis le fichier .env (si présent)
-load_dotenv()
+# Charger les variables d'environnement en forçant le remplacement du cache
+load_dotenv(override=True)
 
-# Récupération sécurisée : Priorité au fichier .env (VPS), puis st.secrets (Cloud/Local), sinon SQLite (Local isolé)
+# Récupération sécurisée et prioritaire via .env ou st.secrets, avec secours SQLite
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not DATABASE_URL:
