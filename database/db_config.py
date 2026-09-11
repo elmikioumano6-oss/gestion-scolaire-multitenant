@@ -46,11 +46,13 @@ class TenantSession(Session):
             is_super = st.session_state.get("is_super_admin", False)
             
             if school_id and not is_super:
+                from database.models import User
                 for entity in entities:
-                    # On vérifie si l'entité possède un attribut/colonne school_id
-                    # IMPORTANT : On exclut User pour permettre l'authentification globale multi-tenant
-                    from database.models import User
-                    if hasattr(entity, "school_id") and entity != User:
+                    # CORRECTION ARCHITECTURALE : Si l'entité est User, on ne filtre JAMAIS par school_id globalement
+                    if entity == User:
+                        continue
+                    
+                    if hasattr(entity, "school_id"):
                         query = query.filter(entity.school_id == school_id)
         except Exception:
             pass # Hors contexte Streamlit ou session non initialisée
@@ -74,7 +76,7 @@ def init_db():
     # 1. Création initiale des tables de la base de données
     Base.metadata.create_all(bind=engine)
     
-    # 2. Migrations automatiques exécutées AVANT toute requête ORM (évite les erreurs de colonnes manquantes)
+    # 2. Migrations automatiques exécutées AVANT toute requête ORM
     migrations = [
         "ALTER TABLE users ADD COLUMN changer_mdp_requis BOOLEAN DEFAULT 1;",
         "ALTER TABLE cahiers_texte ADD COLUMN duree FLOAT DEFAULT 1.0;",
