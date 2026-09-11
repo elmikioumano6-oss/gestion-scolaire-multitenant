@@ -33,9 +33,10 @@ def afficher_login():
         unsafe_allow_html=True,
     )
 
-    # Réinitialisation automatique / forcée du compte admin à chaque affichage pour éliminer les blocages de hachage
+    # --- INITIALISATION ET SÉCURISATION DES COMPTES DE TEST PAR DÉFAUT ---
     db_init = SessionLocal()
     try:
+        # 1. Super Admin Global
         admin_verif = db_init.query(User).filter(User.username == "admin").first()
         new_h = bcrypt.hashpw(
             "admin2026".encode("utf-8"), bcrypt.gensalt()
@@ -58,6 +59,41 @@ def afficher_login():
             admin_verif.role = "super_admin"
             admin_verif.changer_mdp_requis = False
             db_init.commit()
+
+        # 2. École Horizon & Compte admin_horizon pour vos tests de validation
+        ecole_horizon = db_init.query(School).filter(School.code == "CS-HORIZON").first()
+        if not ecole_horizon:
+            ecole_horizon = School(
+                nom="Complexe Scolaire Horizon",
+                code="CS-HORIZON",
+                subdomain="complexe-scolaire-horizon",
+                actif=True,
+                is_trial=True,
+                trial_expires_at=datetime.now() + timedelta(days=14)
+            )
+            db_init.add(ecole_horizon)
+            db_init.commit()
+            db_init.refresh(ecole_horizon)
+
+        user_horizon = db_init.query(User).filter(User.username == "admin_horizon").first()
+        hashed_test_pwd = bcrypt.hashpw("admin@123".encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+        
+        if not user_horizon:
+            new_u = User(
+                username="admin_horizon",
+                password=hashed_test_pwd,
+                role="directeur",
+                school_id=ecole_horizon.id,
+                changer_mdp_requis=False
+            )
+            db_init.add(new_u)
+            db_init.commit()
+        else:
+            user_horizon.password = hashed_test_pwd
+            user_horizon.school_id = ecole_horizon.id
+            user_horizon.changer_mdp_requis = False
+            db_init.commit()
+
     except Exception:
         db_init.rollback()
     finally:
