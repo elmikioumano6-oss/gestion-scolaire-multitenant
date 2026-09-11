@@ -221,7 +221,8 @@ def afficher_login():
                                         password_input.encode("utf-8"),
                                         user.password.encode("utf-8"),
                                     )
-                                except Exception:
+                                except Exception as crypto_err:
+                                    st.error(f"Erreur cryptographique bcrypt : {crypto_err}")
                                     password_valid = False
 
                             if user and password_valid:
