@@ -10,8 +10,11 @@ from streamlit_option_menu import option_menu
 
 
 def init_tenant_context():
-    """Détecte le tenant par sous-domaine ou initialise l'école par défaut en session."""
-    if "school_id" in st.session_state and st.session_state["school_id"]:
+    """Détecte proprement le tenant par sous-domaine métier ou initialise le contexte global."""
+    if st.session_state.get("authenticated") and st.session_state.get("school_id"):
+        return
+
+    if "school_id" in st.session_state and st.session_state["school_id"] and not st.session_state.get("is_super_admin"):
         return
 
     db = SessionLocal()
@@ -19,10 +22,12 @@ def init_tenant_context():
         subdomain = "default"
         try:
             host = st.context.headers.get("Host", "") or st.context.headers.get("X-Forwarded-Host", "")
-            if host and "localhost" not in host and "127.0.0.1" not in host:
-                parts = host.split(".")
-                if len(parts) > 2:
-                    subdomain = parts[0].lower()
+            if host:
+                host_clean = host.split(":")[0].lower()
+                if "localhost" not in host_clean and "127.0.0.1" not in host_clean:
+                    parts = host_clean.split(".")
+                    if len(parts) > 2 and parts[0] not in ["www", "app", "gestion"]:
+                        subdomain = parts[0]
         except Exception:
             pass
 
@@ -30,17 +35,14 @@ def init_tenant_context():
         if subdomain != "default":
             school = db.query(School).filter(School.subdomain == subdomain).first()
         
-        # Fallback sur la première école si aucun sous-domaine ne correspond
-        if not school:
-            school = db.query(School).first()
-
         if school:
             st.session_state["school_id"] = school.id
             st.session_state["school_name"] = school.nom
             st.session_state["school_code"] = school.code
         else:
-            st.session_state["school_id"] = 1
-            st.session_state["school_name"] = "Default School"
+            if "school_id" not in st.session_state:
+                st.session_state["school_id"] = None
+                st.session_state["school_name"] = "Gestion Scolaire Pro"
     finally:
         db.close()
 
