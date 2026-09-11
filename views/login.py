@@ -394,7 +394,7 @@ def afficher_login():
                                 new_admin = User(
                                     username=admin_username_trial.strip(),
                                     password=hashed_pwd,
-                                    role="administrateur",
+                                    role="directeur",  # Rôle aligné sur les attentes de l'application
                                     school_id=new_school.id,
                                     changer_mdp_requis=False,
                                 )
