@@ -48,7 +48,9 @@ class TenantSession(Session):
             if school_id and not is_super:
                 for entity in entities:
                     # On vérifie si l'entité possède un attribut/colonne school_id
-                    if hasattr(entity, "school_id"):
+                    # IMPORTANT : On exclut User pour permettre l'authentification globale multi-tenant
+                    from database.models import User
+                    if hasattr(entity, "school_id") and entity != User:
                         query = query.filter(entity.school_id == school_id)
         except Exception:
             pass # Hors contexte Streamlit ou session non initialisée
