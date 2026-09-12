@@ -2,11 +2,22 @@ import importlib
 import inspect
 from datetime import datetime
 import os
-from database.db_config import SessionLocal, init_db
-from database.models import AnneeScolaire, User, School
 import streamlit as st
 import bcrypt
 from streamlit_option_menu import option_menu
+
+import sentry_sdk
+
+# Initialisation du monitoring Sentry pour la production
+sentry_sdk.init(
+    dsn="https://67948b5d07c09449c5bd329b9d430cf6@o4512073469329408.ingest.us.sentry.io/4512073502359552",
+    traces_sample_rate=1.0,
+    profiles_sample_rate=1.0,
+    send_default_pii=True,
+)
+
+from database.db_config import SessionLocal, init_db
+from database.models import AnneeScolaire, User, School
 
 
 def init_tenant_context():
@@ -218,7 +229,6 @@ def main():
             school_name_lower = st.session_state.get("school_name", "").lower()
             school_code = st.session_state.get("school_code", "").lower()
             
-            # Gestion dynamique propre des logos par école
             logo_file = "Logo Gestion Scolaire Pro.png"
             if "rahmat" in school_name_lower or "rahmat" in school_code:
                 logo_file = "Logo CSP-RAHMAT-FH.png"
