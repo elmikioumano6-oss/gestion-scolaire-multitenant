@@ -216,18 +216,20 @@ def main():
     with st.sidebar:
         try:
             school_name_lower = st.session_state.get("school_name", "").lower()
-            if "etoile" in school_name_lower:
+            school_code = st.session_state.get("school_code", "").lower()
+            
+            # Gestion dynamique propre des logos par école
+            logo_file = "Logo Gestion Scolaire Pro.png"
+            if "rahmat" in school_name_lower or "rahmat" in school_code:
+                logo_file = "Logo CSP-RAHMAT-FH.png"
+            elif "etoile" in school_name_lower:
                 logo_file = "Logo L'ETOILE DU SUCCES.png"
-            else:
-                logo_file = (
-                    "Logo Gestion Scolaire Pro.png"
-                    if os.path.exists("Logo Gestion Scolaire Pro.png")
-                    else "Logo CSP-RAHMAT-FH.png"
-                )
+            elif not os.path.exists(logo_file):
+                logo_file = None
 
             col_logo1, col_logo2, col_logo3 = st.columns([1, 2, 1])
             with col_logo2:
-                if os.path.exists(logo_file):
+                if logo_file and os.path.exists(logo_file):
                     st.image(logo_file, width=100)
                 else:
                     st.markdown(
