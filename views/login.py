@@ -204,7 +204,7 @@ def afficher_login():
 
                                 is_super = role_db == "super_admin"
 
-                                # --- CONTRÔLE D'ABONNEMENT ET D'ESSAI ---
+                                # --- CONTRÔLE D'ABONNEMENT ET D'ESSAI SÉCURISÉ ---
                                 if user.school_id and not is_super:
                                     ecole = (
                                         db.query(School)
@@ -218,7 +218,10 @@ def afficher_login():
                                             return
 
                                         if getattr(ecole, "is_trial", False) and ecole.trial_expires_at:
-                                            if datetime.now() > ecole.trial_expires_at:
+                                            trial_exp = ecole.trial_expires_at
+                                            if hasattr(trial_exp, "tzinfo") and trial_exp.tzinfo is not None:
+                                                trial_exp = trial_exp.replace(tzinfo=None)
+                                            if datetime.now() > trial_exp:
                                                 st.error(f"🔒 Période d'essai expirée pour '{ecole.nom}'.")
                                                 db.close()
                                                 return
