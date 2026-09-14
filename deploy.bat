@@ -49,12 +49,12 @@ if errorlevel 1 (
     if errorlevel 2 goto ERREUR_FIN
 )
 
-:: --- 5. TESTS DE SANTE ET INTEGRITE POST-DEPLOIEMENT ---
+:: --- 5. TESTS DE SANTE ET INTEGRITE POST-DEPLOIEMENT (CORRIGE) ---
 echo.
 echo [etape 5/5] Execution des diagnostics de la base de donnees...
 if exist test_conn.py (
     python test_conn.py
-    if errorlevel 1 (
+    if !errorlevel! neq 0 (
         echo [ERREUR CRITIQUE] Le test de connexion a la base de donnees a echoue.
         goto ERREUR_FIN
     )
@@ -62,7 +62,7 @@ if exist test_conn.py (
 
 if exist tester_all_tables.py (
     python tester_all_tables.py
-    if errorlevel 1 (
+    if !errorlevel! neq 0 (
         echo [ERREUR CRITIQUE] L'integrite des tables de l'ERP est compromise.
         goto ERREUR_FIN
     )
