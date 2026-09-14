@@ -288,6 +288,7 @@ class Evaluation(Base):
     cycle = Column(String(50), nullable=False, default="Collège")
     classe_id = Column(Integer, ForeignKey("classes.id"), nullable=False, index=True)
     matiere_id = Column(Integer, ForeignKey("matieres.id"), nullable=False, index=True)
+    semestre = Column(String(50), default="Semestre 1", nullable=True)
     type_evaluation = Column(String, nullable=False)
     intitule = Column(String(255), nullable=False)
     date_evaluation = Column(Date, nullable=False)

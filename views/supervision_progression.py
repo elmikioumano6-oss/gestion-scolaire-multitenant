@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 from database.db_config import SessionLocal
 from database.models import ActivityLog, CahierTexte, Matiere, School
+from database.queries import get_classes_cached, get_matieres_cached
 
 
 def afficher_supervision_progression():
@@ -81,6 +82,7 @@ def afficher_supervision_progression():
 
     data_suivi = []
     for mat in matieres_cycle:
+      mat_lib = mat.libelle if hasattr(mat, 'libelle') and mat.libelle else getattr(mat, 'nom', 'Matière')
       # Filtrage des séances dispensées pour cette matière (liaison par id de matière)
       seances_mat = [e for e in toutes_entrees if e.matiere_id == mat.id]
 
@@ -120,7 +122,7 @@ def afficher_supervision_progression():
         remarque = "🔵 Programme bien avancé"
 
       data_suivi.append({
-          "Discipline / Matière": mat.libelle,
+          "Discipline / Matière": mat_lib,
           "Coefficient": int(getattr(mat, "coefficient", 1) or 1),
           "Volume Prévu": f"{volume_prevu}h",
           "Volume Réalisé": f"{volume_realise}h",

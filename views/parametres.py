@@ -3,6 +3,7 @@ import os
 from database.audit import log_action_erp
 from database.db_config import SessionLocal
 from database.models import School
+from database.queries import get_classes_cached, get_matieres_cached
 import streamlit as st
 
 
@@ -36,7 +37,7 @@ def afficher_parametres():
       ecole_courante = next(
           (e for e in ecoles if e.nom == choix_ecole), ecoles[0]
       )
-      target_id = ecool_courante.id
+      target_id = ecole_courante.id
     else:
       ecole_courante = db.query(School).filter(School.id == target_id).first()
 

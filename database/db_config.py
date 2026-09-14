@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, event
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 import streamlit as st
@@ -8,18 +8,26 @@ from dotenv import load_dotenv
 # Charger les variables d'environnement en forçant le remplacement du cache
 load_dotenv(override=True)
 
-# Récupération sécurisée et prioritaire via .env ou st.secrets, avec secours SQLite
-DATABASE_URL = os.getenv("DATABASE_URL")
+# Récupération sécurisée et prioritaire via .env ou st.secrets
+DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("DB_URL")
 
 if not DATABASE_URL:
     try:
         DATABASE_URL = st.secrets["DB_URL"]
     except Exception:
-        DATABASE_URL = "sqlite:///staging.db"
+        DATABASE_URL = None
 
-connect_args = {"connect_timeout": 10} if not DATABASE_URL.startswith("sqlite") else {"timeout": 15}
+# Sécurité anti-localhost : Si l'URL contient localhost, on la force en 127.0.0.1 (IPv4 locale)
+if DATABASE_URL and "localhost" in DATABASE_URL:
+    DATABASE_URL = DATABASE_URL.replace("localhost", "127.0.0.1")
 
-# Configuration de l'engine avec gestion adaptée du dialecte (SQLite vs PostgreSQL)
+# Secours ultime sur l'IP du VPS en production, modifiable dynamiquement via .env en local
+if not DATABASE_URL:
+    DATABASE_URL = "postgresql://erp_user:Rahmatfh2026@72.62.147.14:5432/school_erp"
+
+connect_args = {"connect_timeout": 30} if not DATABASE_URL.startswith("sqlite") else {"timeout": 30}
+
+# Configuration de l'engine avec un pool renforcé pour éliminer la latence réseau (connexions persistantes)
 if DATABASE_URL.startswith("sqlite"):
     engine = create_engine(
         DATABASE_URL,
@@ -28,10 +36,10 @@ if DATABASE_URL.startswith("sqlite"):
 else:
     engine = create_engine(
         DATABASE_URL,
-        pool_size=10,
-        max_overflow=20,
+        pool_size=20,
+        max_overflow=40,
         pool_pre_ping=True,
-        pool_recycle=300,
+        pool_recycle=1800,
         connect_args=connect_args
     )
 
@@ -56,6 +64,20 @@ class TenantSession(Session):
             pass # Hors contexte Streamlit ou session non initialisée
             
         return query
+
+# Synchronisation automatique de la variable RLS PostgreSQL à chaque début de transaction
+@event.listens_for(Session, "after_begin")
+def receive_after_begin(session, transaction, connection):
+    try:
+        if DATABASE_URL and not DATABASE_URL.startswith("sqlite"):
+            school_id = st.session_state.get("school_id")
+            is_super = st.session_state.get("is_super_admin", False)
+            if school_id and not is_super:
+                connection.execute(text(f"SET LOCAL app.current_school_id = '{school_id}';"))
+            else:
+                connection.execute(text("SET LOCAL app.current_school_id = '';"))
+    except Exception:
+        pass
 
 # Utilisation de notre classe de session cloisonnée pour le multi-tenancy
 SessionLocal = sessionmaker(class_=TenantSession, autocommit=False, autoflush=False, bind=engine)

@@ -1,5 +1,5 @@
 from datetime import datetime
-import io
+from io import BytesIO
 import zipfile
 from database.audit import log_action_erp
 from database.db_config import SessionLocal

@@ -3,6 +3,7 @@ import io
 from database.audit import log_action_erp
 from database.db_config import SessionLocal
 from database.models import ActivityLog, Classe, Eleve, Paiement, School
+from database.queries import get_classes_cached, get_matieres_cached
 import pandas as pd
 import streamlit as st
 
@@ -55,6 +56,12 @@ def afficher_stats_encaissements():
       classes_query = classes_query.filter(Classe.deleted_at.is_(None))
     classes_cycle = classes_query.all()
 
+    def get_classe_libelle(c):
+        for attr in ['libelle', 'nom', 'name', 'titre']:
+            if hasattr(c, attr) and getattr(c, attr):
+                return getattr(c, attr)
+        return f"Classe {c.id}"
+
     classes_dict = {c.id: c for c in classes_cycle}
     classes_ids = list(classes_dict.keys())
 
@@ -106,11 +113,12 @@ def afficher_stats_encaissements():
       total_recouvre += montant_paye
       solde_restant = max(0.0, total_du_net - montant_paye)
 
+      classe_lib = (get_classe_libelle(classe)) if classe else "Non assignée"
       data.append({
           "Matricule": getattr(eleve, "matricule", "N/D"),
           "Élève": f"{getattr(eleve, 'nom', '')} {getattr(eleve, 'prenom', '')}".strip()
           or "Élève",
-          "Classe": classe.libelle if classe else "Non assignée",
+          "Classe": classe_lib,
           "Montant Dû (Net)": total_du_net,
           "Montant Payé": montant_paye,
           "Solde Restant": solde_restant,

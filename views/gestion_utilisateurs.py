@@ -5,7 +5,7 @@ import string
 import bcrypt
 from database.audit import log_action_erp
 from database.db_config import SessionLocal
-from database.models import Enseignant, School, User
+from database.models import Enseignant, Eleve, School, User
 import pandas as pd
 import streamlit as st
 
@@ -56,13 +56,10 @@ def afficher_gestion_utilisateurs():
                 f"### Utilisateurs Actifs — **{school_name} ({cycle_en_cours})**"
             )
 
-            # FILTRAGE STRICT PAR ÉCOLE ACTIVE ET EXCLUSION DU SUPER ADMIN GLOBAL
             users_query = db.query(User)
             if is_super_admin:
-                # Le Super Admin voit l'ensemble des comptes de la plateforme
                 pass
             elif school_id:
-                # Les administrateurs d'école ne voient que leur école et JAMAIS le super_admin global
                 users_query = users_query.filter(
                     User.school_id == school_id,
                     User.role != "super_admin"
@@ -80,7 +77,6 @@ def afficher_gestion_utilisateurs():
                     if u.username not in noms_vus:
                         noms_vus.add(u.username)
 
-                        # Détermination du statut en ligne (actif il y a moins de 5 minutes)
                         statut_connexion = "🔴 Hors ligne"
                         if hasattr(u, "derniere_activite") and u.derniere_activite:
                             diff = maintenant - u.derniere_activite
@@ -116,160 +112,177 @@ def afficher_gestion_utilisateurs():
                     )
                     st.rerun()
 
-            enseignants_db = (
-                db.query(Enseignant)
-                .filter(Enseignant.school_id == (school_id or 1))
-                .all()
-            )
-            noms_enseignants = [f"{e.nom} {e.prenom}" for e in enseignants_db]
-
-            with st.form("form_creation_compte"):
-                col1, col2 = st.columns(2)
-                with col1:
-                    nouveau_user = st.text_input("Nom d'utilisateur (Identifiant)")
-                    mot_de_passe = st.text_input(
-                        "Mot de passe provisoire",
-                        value=st.session_state["temp_gen_pwd"],
-                        type="password",
-                    )
-                with col2:
-                    role_options = {
-                        "directeur": "Directeur / Administrateur",
-                        "enseignant": "Enseignant / Professeur",
-                        "econome": "Économe / Finances",
-                        "surveillant": "Surveillant Général",
-                        "inspecteur": "Inspecteur",
-                        "parent": "Parent d'élève",
-                    }
-                    role_attribue = st.selectbox(
-                        "Rôle / Fonction", options=list(role_options.keys())
-                    )
-                    cycle_associe = st.selectbox(
-                        "Cycle d'affectation",
-                        ["Collège", "Lycée", "Tous les cycles"],
-                    )
-
-                role_descriptions = {
-                    "directeur": (
-                        "Accès complet à la gestion administrative, financière et aux"
-                        " paramètres de l'école."
-                    ),
-                    "enseignant": (
-                        "Saisie des notes, émargement du cahier de texte et suivi de"
-                        " classe."
-                    ),
-                    "econome": (
-                        "Gestion de la trésorerie, encaissements de scolarité et suivi"
-                        " des dépenses."
-                    ),
-                    "surveillant": (
-                        "Gestion des absences, retours de discipline et cahier de"
-                        " correspondance."
-                    ),
-                    "inspecteur": (
-                        "Supervision pédagogique, apposition de visas et audit des"
-                        " notes (Portail Inspecteur dédié)."
-                    ),
-                    "parent": (
-                        "Accès restreint au portail famille pour le suivi exclusif de"
-                        " l'enfant."
-                    ),
+            col1, col2 = st.columns(2)
+            with col1:
+                nouveau_user = st.text_input("Nom d'utilisateur (Identifiant)")
+                mot_de_passe = st.text_input(
+                    "Mot de passe provisoire",
+                    value=st.session_state["temp_gen_pwd"],
+                    type="password",
+                )
+            with col2:
+                role_options = {
+                    "directeur": "Directeur / Administrateur",
+                    "enseignant": "Enseignant / Professeur",
+                    "econome": "Économe / Finances",
+                    "surveillant": "Surveillant Général",
+                    "inspecteur": "Inspecteur",
+                    "parent": "Parent d'élève",
                 }
-                st.markdown(
-                    f"<div style='background-color: rgba(217, 119, 6, 0.1); padding: 8px 12px; border-radius: 6px; border-left: 3px solid #D97706; font-size: 0.85rem; color: #E2E8F0; margin-bottom: 10px;'>ℹ️ <b>Permission :</b> {role_descriptions.get(role_attribue, 'Accès standard')}</div>",
-                    unsafe_allow_html=True,
+                role_attribue = st.selectbox(
+                    "Rôle / Fonction", options=list(role_options.keys())
+                )
+                cycle_associe = st.selectbox(
+                    "Cycle d'affectation",
+                    ["Collège", "Lycée", "Tous les cycles"],
                 )
 
-                prof_lie = None
-                if role_attribue == "enseignant" and noms_enseignants:
-                    prof_lie = st.selectbox(
-                        "Lier à un enseignant enregistré", ["Aucun"] + noms_enseignants
+            role_descriptions = {
+                "directeur": "Accès complet à la gestion administrative, financière et aux paramètres de l'école.",
+                "enseignant": "Saisie des notes, émargement du cahier de texte et suivi de classe.",
+                "econome": "Gestion de la trésorerie, encaissements de scolarité et suivi des dépenses.",
+                "surveillant": "Gestion des absences, retours de discipline et cahier de correspondance.",
+                "inspecteur": "Supervision pédagogique, apposition de visas et audit des notes.",
+                "parent": "Accès restreint au portail famille pour le suivi exclusif de l'enfant.",
+            }
+            st.markdown(
+                f"<div style='background-color: rgba(217, 119, 6, 0.1); padding: 8px 12px; border-radius: 6px; border-left: 3px solid #D97706; font-size: 0.85rem; color: #E2E8F0; margin-bottom: 10px;'>ℹ️ <b>Permission :</b> {role_descriptions.get(role_attribue, 'Accès standard')}</div>",
+                unsafe_allow_html=True,
+            )
+
+            # --- ASSOCIATION SI RÔLE == PARENT ---
+            eleves_associes_ids = []
+            if role_attribue == "parent":
+                st.markdown("#### 🔗 Association des enfants")
+                tous_les_eleves = db.query(Eleve).filter(
+                    Eleve.school_id == (school_id or 1),
+                    Eleve.deleted_at.is_(None)
+                ).all()
+                
+                options_eleves_form = {f"{e.nom} {e.prenom} (Matricule: {e.matricule})": e.id for e in tous_les_eleves}
+                if options_eleves_form:
+                    choix_eleves_form = st.multiselect("Sélectionner le ou les enfants concernés *", list(options_eleves_form.keys()))
+                    eleves_associes_ids = [options_eleves_form[nom] for nom in choix_eleves_form]
+                else:
+                    st.warning("⚠️ Aucun élève enregistré dans cet établissement pour l'instant.")
+
+            # --- ASSOCIATION SI RÔLE == ENSEIGNANT ---
+            enseignant_associe_id = None
+            if role_attribue == "enseignant":
+                st.markdown("#### 🔗 Association de l'enseignant")
+                enseignants_db = db.query(Enseignant).filter(
+                    Enseignant.school_id == (school_id or 1)
+                ).all()
+                
+                options_ens_form = {f"{ens.nom} {ens.prenom}": ens.id for ens in enseignants_db}
+                if options_ens_form:
+                    choix_ens_form = st.selectbox("Sélectionner le profil enseignant à lier *", list(options_ens_form.keys()))
+                    enseignant_associe_id = options_ens_form[choix_ens_form]
+                else:
+                    st.warning("⚠️ Aucun enseignant enregistré dans cet établissement. Veuillez d'abord en créer un dans le module 'Enseignants'.")
+
+            contact_tel = st.text_input(
+                "Numéro de téléphone (WhatsApp optionnel pour notification)",
+                placeholder="Ex: 90123456",
+            )
+
+            if st.button("💾 Créer et Sécuriser le Compte Utilisateur", type="primary"):
+                if not nouveau_user or not mot_de_passe:
+                    st.error("⚠️ Veuillez renseigner l'identifiant et le mot de passe.")
+                elif len(mot_de_passe) < 6:
+                    st.error("⚠️ Le mot de passe doit contenir au moins 6 caractères.")
+                elif role_attribue == "parent" and not eleves_associes_ids:
+                    st.error("⚠️ Veuillez sélectionner au moins un enfant à associer au compte parent.")
+                elif role_attribue == "enseignant" and not enseignant_associe_id:
+                    st.error("⚠️ Veuillez sélectionner le profil enseignant à associer.")
+                else:
+                    existe_deja = (
+                        db.query(User)
+                        .filter(User.username == nouveau_user.strip())
+                        .first()
                     )
-
-                contact_tel = st.text_input(
-                    "Numéro de téléphone (WhatsApp optionnel pour notification)",
-                    placeholder="Ex: 90123456",
-                )
-
-                submitted_user = st.form_submit_button(
-                    "💾 Créer et Sécuriser le Compte Utilisateur", type="primary"
-                )
-                if submitted_user:
-                    if not nouveau_user or not mot_de_passe:
-                        st.error("⚠️ Veuillez renseigner l'identifiant et le mot de passe.")
-                    elif len(mot_de_passe) < 6:
-                        st.error("⚠️ Le mot de passe doit contenir au moins 6 caractères.")
+                    if existe_deja:
+                        st.error(f"⚠️ Un utilisateur portant l'identifiant '{nouveau_user}' existe déjà.")
                     else:
-                        existe_deja = (
-                            db.query(User)
-                            .filter(User.username == nouveau_user.strip())
-                            .first()
+                        hashed = bcrypt.hashpw(
+                            mot_de_passe.encode("utf-8"), bcrypt.gensalt()
+                        ).decode("utf-8")
+                        
+                        nouveau_compte = User(
+                            school_id=school_id if school_id else 1,
+                            username=nouveau_user.strip(),
+                            password=hashed,
+                            role=role_attribue,
+                            changer_mdp_requis=True,
                         )
-                        if existe_deja:
-                            st.error(
-                                f"⚠️ Un utilisateur portant l'identifiant '{nouveau_user}'"
-                                " existe déjà."
-                            )
-                        else:
-                            hashed = bcrypt.hashpw(
-                                mot_de_passe.encode("utf-8"), bcrypt.gensalt()
-                            ).decode("utf-8")
-                            nouveau_compte = User(
-                                school_id=school_id if school_id else 1,
-                                username=nouveau_user.strip(),
-                                password=hashed,
-                                role=role_attribue,
-                                changer_mdp_requis=True,
-                            )
-                            db.add(nouveau_compte)
+                        db.add(nouveau_compte)
+                        db.commit()
+                        db.refresh(nouveau_compte)
 
-                            log_action_erp(
-                                module="IAM & Sécurité",
-                                action=(
-                                    f"Création du compte utilisateur : {nouveau_user.strip()}"
-                                    f" (Rôle: {role_attribue}, Cycle: {cycle_associe})"
-                                ),
-                                statut="Critique",
-                                valeur_avant="Inexistant",
-                                valeur_apres=f"Compte actif [{role_attribue} - {cycle_associe}]",
-                            )
-
+                        # Liaison Parent <-> Élèves
+                        if role_attribue == "parent" and eleves_associes_ids:
+                            for eleve_id in eleves_associes_ids:
+                                eleve_concerne = db.query(Eleve).filter(Eleve.id == eleve_id).first()
+                                if eleve_concerne:
+                                    eleve_concerne.parent_id = nouveau_compte.id
                             db.commit()
 
-                            if "temp_gen_pwd" in st.session_state:
-                                st.session_state["temp_gen_pwd"] = ""
+                        # Liaison Enseignant <-> Compte Utilisateur
+                        if role_attribue == "enseignant" and enseignant_associe_id:
+                            prof_concerne = db.query(Enseignant).filter(Enseignant.id == enseignant_associe_id).first()
+                            if prof_concerne:
+                                prof_concerne.user_id = nouveau_compte.id
+                                db.commit()
 
-                            st.success(
-                                f"✅ Le compte de **{nouveau_user.strip()}** ({role_attribue})"
-                                f" a été créé avec succès ! Un changement de mot de passe"
-                                f" sera exigé à sa première connexion."
+                        log_action_erp(
+                            module="IAM & Sécurité",
+                            action=(
+                                f"Création du compte utilisateur : {nouveau_user.strip()}"
+                                f" (Rôle: {role_attribue}, Cycle: {cycle_associe})"
+                            ),
+                            statut="Critique",
+                            valeur_avant="Inexistant",
+                            valeur_apres=f"Compte actif [{role_attribue} - {cycle_associe}]",
+                        )
+
+                        if "temp_gen_pwd" in st.session_state:
+                            st.session_state["temp_gen_pwd"] = ""
+
+                        st.success(
+                            f"✅ Le compte de **{nouveau_user.strip()}** ({role_attribue})"
+                            f" a été créé et lié avec succès !"
+                        )
+
+                        if contact_tel.strip():
+                            clean_num = "".join(
+                                filter(str.isdigit, contact_tel.strip())
                             )
+                            if len(clean_num) == 8:
+                                clean_num = "227" + clean_num
+                            
+                            url_application = "https://www.gestionscolairepro.com"
 
-                            if contact_tel.strip():
-                                clean_num = "".join(
-                                    filter(str.isdigit, contact_tel.strip())
-                                )
-                                if len(clean_num) == 8:
-                                    clean_num = "227" + clean_num
-                                msg = (
-                                    f"Bonjour, votre compte {role_attribue} pour"
-                                    f" l'établissement {school_name} est créé.\n👤 Identifiant"
-                                    f" : {nouveau_user.strip()}\n🔑 Mot de passe provisoire :"
-                                    f" {mot_de_passe}\n⚠️ Modification obligatoire à la"
-                                    f" connexion."
-                                )
-                                wa_url = (
-                                    f"https://wa.me/{clean_num}?text="
-                                    + urllib.parse.quote(msg)
-                                )
-                                st.markdown(
-                                    f"""
-                                            <a href="{wa_url}" target="_blank" style="display:inline-block;background-color:#25D366;color:white;padding:8px 16px;border-radius:5px;text-decoration:none;font-weight:bold;margin-top:10px;">
-                                                📲 Envoyer les accès par WhatsApp
-                                            </a>
-                                            """,
-                                    unsafe_allow_html=True,
-                                )
+                            msg = (
+                                f"Bonjour, votre compte {role_attribue} pour "
+                                f"l'établissement {school_name} est créé.\n\n"
+                                f"🌐 Lien de connexion : {url_application}\n"
+                                f"👤 Identifiant : {nouveau_user.strip()}\n"
+                                f"🔑 Mot de passe provisoire : {mot_de_passe}\n\n"
+                                f"⚠️ Modification obligatoire à la première connexion."
+                            )
+                            
+                            wa_url = (
+                                f"https://wa.me/{clean_num}?text="
+                                + urllib.parse.quote(msg)
+                            )
+                            st.markdown(
+                                f"""
+                                <a href="{wa_url}" target="_blank" style="display:inline-block;background-color:#25D366;color:white;padding:8px 16px;border-radius:5px;text-decoration:none;font-weight:bold;margin-top:10px;">
+                                    📲 Envoyer les accès par WhatsApp
+                                </a>
+                                """,
+                                unsafe_allow_html=True,
+                            )
 
     finally:
         db.close()

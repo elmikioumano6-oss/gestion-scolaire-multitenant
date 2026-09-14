@@ -1,10 +1,8 @@
 import streamlit as st
-import pandas as pd
-from datetime import datetime, date, time, timedelta
-import io
+from datetime import datetime
 from database.db_config import SessionLocal
 from database.models import Matiere, JournalActivite
-from sqlalchemy import and_, or_, desc
+from database.queries import get_matieres_cached
 
 def afficher_matieres(niveau_actif="Collège"):
     st.subheader("📚 Gestion des Matières & Coefficients")

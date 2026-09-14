@@ -3,6 +3,7 @@ import urllib.parse
 from database.audit import log_action_erp
 from database.db_config import SessionLocal
 from database.models import Eleve, School, User
+from database.queries import get_classes_cached, get_matieres_cached
 import streamlit as st
 
 

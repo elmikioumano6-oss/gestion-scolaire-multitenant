@@ -11,7 +11,9 @@ from database.models import (
     Presence,
     School,
     User,
+    Message,
 )
+from database.queries import get_classes_cached, get_matieres_cached
 import pandas as pd
 import streamlit as st
 
@@ -20,7 +22,8 @@ def afficher_espace_parent():
   st.subheader("👨‍👩‍👧 Espace Famille & Suivi Élève")
   st.markdown(
       "Consultation sécurisée et auditée des notes, du cahier d'appel, de"
-      " l'emploi du temps et de la situation financière."
+      " l'emploi du temps, de la situation financière et messagerie avec"
+      " l'administration."
   )
   st.markdown("---")
 
@@ -55,7 +58,9 @@ def afficher_espace_parent():
 
     if user_role and user_role.lower() == "parent" and user_obj:
       eleves_query = eleves_query.filter(
-          (Eleve.parent_id == user_obj.id) | (Eleve.id == user_obj.eleve_id)
+          (Eleve.parent_id == user_obj.id)
+          | (Eleve.id == user_obj.eleve_id)
+          | (Eleve.contact_parent == user_obj.username)
       )
     else:
       if not is_super_admin and school_id:
@@ -102,7 +107,11 @@ def afficher_espace_parent():
             if eleve_obj.classe_id
             else None
         )
-        classe_nom = classe.libelle if classe else "Non assignée"
+        classe_nom = (
+            classe.libelle
+            if classe and hasattr(classe, "libelle") and classe.libelle
+            else getattr(classe, "nom", "Non assignée")
+        )
 
         # --- TRACABILITÉ D'AUDIT DE LA CONSULTATION (NORMES SOC 2 / ISO 27001) ---
         if "last_consulted_eleve" not in st.session_state or (
@@ -124,12 +133,13 @@ def afficher_espace_parent():
             f" Classe : **{classe_nom}**"
         )
 
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
             "📚 Notes & Évaluations",
             "📋 Bulletins",
             "🕒 Emploi du Temps",
             "📌 Assiduité (Cahier d'appel)",
             "💳 Situation Financière",
+            "✉️ Envoyer un message",
         ])
 
         # Onglet 1 : Notes & Évaluations
@@ -148,13 +158,18 @@ def afficher_espace_parent():
                   .filter(Matiere.id == n.matiere_id)
                   .first()
               )
+              mat_lib = (
+                  mat.libelle
+                  if mat and hasattr(mat, "libelle") and mat.libelle
+                  else getattr(mat, "nom", "N/D")
+              )
               data_notes.append({
-                  "Matière": mat.libelle if mat else "N/D",
+                  "Matière": mat_lib,
                   "Type d'évaluation": n.type_evaluation,
-                  "Semestre": n.semestre,
-                  "Note /20": n.valeur,
+                  "Semestre": getattr(n, "semestre", getattr(n, "trimestre", "N/D")),
+                  "Note /20": float(n.valeur),
               })
-            st.dataframe(pd.DataFrame(data_notes), use_container_width=True)
+            st.dataframe(pd.DataFrame(data_notes), use_container_width=True, hide_index=True)
 
         # Onglet 2 : Bulletins
         with tab2:
@@ -172,20 +187,28 @@ def afficher_espace_parent():
                   .filter(Matiere.id == n.matiere_id)
                   .first()
               )
-              nom_mat = mat.libelle if mat else "Autre"
+              nom_mat = (
+                  (mat.libelle if hasattr(mat, "libelle") and mat.libelle else getattr(mat, "nom", "Autre"))
+                  if mat
+                  else "Autre"
+              )
               if nom_mat not in matieres_dict:
                 matieres_dict[nom_mat] = []
-              matieres_dict[nom_mat].append(n.valeur)
+              matieres_dict[nom_mat].append(float(n.valeur))
 
             bulletin_data = []
-            total_points = 0
-            total_coef = 0
+            total_points = 0.0
+            total_coef = 0.0
             for mat_nom, notes in matieres_dict.items():
               moy_mat = sum(notes) / len(notes)
               mat_obj = (
-                  db.query(Matiere).filter(Matiere.libelle == mat_nom).first()
+                  db.query(Matiere)
+                  .filter(
+                      (Matiere.libelle == mat_nom) | (Matiere.nom == mat_nom)
+                  )
+                  .first()
               )
-              coef = mat_obj.coefficient if mat_obj else 1.0
+              coef = float(getattr(mat_obj, "coefficient", 1.0) or 1.0) if mat_obj else 1.0
               total_points += moy_mat * coef
               total_coef += coef
               bulletin_data.append({
@@ -194,7 +217,7 @@ def afficher_espace_parent():
                   "Moyenne Matière": round(moy_mat, 2),
               })
 
-            st.dataframe(pd.DataFrame(bulletin_data), use_container_width=True)
+            st.dataframe(pd.DataFrame(bulletin_data), use_container_width=True, hide_index=True)
             if total_coef > 0:
               moy_generale = total_points / total_coef
               st.metric(
@@ -221,9 +244,9 @@ def afficher_espace_parent():
                     "Jour": ed.jour,
                     "Heure": ed.heure,
                     "Matière": ed.matiere,
-                    "Enseignant": ed.enseignant or "N/D",
+                    "Enseignant": getattr(ed, "enseignant", "N/D") or "N/D",
                 })
-              st.dataframe(pd.DataFrame(edt_data), use_container_width=True)
+              st.dataframe(pd.DataFrame(edt_data), use_container_width=True, hide_index=True)
 
         # Onglet 4 : Assiduité & Absences (Cahier d'appel)
         with tab4:
@@ -243,9 +266,9 @@ def afficher_espace_parent():
                       else "N/D"
                   ),
                   "Statut": p.statut,
-                  "Motif": p.motif or "Non spécifié",
+                  "Motif": getattr(p, "motif", None) or "Non spécifié",
               })
-            st.dataframe(pd.DataFrame(pres_data), use_container_width=True)
+            st.dataframe(pd.DataFrame(pres_data), use_container_width=True, hide_index=True)
 
         # Onglet 5 : Situation Financière
         with tab5:
@@ -326,19 +349,57 @@ def afficher_espace_parent():
             hist_paiements = []
             for p in paiements_eleve:
               hist_paiements.append({
-                  "Reçu N°": p.reference_recu,
+                  "Reçu N°": getattr(p, "reference_recu", "N/D"),
                   "Date": (
                       p.date_paiement.strftime("%d/%m/%Y %H:%M")
-                      if p.date_paiement
+                      if getattr(p, "date_paiement", None)
                       else "N/D"
                   ),
-                  "Montant (FCFA)": f"{p.montant:,.0f}",
-                  "Mode": p.mode_reglement,
-                  "Motif": p.motif,
+                  "Montant (FCFA)": f"{float(p.montant):,.0f}",
+                  "Mode": getattr(p, "mode_reglement", "Espèces"),
+                  "Motif": getattr(p, "motif", "Scolarité"),
               })
             st.dataframe(
-                pd.DataFrame(hist_paiements), use_container_width=True
+                pd.DataFrame(hist_paiements), use_container_width=True, hide_index=True
             )
+
+        # Onglet 6 : Envoyer un message à l'administration
+        with tab6:
+          st.markdown("#### ✉️ Contacter l'Administration")
+          st.markdown(f"Envoyez un message concernant le suivi de **{eleve_obj.nom} {eleve_obj.prenom}** directement à la direction.")
+          
+          with st.form("form_contact_admin_parent"):
+            objet_message = st.text_input("Objet", placeholder="Ex : Demande de rendez-vous, Motif d'absence...")
+            contenu_message = st.text_area("Message", placeholder="Rédigez votre message ici...")
+            
+            submit_msg = st.form_submit_button("Envoyer le message", type="primary")
+            
+            if submit_msg:
+              if not objet_message or not contenu_message:
+                st.error("⚠️ Veuillez renseigner l'objet et le contenu du message.")
+              else:
+                try:
+                  nouveau_message = Message(
+                      school_id=school_id,
+                      expediteur=username or "Parent",
+                      destinataire="Administration",
+                      objet=f"[{eleve_obj.nom} {eleve_obj.prenom}] {objet_message}",
+                      contenu=contenu_message,
+                      date_envoi=datetime.now()
+                  )
+                  db.add(nouveau_message)
+                  db.commit()
+
+                  log_action_erp(
+                      module="Espace Parent",
+                      action=f"Envoi d'un message à l'administration concernant l'élève {eleve_obj.nom} {eleve_obj.prenom}",
+                      statut="Succès"
+                  )
+
+                  st.success("✅ Votre message a été transmis avec succès à l'administration !")
+                except Exception as ex:
+                  db.rollback()
+                  st.error(f"Erreur lors de l'envoi du message : {ex}")
 
   finally:
     db.close()

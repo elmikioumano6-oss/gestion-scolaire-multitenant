@@ -1,13 +1,22 @@
-from datetime import datetime
-from database.db_config import SessionLocal
-from database.models import Classe, Matiere, Evaluation, ActivityLog, School
+from datetime import datetime, date, time, timedelta
+import sqlalchemy as sa
 import pandas as pd
 import streamlit as st
+from database.db_config import SessionLocal, engine
+from database.models import Classe, Matiere, Evaluation, ActivityLog, School
 
 def afficher_planification_evaluations():
     st.subheader("📋 Planification Avancée des Évaluations (SIA)")
     st.markdown("Calendrier officiel des contrôles, compositions et examens blancs avec workflow de validation, gestion des ressources et contrôle anti-collision.")
     st.markdown("---")
+
+    # --- MIGRATION AUTOMATIQUE DE LA COLONNE SEMESTRE ---
+    try:
+        with engine.connect() as conn:
+            conn.execute(sa.text("ALTER TABLE evaluations ADD COLUMN semestre VARCHAR(50) DEFAULT 'Semestre 1';"))
+            conn.commit()
+    except Exception:
+        pass
 
     school_id = st.session_state.get("school_id")
     is_super_admin = st.session_state.get("is_super_admin", False)
@@ -44,13 +53,19 @@ def afficher_planification_evaluations():
         with tab1:
             st.markdown(f"### Calendrier Officiel — **{school_name} ({cycle_en_cours})**")
             
-            classe_filtre = st.selectbox("Filtrer par classe", ["Toutes les classes"] + noms_classes, key="filtre_eval_classe")
+            col_filt1, col_filt2 = st.columns(2)
+            with col_filt1:
+                classe_filtre = st.selectbox("Filtrer par classe", ["Toutes les classes"] + noms_classes, key="filtre_eval_classe")
+            with col_filt2:
+                semestre_filtre = st.selectbox("Filtrer par semestre", ["Tous les semestres", "Semestre 1", "Semestre 2"], key="filtre_eval_semestre")
             
             eval_query = db.query(Evaluation).join(Classe).filter(Classe.cycle == cycle_en_cours)
             if not is_super_admin and school_id:
                 eval_query = eval_query.filter(Evaluation.school_id == school_id)
             if classe_filtre != "Toutes les classes":
                 eval_query = eval_query.join(Classe, Evaluation.classe_id == Classe.id).filter(Classe.libelle == classe_filtre)
+            if semestre_filtre != "Tous les semestres" and hasattr(Evaluation, 'semestre'):
+                eval_query = eval_query.filter(Evaluation.semestre == semestre_filtre)
             
             evaluations_list = eval_query.all()
 
@@ -61,12 +76,14 @@ def afficher_planification_evaluations():
                 for ev in evaluations_list:
                     classe_obj = db.query(Classe).get(ev.classe_id)
                     matiere_obj = db.query(Matiere).get(ev.matiere_id) if ev.matiere_id else None
+                    mat_lib = (matiere_obj.libelle if hasattr(matiere_obj, 'libelle') else getattr(matiere_obj, 'nom', 'N/A')) if matiere_obj else "N/A"
                     data_tableau.append({
                         "ID": ev.id,
+                        "Semestre": getattr(ev, 'semestre', 'Semestre 1'),
                         "Date": ev.date_evaluation.strftime("%d/%m/%Y") if ev.date_evaluation else "",
                         "Horaire": f"{ev.heure_debut} - {ev.heure_fin}",
                         "Classe": classe_obj.libelle if classe_obj else "N/A",
-                        "Matière": matiere_obj.libelle if matiere_obj else "N/A",
+                        "Matière": mat_lib,
                         "Type": ev.type_evaluation,
                         "Intitulé": ev.intitule,
                         "Salle": ev.salle or "Non assignée",
@@ -102,12 +119,14 @@ def afficher_planification_evaluations():
             if not matieres_disponibles:
                 st.warning("⚠️ Veuillez d'abord créer des matières dans le module 'Matières & Coeffs' pour pouvoir planifier une évaluation.")
             else:
+                noms_matieres = [m.libelle if hasattr(m, 'libelle') else getattr(m, 'nom', '') for m in matieres_disponibles]
                 with st.form("form_add_evaluation"):
                     col1, col2 = st.columns(2)
                     with col1:
                         classe_choisie = st.selectbox("Classe concernée", noms_classes)
-                        matiere_choisie = st.selectbox("Matière / Discipline", [m.libelle for m in matieres_disponibles])
-                        type_eval = st.selectbox("Type d'évaluation", ["Interrogation", "Devoir Surveillé (DS)", "Composition Trimestrielle", "Examen Blanc", "Rattrapage"])
+                        matiere_choisie = st.selectbox("Matière / Discipline", noms_matieres)
+                        semestre_eval = st.selectbox("Sélectionner le semestre", ["Semestre 1", "Semestre 2"])
+                        type_eval = st.selectbox("Type d'évaluation", ["Interro 1", "Interro 2", "Devoir 1", "Devoir 2", "Compo"])
                         titre = st.text_input("Intitulé de l'évaluation (ex: Devoir N°1 de Mathématiques)")
                     with col2:
                         date_eval = st.date_input("Date de l'évaluation")
@@ -127,7 +146,7 @@ def afficher_planification_evaluations():
                                 target_school_id = ecole_defaut.id if ecole_defaut else 1
 
                             classe_obj = db.query(Classe).filter(Classe.libelle == classe_choisie, Classe.school_id == target_school_id).first()
-                            matiere_obj = db.query(Matiere).filter(Matiere.libelle == matiere_choisie, Matiere.school_id == target_school_id).first()
+                            matiere_obj = db.query(Matiere).filter((Matiere.libelle == matiere_choisie) | (Matiere.nom == matiere_choisie), Matiere.school_id == target_school_id).first()
 
                             # 🔒 CONTROLE ANTI-COLLISION INTERNATIONAL
                             conflit = db.query(Evaluation).filter(
@@ -145,6 +164,7 @@ def afficher_planification_evaluations():
                                     cycle=cycle_en_cours,
                                     classe_id=classe_obj.id,
                                     matiere_id=matiere_obj.id if matiere_obj else None,
+                                    semestre=semestre_eval,
                                     type_evaluation=type_eval,
                                     intitule=titre.strip(),
                                     date_evaluation=date_eval,
@@ -162,14 +182,14 @@ def afficher_planification_evaluations():
                                     school_id=target_school_id,
                                     timestamp=datetime.now(),
                                     username=username,
-                                    action=f"Planification évaluation : {titre} ({classe_choisie}, {matiere_choisie})",
+                                    action=f"Planification évaluation ({semestre_eval}) : {titre} ({classe_choisie}, {matiere_choisie})",
                                     module="Planification des Évaluations",
                                     statut="Succès"
                                 )
                                 db.add(nouveau_log)
                                 db.commit()
 
-                                st.success(f"✅ Évaluation '{titre}' programmée avec succès et placée en statut 'Brouillon' pour la classe de **{classe_choisie}** !")
+                                st.success(f"✅ Évaluation '{titre}' ({semestre_eval} - {type_eval}) programmée avec succès et placée en statut 'Brouillon' pour la classe de **{classe_choisie}** !")
                                 st.rerun()
 
     finally:

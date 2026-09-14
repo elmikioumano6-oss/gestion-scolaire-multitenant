@@ -2,6 +2,7 @@ from datetime import datetime
 import io
 from database.db_config import SessionLocal
 from database.models import ActivityLog, Matiere, School
+from database.queries import get_classes_cached, get_matieres_cached
 import pandas as pd
 import streamlit as st
 
@@ -118,7 +119,7 @@ def afficher_upload_programmes():
                   .filter(
                       Matiere.school_id == resolved_school_id,
                       Matiere.cycle == cycle_en_cours,
-                      Matiere.libelle == nom_mat,
+                      (Matiere.libelle == nom_mat) | (Matiere.nom == nom_mat),
                   )
                   .first()
               )

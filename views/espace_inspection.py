@@ -2,6 +2,7 @@ from datetime import datetime
 from database.audit import log_action_erp
 from database.db_config import SessionLocal
 from database.models import CahierTexte, Classe, Enseignant, School, Note, Eleve
+from database.queries import get_classes_cached, get_matieres_cached
 import pandas as pd
 import streamlit as st
 

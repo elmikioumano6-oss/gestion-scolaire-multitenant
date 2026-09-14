@@ -5,6 +5,8 @@ import pandas as pd
 import streamlit as st
 from database.db_config import SessionLocal, engine
 from database.models import School, JournalActivite, User
+from database.audit import log_action_erp
+from database.queries import get_classes_cached
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -95,18 +97,15 @@ def afficher_journal_activite():
         query = db.query(JournalActivite)
         
         if is_super_admin:
-            # Le Super Admin voit tout (avec filtre optionnel par selectbox)
             if selected_school_id is not None:
                 query = query.filter(JournalActivite.school_id == selected_school_id)
         else:
-            # Vérification exacte du rôle de l'utilisateur en base ou session
             user_obj = db.query(User).filter(User.username == username_connecte).first()
             user_role = getattr(user_obj, 'role', '').lower() if user_obj else role_connecte
             is_school_admin = user_role in ["admin", "directeur", "proviseur", "censeur"] or "admin" in username_connecte.lower()
             
             if school_id:
                 if is_school_admin:
-                    # L'administrateur de l'école voit tous les logs de son école, sans les actions globales du super admin "admin"
                     query = query.filter(
                         sa.and_(
                             JournalActivite.username != "admin",
@@ -114,7 +113,6 @@ def afficher_journal_activite():
                         )
                     )
                 else:
-                    # Un utilisateur standard ne voit QUE ses propres actions
                     query = query.filter(JournalActivite.username == username_connecte)
             else:
                 query = query.filter(JournalActivite.username == username_connecte)
@@ -173,8 +171,8 @@ def afficher_journal_activite():
 
             df_logs = pd.DataFrame(data_logs)
 
-            # --- 5. BOUTONS D'EXPORT CERTIFIÉ (CSV & PDF) ---
-            col_exp1, col_exp2, _ = st.columns([1, 1, 2])
+            # --- 5. BOUTONS D'EXPORT CERTIFIÉ (CSV & PDF) ET PURGE SÉCURISÉE (> 5 MOIS) ---
+            col_exp1, col_exp2, col_purge = st.columns([1, 1, 1])
             
             with col_exp1:
                 csv_data = df_logs.to_csv(index=False).encode('utf-8')
@@ -233,6 +231,39 @@ def afficher_journal_activite():
                     mime="application/pdf",
                     use_container_width=True
                 )
+
+            # --- BOUTON DE PURGE SÉCURISÉE (> 5 MOIS / 150 JOURS) RÉSERVÉ AU SUPER ADMIN ---
+            if is_super_admin:
+                with col_purge:
+                    with st.popover("🗑️ Purger anciens logs (> 5 mois)", use_container_width=True):
+                        st.warning("⚠️ Action irréversible : Supprime les archives de plus de 150 jours.")
+                        confirmation_purge = st.checkbox("Je confirme la purge des archives")
+                        
+                        if st.button("Exécuter la purge", type="primary", disabled=not confirmation_purge):
+                            try:
+                                date_limite = datetime.now() - timedelta(days=150)
+                                logs_a_supprimer = db.query(JournalActivite).filter(JournalActivite.timestamp < date_limite)
+                                nombre_supprime = logs_a_supprimer.count()
+                                
+                                if nombre_supprime > 0:
+                                    logs_a_supprimer.delete(synchronize_session=False)
+                                    db.commit()
+                                    
+                                    # Traçabilité de l'action de purge elle-même
+                                    log_action_erp(
+                                        module="Piste d'Audit",
+                                        action=f"Purge des archives : {nombre_supprime} anciens logs supprimés (> 5 mois)",
+                                        statut="Critique",
+                                        valeur_avant="Anciens historiques présents",
+                                        valeur_apres=f"{nombre_supprime} entrées purgées",
+                                    )
+                                    st.success(f"✅ {nombre_supprime} anciens logs de plus de 5 mois ont été purgés.")
+                                    st.rerun()
+                                else:
+                                    st.info("ℹ️ Aucun log de plus de 5 mois à purger.")
+                            except Exception as e:
+                                db.rollback()
+                                st.error(f"❌ Erreur lors de la purge : {e}")
 
             st.markdown("<br>", unsafe_allow_html=True)
 

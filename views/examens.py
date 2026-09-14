@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from database.db_config import SessionLocal
 from database.models import Classe, Eleve, School
+from database.queries import get_classes_cached
 
 def afficher_examens():
     st.subheader("📝 Gestion des Examens & Compositions")
@@ -59,3 +60,6 @@ def afficher_examens():
 
     finally:
         db.close()
+
+# Alias de compatibilité
+afficher_examens = afficher_examens

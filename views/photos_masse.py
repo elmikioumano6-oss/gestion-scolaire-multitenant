@@ -2,6 +2,7 @@ import streamlit as st
 import os
 from database.db_config import SessionLocal
 from database.models import Classe, Eleve
+from database.queries import get_classes_cached
 
 def afficher_import_photos_masse(niveau_actif):
     db = SessionLocal()
@@ -16,7 +17,7 @@ def afficher_import_photos_masse(niveau_actif):
         # --- RÉCUPÉRATION DES DONNÉES ---
         classes = db.query(Classe).all()
         # Sécurisation stricte du dictionnaire {id: libelle}
-        classes_dict = {c.id: (c.libelle if c.libelle else f"Classe {c.id}") for c in classes}
+        classes_dict = {c.id: (c.libelle if hasattr(c, 'libelle') and c.libelle else getattr(c, 'nom', f"Classe {c.id}")) for c in classes}
         total_eleves = db.query(Eleve).count()
 
         # --- 2. INDICATEURS CLÉS (KPIs) ---
@@ -89,6 +90,13 @@ def afficher_import_photos_masse(niveau_actif):
                     try:
                         with open(chemin_destination, "wb") as f:
                             f.write(uploaded_file.getbuffer())
+                        
+                        # Mise à jour optionnelle du chemin dans la table Élève si le matricule correspond
+                        eleve_concerne = db.query(Eleve).filter(Eleve.matricule == matricule_fichier).first()
+                        if eleve_concerne:
+                            eleve_concerne.photo = chemin_destination
+                            db.commit()
+
                         succes_count += 1
                     except Exception as e:
                         print(f"Erreur import photo {uploaded_file.name}: {e}")
@@ -98,3 +106,6 @@ def afficher_import_photos_masse(niveau_actif):
 
     finally:
         db.close()
+
+# Alias de compatibilité
+afficher_import_photos_masse = afficher_import_photos_masse

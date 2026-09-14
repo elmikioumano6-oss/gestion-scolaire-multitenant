@@ -11,6 +11,7 @@ from database.models import (
     Programme,
     School,
 )
+from database.queries import get_classes_cached, get_matieres_cached
 from sqlalchemy import or_
 
 
@@ -97,7 +98,7 @@ def afficher_supervision_cahier():
     # Filtres de supervision avancés
     col_f1, col_f2 = st.columns(2)
     with col_f1:
-      noms_classes = [c.libelle for c in classes_cycle]
+      noms_classes = [c.libelle if hasattr(c, 'libelle') and c.libelle else getattr(c, 'nom', f"Classe {c.id}") for c in classes_cycle]
       classe_suivie = st.selectbox(
           "Sélectionner la classe à inspecter",
           noms_classes,
@@ -116,7 +117,7 @@ def afficher_supervision_cahier():
       )
 
     classe_obj = next(
-        (c for c in classes_cycle if c.libelle == classe_suivie), None
+        (c for c in classes_cycle if (c.libelle if hasattr(c, 'libelle') and c.libelle else getattr(c, 'nom', f"Classe {c.id}")) == classe_suivie), None
     )
     st.info(
         f"🔍 Registre d'inspection actif pour la classe de **{classe_suivie}** ("
@@ -138,14 +139,17 @@ def afficher_supervision_cahier():
 
     data_suivi = []
     for mat in matieres_cycle:
+      mat_lib = mat.libelle if hasattr(mat, 'libelle') and mat.libelle else getattr(mat, 'nom', 'Matière')
+      mat_code = getattr(mat, 'code', '') or ''
+      
       # Récupération exacte des heures prévues depuis les programmes importés
       prog_obj = (
           db.query(Programme)
           .filter(
               Programme.school_id == target_school_id,
               or_(
-                  Programme.code_matiere == mat.code,
-                  Programme.nom_matiere == mat.libelle,
+                  Programme.code_matiere == mat_code,
+                  Programme.nom_matiere == mat_lib,
               ),
           )
           .first()
@@ -214,7 +218,7 @@ def afficher_supervision_cahier():
         appreciation = "🔴 En attente de première saisie"
 
       data_suivi.append({
-          "Matière": mat.libelle,
+          "Matière": mat_lib,
           "Enseignant(e)": enseignant_ref,
           "Heures Prévues": f"{heures_prevues}h",
           "Heures Réalisées": f"{heures_realisees}h",

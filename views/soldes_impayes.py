@@ -3,6 +3,7 @@ import io
 from database.audit import log_action_erp
 from database.db_config import SessionLocal
 from database.models import ActivityLog, Classe, Eleve, Paiement, School
+from database.queries import get_classes_cached, get_matieres_cached
 import pandas as pd
 import streamlit as st
 
@@ -44,7 +45,13 @@ def afficher_soldes_impayes(niveau_actif="Collège"):
       st.warning(f"Aucune classe trouvée pour le cycle {niveau_actif}.")
       return
 
-    options_classes = {c.libelle: c.id for c in classes}
+    def get_classe_libelle(c):
+        for attr in ['libelle', 'nom', 'name', 'titre']:
+            if hasattr(c, attr) and getattr(c, attr):
+                return getattr(c, attr)
+        return f"Classe {c.id}"
+
+    options_classes = {get_classe_libelle(c): c.id for c in classes}
     choix_classe = st.selectbox(
         "Filtrer par classe",
         list(options_classes.keys()),
@@ -192,7 +199,7 @@ def afficher_soldes_impayes(niveau_actif="Collège"):
     st.markdown(
         "Conformément aux normes comptables, la suppression physique est"
         " remplacée par une écriture de contre-passation. La référence affichée"
-        " ci-dessous est celle saisie par la comptable lors de l'encaissement."
+        " ci-dessous est celle saisie par la comptabilité lors de l'encaissement."
     )
 
     if not profil_autorise_annulation:

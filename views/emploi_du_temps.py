@@ -1,7 +1,8 @@
 from datetime import datetime
-import pandas as pd
 from database.db_config import SessionLocal
 from database.models import ActivityLog, Classe, School
+from database.queries import get_classes_cached
+import pandas as pd
 import streamlit as st
 
 

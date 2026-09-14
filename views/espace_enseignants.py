@@ -12,6 +12,7 @@ from database.models import (
     Presence,
     School,
 )
+from database.queries import get_classes_cached, get_matieres_cached
 
 
 def afficher_espace_enseignants():
@@ -98,7 +99,7 @@ def afficher_espace_enseignants():
       matieres_disponibles = [
           m
           for m in toutes_matieres_cycle
-          if m.libelle in matieres_assignées_noms
+          if (m.libelle if hasattr(m, 'libelle') else getattr(m, 'nom', '')) in matieres_assignées_noms
       ]
 
       if not classes_disponibles:
@@ -107,7 +108,7 @@ def afficher_espace_enseignants():
         matieres_disponibles = toutes_matieres_cycle
 
     noms_classes = [c.libelle for c in classes_disponibles]
-    noms_matieres = [m.libelle for m in matieres_disponibles]
+    noms_matieres = [m.libelle if hasattr(m, 'libelle') else getattr(m, 'nom', '') for m in matieres_disponibles]
 
     st.markdown(
         f"### Espace Enseignant (`{username}`) — **{school_name}"
@@ -128,7 +129,7 @@ def afficher_espace_enseignants():
         (c for c in classes_disponibles if c.libelle == classe_enseignant), None
     )
     matiere_obj = next(
-        (m for m in matieres_disponibles if m.libelle == matiere_enseignant),
+        (m for m in matieres_disponibles if (m.libelle if hasattr(m, 'libelle') else getattr(m, 'nom', '')) == matiere_enseignant),
         None,
     )
 

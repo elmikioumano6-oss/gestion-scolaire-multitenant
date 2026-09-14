@@ -91,3 +91,6 @@ def afficher_annee_scolaire():
 
     finally:
         db.close()
+
+# Alias de compatibilité
+afficher_annee_scolaire = afficher_annee_scolaire

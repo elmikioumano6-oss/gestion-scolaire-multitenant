@@ -1,11 +1,14 @@
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class Config:
     APP_NAME = "CSP RAHMAT-FH"
     VERSION = "2.0.0"
     
-    # Préparation pour PostgreSQL (par défaut SQLite pour la transition)
-    DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///csp_rahmat_v2.db")
+    # Configuration PostgreSQL via le tunnel SSH local
+    DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://erp_user:Rahmatfh2026@127.0.0.1:5432/school_erp")
     SECRET_KEY = os.getenv("SECRET_KEY", "une_cle_secrete_tres_longue_et_complexe_a_changer_en_prod")
     
     # Paramètres de l'établissement

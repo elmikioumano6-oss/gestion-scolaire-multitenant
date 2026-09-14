@@ -1,4 +1,5 @@
 from datetime import datetime
+from database.queries import get_classes_cached
 import pandas as pd
 import streamlit as st
 from database.db_config import SessionLocal
@@ -62,7 +63,7 @@ def afficher_presence():
       )
       return
 
-    noms_classes = [c.libelle for c in classes_cycle]
+    noms_classes = [c.libelle if hasattr(c, 'libelle') else getattr(c, 'nom', '') for c in classes_cycle]
 
     col_sel1, col_sel2 = st.columns(2)
     with col_sel1:
@@ -77,7 +78,7 @@ def afficher_presence():
       )
 
     classe_obj = next(
-        (c for c in classes_cycle if c.libelle == classe_choisie), None
+        (c for c in classes_cycle if (c.libelle if hasattr(c, 'libelle') else getattr(c, 'nom', '')) == classe_choisie), None
     )
     if not classe_obj:
       return

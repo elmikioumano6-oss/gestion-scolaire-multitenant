@@ -1,12 +1,13 @@
 import streamlit as st
 import pandas as pd
 from database.db_config import SessionLocal
-from database.models import Classe, Eleve, User, Paiement
+from database.models import Classe, Eleve, User, Paiement, School
+from database.queries import get_classes_cached, get_matieres_cached
 from sqlalchemy import func
 
 def afficher_tableau_de_bord():
     st.subheader("📊 Tableau de Bord Exécutif & Pilotage")
-    st.markdown("Vue d'ensemble de la performance administrative, financière et pédagogique de l'établissement.")
+    st.markdown("Vue d'ensemble de la performance administrative, financière et pédagogique de l'établissement avec isolation multi-tenant stricte.")
     st.markdown("---")
 
     school_id = st.session_state.get("school_id")
@@ -22,10 +23,19 @@ def afficher_tableau_de_bord():
 
     db = SessionLocal()
     try:
+        target_school_id = school_id
+        if is_super_admin and not target_school_id:
+            ecole_defaut = db.query(School).first()
+            target_school_id = ecole_defaut.id if ecole_defaut else 1
+
+        ecole_active_id = school_id if school_id else target_school_id
+
         # Isolation stricte multi-écoles et multi-cycles pour les classes
         classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours)
         if not is_super_admin and school_id:
             classes_query = classes_query.filter(Classe.school_id == school_id)
+        else:
+            classes_query = classes_query.filter(Classe.school_id == ecole_active_id)
         classes_cycle = classes_query.all()
 
         classes_ids = [c.id for c in classes_cycle]
@@ -36,6 +46,8 @@ def afficher_tableau_de_bord():
             eleves_query = eleves_query.filter(Eleve.classe_id.in_(classes_ids))
         if not is_super_admin and school_id:
             eleves_query = eleves_query.filter(Eleve.school_id == school_id)
+        else:
+            eleves_query = eleves_query.filter(Eleve.school_id == ecole_active_id)
         eleves = eleves_query.all()
 
         eleves_ids = [e.id for e in eleves]
@@ -44,11 +56,13 @@ def afficher_tableau_de_bord():
         users_query = db.query(User)
         if not is_super_admin and school_id:
             users_query = users_query.filter(User.school_id == school_id)
+        else:
+            users_query = users_query.filter(User.school_id == ecole_active_id)
         users = users_query.all()
 
         total_eleves = len(eleves)
         total_classes = len(classes_cycle)
-        total_enseignants = len([u for u in users if str(u.role).lower() in ["prof", "enseignant"]])
+        total_enseignants = len([u for u in users if str(getattr(u, 'role', '')).lower() in ["prof", "enseignant"]])
 
         # Calcul sécurisé des recettes réelles basées sur la table Paiement pour ces élèves
         total_recettes = 0.0
@@ -56,6 +70,8 @@ def afficher_tableau_de_bord():
             recettes_query = db.query(func.sum(Paiement.montant)).filter(Paiement.eleve_id.in_(eleves_ids))
             if not is_super_admin and school_id:
                 recettes_query = recettes_query.filter(Paiement.school_id == school_id)
+            else:
+                recettes_query = recettes_query.filter(Paiement.school_id == ecole_active_id)
             res_recettes = recettes_query.scalar()
             if res_recettes:
                 total_recettes = float(res_recettes)
@@ -66,7 +82,7 @@ def afficher_tableau_de_bord():
             if classe:
                 frais_scol = getattr(classe, 'frais_scolarite', 0.0) or 0.0
                 frais_inscr = getattr(classe, 'frais_inscription', 0.0) or 0.0
-                total_attendu += (frais_scol + frais_inscr)
+                total_attendu += (float(frais_scol) + float(frais_inscr))
 
         reste_a_recouvrer = total_attendu - total_recettes
         taux = (total_recettes / total_attendu * 100) if total_attendu > 0 else 0.0
@@ -94,13 +110,18 @@ def afficher_tableau_de_bord():
             data_effectifs = []
             for classe in classes_cycle:
                 nb_eleves_classe = len([e for e in eleves if e.classe_id == classe.id])
+                classe_lib = classe.libelle if hasattr(classe, 'libelle') and classe.libelle else getattr(classe, 'nom', f"Classe {classe.id}")
+                classe_niv = getattr(classe, 'niveau', 'N/D')
                 data_effectifs.append({
-                    "Classe": classe.libelle,
-                    "Niveau": classe.niveau,
+                    "Classe": classe_lib,
+                    "Niveau": classe_niv,
                     "Effectif": nb_eleves_classe
                 })
             df_eff = pd.DataFrame(data_effectifs)
-            st.dataframe(df_eff, use_container_width=True)
+            st.dataframe(df_eff, use_container_width=True, hide_index=True)
 
     finally:
         db.close()
+
+# Alias de compatibilité
+afficher_tableau_de_bord = afficher_tableau_de_bord

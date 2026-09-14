@@ -7,6 +7,7 @@ from datetime import datetime
 from sqlalchemy import text
 from database.db_config import SessionLocal
 from database.models import Classe, Eleve, School, JournalActivite, AnneeScolaire
+from database.queries import get_classes_cached
 
 def obtenir_logo_et_palette(school_name):
     """

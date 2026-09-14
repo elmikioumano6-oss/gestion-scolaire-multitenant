@@ -16,8 +16,24 @@ sentry_sdk.init(
     send_default_pii=True,
 )
 
-from database.db_config import SessionLocal, init_db
+from database.db_config import SessionLocal
 from database.models import AnneeScolaire, User, School
+
+
+@st.cache_data(ttl=600)
+def get_libelle_annee_courante():
+    db_sidebar = SessionLocal()
+    try:
+        annee_courante = (
+            db_sidebar.query(AnneeScolaire)
+            .filter(AnneeScolaire.active == True)
+            .first()
+        )
+        return annee_courante.libelle if annee_courante else "2026-2027"
+    except Exception:
+        return "2026-2027"
+    finally:
+        db_sidebar.close()
 
 
 def init_tenant_context():
@@ -191,7 +207,7 @@ def main():
                     if submit_btn:
                         if len(nouveau_p) < 6:
                             st.error(
-                                "⚠️ Le mot de passe doit contenir au moins 6 caractères."
+                                f"🔒 Période d'essai expirée : La période d'essai de 14 jours pour l'établissement '{ecole_verif.nom}' est arrivée à terme. Veuillez contacter le support pour activer votre abonnement."
                             )
                         elif nouveau_p != confirme_p:
                             st.error("⚠️ Les mots de passe ne correspondent pas.")
@@ -299,22 +315,14 @@ def main():
             st.markdown("#### 🔍 Portail Inspecteur")
             st.info(f"Connecté : **{nom_utilisateur}**")
             options_menu = [
-                "Accueil",
-                "Tableau de Bord",
                 "Espace Inspection",
                 "Suivi des Programmes",
                 "Supervision cahier",
-                "Journal d'activité",
-                "Messages",
             ]
             icons_menu = [
-                "house",
-                "speedometer2",
                 "clipboard-check",
                 "graph-up",
                 "eye",
-                "clock-history",
-                "chat-dots",
             ]
             menu_key_val = "menu_inspecteur"
 
@@ -512,18 +520,7 @@ def main():
 
         st.markdown("---")
 
-        db_sidebar = SessionLocal()
-        try:
-            annee_courante = (
-                db_sidebar.query(AnneeScolaire)
-                .filter(AnneeScolaire.active == True)
-                .first()
-            )
-            libelle_annee = annee_courante.libelle if annee_courante else "2026-2027"
-        except Exception:
-            libelle_annee = "2026-2027"
-        finally:
-            db_sidebar.close()
+        libelle_annee = get_libelle_annee_courante()
 
         st.markdown(
             f"<div style='text-align: center; color: #C5A059; font-size: 0.75rem;'>Année"

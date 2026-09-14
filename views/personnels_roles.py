@@ -1,7 +1,9 @@
 from datetime import datetime
+import bcrypt
 from database.audit import log_action_erp
 from database.db_config import SessionLocal
 from database.models import ActivityLog, School, User
+from database.queries import get_classes_cached, get_matieres_cached
 import pandas as pd
 import streamlit as st
 
@@ -195,10 +197,14 @@ def afficher_personnels():
                   " cet établissement."
               )
             else:
+              hashed_pwd = bcrypt.hashpw(
+                  mot_de_passe.strip().encode("utf-8"), bcrypt.gensalt()
+              ).decode("utf-8")
+
               nouvel_utilisateur = User(
                   school_id=ecole_active_id,
                   username=identifiant.strip(),
-                  password=mot_de_passe.strip(),
+                  password=hashed_pwd,
                   role=role_attribue,
               )
               if hasattr(nouvel_utilisateur, "email"):

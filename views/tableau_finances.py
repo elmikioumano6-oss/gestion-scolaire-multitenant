@@ -3,6 +3,7 @@ import io
 from database.audit import log_action_erp
 from database.db_config import SessionLocal
 from database.models import ActivityLog, Classe, Depense, Eleve, Paiement, School
+from database.queries import get_classes_cached, get_matieres_cached
 import pandas as pd
 import streamlit as st
 
@@ -42,6 +43,12 @@ def afficher_tableau_finances():
     if hasattr(Classe, "deleted_at"):
       classes_query = classes_query.filter(Classe.deleted_at.is_(None))
     classes_cycle = classes_query.all()
+
+    def get_classe_libelle(c):
+        for attr in ['libelle', 'nom', 'name', 'titre']:
+            if hasattr(c, attr) and getattr(c, attr):
+                return getattr(c, attr)
+        return f"Classe {c.id}"
 
     classes_dict = {c.id: c for c in classes_cycle}
     classes_ids = list(classes_dict.keys())
@@ -181,8 +188,9 @@ def afficher_tableau_finances():
               else 0.0
           )
 
+        classe_lib = get_classe_libelle(classe)
         repartition_data.append({
-            "Classe": classe.libelle,
+            "Classe": classe_lib,
             "Niveau": getattr(classe, "niveau", "N/D"),
             "Effectif": nb_eleves,
             "Attendu (Net)": attendu_classe,
@@ -191,7 +199,7 @@ def afficher_tableau_finances():
         })
 
       df_rep = pd.DataFrame(repartition_data)
-      st.dataframe(df_rep, use_container_width=True)
+      st.dataframe(df_rep, use_container_width=True, hide_index=True)
 
       # Section d'exportation professionnelle
       st.markdown("##### 📥 Exportation des Bilans Macroscopiques")

@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 import re
 import unicodedata
+import time
 import bcrypt
 import streamlit as st
 from database.db_config import SessionLocal
@@ -80,6 +81,17 @@ def afficher_login():
         )
 
         with tab_login:
+            # --- CONTRÔLE RATE LIMITING (ANTI-BRUTE FORCE) ---
+            if "login_attempts" not in st.session_state:
+                st.session_state["login_attempts"] = 0
+            if "lockout_time" not in st.session_state:
+                st.session_state["lockout_time"] = 0
+
+            if st.session_state["lockout_time"] > time.time():
+                temps_restant = int(st.session_state["lockout_time"] - time.time())
+                st.error(f"🔒 Trop de tentatives infructueuses. Veuillez patienter {temps_restant} secondes.")
+                st.stop()
+
             # --- INTERCEPTION DU CHANGEMENT DE MOT DE PASSE OBLIGATOIRE ---
             if st.session_state.get("pending_password_change", False):
                 st.warning("🔒 Sécurité Obligatoire de Première Connexion")
@@ -198,6 +210,10 @@ def afficher_login():
                                     password_valid = False
 
                             if user and password_valid:
+                                # Réinitialisation du compteur d'échecs en cas de succès
+                                st.session_state["login_attempts"] = 0
+                                st.session_state["lockout_time"] = 0
+
                                 role_db = str(user.role or "").strip().lower()
                                 if role_db == "admin":
                                     role_db = "administrateur"
@@ -254,7 +270,14 @@ def afficher_login():
                                 st.success("✅ Connexion réussie ! Chargement...")
                                 st.rerun()
                             else:
-                                st.error("⛔ Identifiant ou mot de passe incorrect.")
+                                # Incrémentation des échecs pour le Rate Limiting
+                                st.session_state["login_attempts"] += 1
+                                if st.session_state["login_attempts"] >= 5:
+                                    st.session_state["lockout_time"] = time.time() + 30
+                                    st.session_state["login_attempts"] = 0
+                                    st.warning("⚠️ Trop d'échecs consécutifs. Compte temporairement verrouillé pour 30 secondes.")
+                                else:
+                                    st.error("⛔ Identifiant ou mot de passe incorrect.")
                         finally:
                             db.close()
 

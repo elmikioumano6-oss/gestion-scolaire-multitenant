@@ -8,3 +8,4 @@ qrcode
 pillow
 python-dotenv
 psycopg2-binary
+sentry_sdk

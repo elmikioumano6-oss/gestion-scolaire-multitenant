@@ -3,6 +3,7 @@ import io
 from database.audit import log_action_erp
 from database.db_config import SessionLocal
 from database.models import Classe, Depense, Eleve, Paiement, School
+from database.queries import get_classes_cached, get_matieres_cached
 import pandas as pd
 import streamlit as st
 
@@ -210,8 +211,9 @@ def afficher_rapports():
                         0.0, total_attendu_classe - recettes_classe
                     )
 
+                    classe_lib = classe.libelle if hasattr(classe, 'libelle') else getattr(classe, 'nom', 'N/A')
                     rapport_data.append({
-                        "Classe": classe.libelle,
+                        "Classe": classe_lib,
                         "Niveau": getattr(classe, "niveau", "N/D"),
                         "Effectif": len(eleves_classe),
                         "Recettes (FCFA)": f"{recettes_classe:,.0f}",
@@ -328,10 +330,11 @@ def afficher_rapports():
                     montant_red = float(e.montant_reduction or 0.0)
                     total_remises += montant_red
 
+                    classe_lib = (classe.libelle if hasattr(classe, 'libelle') else getattr(classe, 'nom', 'Non assignée')) if classe else "Non assignée"
                     data_red.append({
                         "Matricule": getattr(e, "matricule", "N/A"),
                         "Élève": f"{e.nom} {e.prenom}",
-                        "Classe": classe.libelle if classe else "Non assignée",
+                        "Classe": classe_lib,
                         "Type / Motif de Réduction": (
                             getattr(e, "type_reduction", "Standard") or "Standard"
                         ),
