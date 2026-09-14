@@ -49,7 +49,7 @@ if errorlevel 1 (
     if errorlevel 2 goto ERREUR_FIN
 )
 
-:: --- 5. TESTS DE SANTE ET INTEGRITE POST-DEPLOIEMENT (CORRIGE) ---
+:: --- 5. TESTS DE SANTE ET INTEGRITE POST-DEPLOIEMENT ---
 echo.
 echo [etape 5/5] Execution des diagnostics de la base de donnees...
 if exist test_conn.py (
