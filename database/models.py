@@ -1,4 +1,3 @@
-
 from datetime import datetime
 from database.db_config import Base
 from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text
@@ -16,7 +15,6 @@ class School(Base):
     adresse = Column(String(255), default="Quartier, Niamey - Niger")
     contacts = Column(String(255), default="N/D")
     logo = Column(String(255), nullable=True)
-    subdomain = Column(String, unique=True, index=True, nullable=True)
     actif = Column(Boolean, default=True)
     deleted_at = Column(DateTime, nullable=True)  # Soft Delete ERP
     date_expiration = Column(DateTime, nullable=True)
@@ -127,6 +125,23 @@ class User(Base):
     enseignant = relationship("Enseignant", foreign_keys=[enseignant_id])
     eleve = relationship("Eleve", foreign_keys=[eleve_id])
     cahiers_texte = relationship("CahierTexte", back_populates="enseignant_user", cascade="all, delete-orphan")
+
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    school_id = Column(Integer, ForeignKey("schools.id"), nullable=False, index=True)
+    expediteur_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    destinataire_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    sujet = Column(String(255), nullable=True)
+    contenu = Column(Text, nullable=False)
+    lu = Column(Boolean, default=False)
+    date_envoi = Column(DateTime, default=datetime.now)
+
+    school = relationship("School")
+    expediteur = relationship("User", foreign_keys=[expediteur_id])
+    destinataire = relationship("User", foreign_keys=[destinataire_id])
 
 
 class Matiere(Base):
