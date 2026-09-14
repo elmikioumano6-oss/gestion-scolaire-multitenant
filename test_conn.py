@@ -3,14 +3,14 @@ import sys
 from dotenv import load_dotenv
 import psycopg2
 
-load_dotenv()
+load_dotenv(override=True)
 
-# Récupération de l'URL de connexion (priorité au .env, sinon fallback sur le tunnel local/VPS)
-url = os.getenv(
-    "DATABASE_URL",
-    "postgresql://postgres:Rahmatfh2026@127.0.0.1:5432/postgres",
-)
-print("URL:", url)
+# On force l'URL exacte pour éviter qu'une ancienne variable système ne prenne le dessus
+url = os.getenv("DATABASE_URL")
+if not url or "supabase" in url:
+    url = "postgresql://erp_user:Rahmatfh2026@127.0.0.1:5432/school_erp"
+
+print("URL ciblee:", url)
 
 try:
     conn = psycopg2.connect(url)
