@@ -1,12 +1,11 @@
+from datetime import datetime
 import importlib
 import inspect
-from datetime import datetime
 import os
-import streamlit as st
 import bcrypt
-from streamlit_option_menu import option_menu
-
 import sentry_sdk
+import streamlit as st
+from streamlit_option_menu import option_menu
 
 # Initialisation du monitoring Sentry pour la production
 sentry_sdk.init(
@@ -16,9 +15,8 @@ sentry_sdk.init(
     send_default_pii=True,
 )
 
-# --- CORRECTION ICI : Importation de init_db en plus de SessionLocal ---
 from database.db_config import SessionLocal, init_db
-from database.models import AnneeScolaire, User, School
+from database.models import AnneeScolaire, School, User
 
 
 @st.cache_data(ttl=600)
@@ -42,14 +40,20 @@ def init_tenant_context():
     if st.session_state.get("authenticated") and st.session_state.get("school_id"):
         return
 
-    if "school_id" in st.session_state and st.session_state["school_id"] and not st.session_state.get("is_super_admin"):
+    if (
+        "school_id" in st.session_state
+        and st.session_state["school_id"]
+        and not st.session_state.get("is_super_admin")
+    ):
         return
 
     db = SessionLocal()
     try:
         subdomain = "default"
         try:
-            host = st.context.headers.get("Host", "") or st.context.headers.get("X-Forwarded-Host", "")
+            host = st.context.headers.get("Host", "") or st.context.headers.get(
+                "X-Forwarded-Host", ""
+            )
             if host:
                 host_clean = host.split(":")[0].lower()
                 if "localhost" not in host_clean and "127.0.0.1" not in host_clean:
@@ -62,7 +66,7 @@ def init_tenant_context():
         school = None
         if subdomain != "default":
             school = db.query(School).filter(School.subdomain == subdomain).first()
-        
+
         if school:
             st.session_state["school_id"] = school.id
             st.session_state["school_name"] = school.nom
@@ -78,14 +82,14 @@ def init_tenant_context():
 def main():
     st.set_page_config(
         page_title="Gestion Scolaire Pro - Plateforme Multi-Tenant",
-        page_icon="🏫",
+        page_icon="🚀",  # Icône fusée pour l'onglet du navigateur
         layout="wide",
         initial_sidebar_state="expanded",
     )
 
     # --- INITIALISATION ET MIGRATIONS AUTOMATIQUES ---
     init_db()
-    
+
     # --- INITIALISATION DU CONTEXTE MULTI-TENANT ---
     init_tenant_context()
 
@@ -208,7 +212,7 @@ def main():
                     if submit_btn:
                         if len(nouveau_p) < 6:
                             st.error(
-                                f"🔒 Période d'essai expirée : La période d'essai de 14 jours pour l'établissement '{ecole_verif.nom}' est arrivée à terme. Veuillez contacter le support pour activer votre abonnement."
+                                "⚠️ Le mot de passe doit contenir au moins 6 caractères."
                             )
                         elif nouveau_p != confirme_p:
                             st.error("⚠️ Les mots de passe ne correspondent pas.")
@@ -245,7 +249,7 @@ def main():
         try:
             school_name_lower = st.session_state.get("school_name", "").lower()
             school_code = st.session_state.get("school_code", "").lower()
-            
+
             logo_file = "Logo Gestion Scolaire Pro.png"
             if "rahmat" in school_name_lower or "rahmat" in school_code:
                 logo_file = "Logo CSP-RAHMAT-FH.png"
