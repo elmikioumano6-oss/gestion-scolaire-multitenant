@@ -16,7 +16,8 @@ sentry_sdk.init(
     send_default_pii=True,
 )
 
-from database.db_config import SessionLocal
+# --- CORRECTION ICI : Importation de init_db en plus de SessionLocal ---
+from database.db_config import SessionLocal, init_db
 from database.models import AnneeScolaire, User, School
 
 
