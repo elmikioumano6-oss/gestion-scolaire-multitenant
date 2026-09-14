@@ -123,6 +123,8 @@ def afficher_gestion_utilisateurs():
             with col2:
                 role_options = {
                     "directeur": "Directeur / Administrateur",
+                    "proviseur": "Proviseur / Direction Secondaire",
+                    "censeur": "Censeur des Études",
                     "enseignant": "Enseignant / Professeur",
                     "econome": "Économe / Finances",
                     "surveillant": "Surveillant Général",
@@ -139,6 +141,8 @@ def afficher_gestion_utilisateurs():
 
             role_descriptions = {
                 "directeur": "Accès complet à la gestion administrative, financière et aux paramètres de l'école.",
+                "proviseur": "Supervision globale du cycle secondaire, pilotage pédagogique et validation des décisions.",
+                "censeur": "Gestion des emplois du temps, des notes, des cahiers de textes et de la discipline.",
                 "enseignant": "Saisie des notes, émargement du cahier de texte et suivi de classe.",
                 "econome": "Gestion de la trésorerie, encaissements de scolarité et suivi des dépenses.",
                 "surveillant": "Gestion des absences, retours de discipline et cahier de correspondance.",

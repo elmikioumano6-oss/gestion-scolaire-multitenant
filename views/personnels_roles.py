@@ -101,6 +101,7 @@ def afficher_personnels():
           with c[3]:
             roles_possibles = [
                 "directeur",
+                "proviseur",
                 "censeur",
                 "enseignant",
                 "comptable",
@@ -165,6 +166,7 @@ def afficher_personnels():
               "Rôle RBAC dans l'établissement",
               [
                   "directeur",
+                  "proviseur",
                   "censeur",
                   "enseignant",
                   "comptable",

@@ -38,7 +38,7 @@ def afficher_utilisateurs(vue_selectionnee="Utilisateurs connectés"):
                 
                 with col1:
                     username = st.text_input("Nom d'utilisateur (Identifiant) *")
-                    role = st.selectbox("Rôle de l'utilisateur", ["admin", "directeur", "enseignant", "comptable", "surveillant"])
+                    role = st.selectbox("Rôle de l'utilisateur", ["admin", "directeur", "proviseur", "censeur", "enseignant", "comptable", "surveillant"])
                 with col2:
                     password = st.text_input("Mot de passe *", type="password")
                     confirm_password = st.text_input("Confirmer le mot de passe *", type="password")
