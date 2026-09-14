@@ -1,32 +1,22 @@
 import os
+import streamlit as st
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-import streamlit as st
 
-# Récupération sécurisée depuis st.secrets (Production) ou repli isolé sur staging.db (Staging)
-try:
-    DATABASE_URL = st.secrets["DB_URL"]
-    connect_args = {"connect_timeout": 10}
-except Exception:
-    DATABASE_URL = "sqlite:///staging.db"
-    connect_args = {"timeout": 15}
+# Forçage direct de l'URL sur le tunnel SSH local pour pointer vers la base de production du VPS
+DATABASE_URL = "postgresql://erp_user:Rahmatfh2026@127.0.0.1:5432/school_erp"
+connect_args = {"connect_timeout": 10}
 
-# Configuration de l'engine avec gestion adaptée du dialecte (SQLite vs PostgreSQL)
-if DATABASE_URL.startswith("sqlite"):
-    engine = create_engine(
-        DATABASE_URL,
-        connect_args=connect_args
-    )
-else:
-    engine = create_engine(
-        DATABASE_URL,
-        pool_size=10,
-        max_overflow=20,
-        pool_pre_ping=True,
-        pool_recycle=300,
-        connect_args=connect_args
-    )
+# Configuration de l'engine PostgreSQL via le tunnel
+engine = create_engine(
+    DATABASE_URL,
+    pool_size=10,
+    max_overflow=20,
+    pool_pre_ping=True,
+    pool_recycle=300,
+    connect_args=connect_args
+)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
