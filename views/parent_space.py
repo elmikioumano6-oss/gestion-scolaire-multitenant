@@ -65,8 +65,12 @@ def afficher_espace_parent():
     else:
       if not is_super_admin and school_id:
         eleves_query = eleves_query.filter(Eleve.school_id == school_id)
+      
+      # ISOLATION STRICTE PAR CYCLE : Si des classes existent pour ce cycle, on filtre. Sinon, résultat vide.
       if classes_ids:
         eleves_query = eleves_query.filter(Eleve.classe_id.in_(classes_ids))
+      else:
+        eleves_query = eleves_query.filter(Eleve.classe_id == -1)
 
     eleves = eleves_query.all()
 

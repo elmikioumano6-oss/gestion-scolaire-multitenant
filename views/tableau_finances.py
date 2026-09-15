@@ -53,12 +53,17 @@ def afficher_tableau_finances():
     classes_dict = {c.id: c for c in classes_cycle}
     classes_ids = list(classes_dict.keys())
 
-    # Récupération sécurisée des élèves
+    # Récupération sécurisée des élèves strictement rattachés aux classes du cycle actif
     eleves_query = db.query(Eleve).filter(Eleve.school_id == ecole_active_id)
     if hasattr(Eleve, "deleted_at"):
       eleves_query = eleves_query.filter(Eleve.deleted_at.is_(None))
+      
     if classes_ids:
       eleves_query = eleves_query.filter(Eleve.classe_id.in_(classes_ids))
+    else:
+      # Isolation stricte : si aucune classe n'existe pour ce cycle, on renvoie une liste vide
+      eleves_query = eleves_query.filter(Eleve.classe_id == -1)
+      
     eleves = eleves_query.all()
 
     total_classes = len(classes_cycle)

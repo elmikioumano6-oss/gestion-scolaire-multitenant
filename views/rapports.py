@@ -39,14 +39,18 @@ def afficher_rapports():
         classes_dict = {c.id: c for c in classes_cycle}
         classes_ids = list(classes_dict.keys())
 
-        # Récupération des élèves
+        # Récupération sécurisée des élèves (ISOLATION STRICTE PAR CYCLE)
         eleves_query = db.query(Eleve)
         if hasattr(Eleve, "deleted_at"):
             eleves_query = eleves_query.filter(Eleve.deleted_at.is_(None))
         if not is_super_admin and school_id:
             eleves_query = eleves_query.filter(Eleve.school_id == school_id)
+            
         if classes_ids:
             eleves_query = eleves_query.filter(Eleve.classe_id.in_(classes_ids))
+        else:
+            # CORRECTION : Si aucune classe n'existe pour ce cycle, on renvoie une liste vide
+            eleves_query = eleves_query.filter(Eleve.classe_id == -1)
 
         eleves = eleves_query.all()
         eleves_ids = [e.id for e in eleves]
@@ -319,8 +323,8 @@ def afficher_rapports():
 
             if not eleves_avec_reduction:
                 st.info(
-                    "📌 Aucune réduction ou exonération n'a été enregistrée pour les"
-                    " élèves de ce cycle."
+                    f"📌 Aucune réduction ou exonération n'a été enregistrée pour les"
+                    f" élèves du cycle **{cycle_en_cours}**."
                 )
             else:
                 data_red = []

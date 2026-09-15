@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from database.db_config import SessionLocal
-from database.models import Classe, Eleve, User, Paiement, School
+from database.models import Classe, Eleve, User, Paiement, School, EmploiDuTemps
 from database.queries import get_classes_cached, get_matieres_cached
 from sqlalchemy import func
 
@@ -32,6 +32,8 @@ def afficher_tableau_de_bord():
 
         # Isolation stricte multi-écoles et multi-cycles pour les classes
         classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours)
+        if hasattr(Classe, "deleted_at"):
+            classes_query = classes_query.filter(Classe.deleted_at.is_(None))
         if not is_super_admin and school_id:
             classes_query = classes_query.filter(Classe.school_id == school_id)
         else:
@@ -40,10 +42,16 @@ def afficher_tableau_de_bord():
 
         classes_ids = [c.id for c in classes_cycle]
 
-        # Isolation stricte multi-écoles pour les élèves
+        # Isolation stricte multi-écoles et multi-cycles pour les élèves
         eleves_query = db.query(Eleve)
+        if hasattr(Eleve, "deleted_at"):
+            eleves_query = eleves_query.filter(Eleve.deleted_at.is_(None))
+
         if classes_ids:
             eleves_query = eleves_query.filter(Eleve.classe_id.in_(classes_ids))
+        else:
+            eleves_query = eleves_query.filter(Eleve.classe_id == -1)
+
         if not is_super_admin and school_id:
             eleves_query = eleves_query.filter(Eleve.school_id == school_id)
         else:
@@ -52,17 +60,29 @@ def afficher_tableau_de_bord():
 
         eleves_ids = [e.id for e in eleves]
 
-        # Isolation stricte multi-écoles pour les enseignants / utilisateurs
-        users_query = db.query(User)
-        if not is_super_admin and school_id:
-            users_query = users_query.filter(User.school_id == school_id)
-        else:
-            users_query = users_query.filter(User.school_id == ecole_active_id)
-        users = users_query.all()
+        # Calcul strict des enseignants rattachés aux classes de ce cycle (via l'emploi du temps ou la table des profs)
+        total_enseignants = 0
+        if classes_ids:
+            # Récupérer les enseignants uniques enseignant dans les classes de ce cycle
+            profs_edt = db.query(EmploiDuTemps.enseignant).filter(
+                EmploiDuTemps.classe_id.in_(classes_ids),
+                EmploiDuTemps.enseignant.isnot(None),
+                EmploiDuTemps.enseignant != ""
+            ).distinct().all()
+            total_enseignants = len(profs_edt)
+            
+            # Fallback si l'emploi du temps n'est pas rempli mais qu'il y a des profs dans l'école
+            if total_enseignants == 0:
+                users_query = db.query(User)
+                if not is_super_admin and school_id:
+                    users_query = users_query.filter(User.school_id == school_id)
+                else:
+                    users_query = users_query.filter(User.school_id == ecole_active_id)
+                users = users_query.all()
+                total_enseignants = len([u for u in users if str(getattr(u, 'role', '')).lower() in ["prof", "enseignant"]])
 
         total_eleves = len(eleves)
         total_classes = len(classes_cycle)
-        total_enseignants = len([u for u in users if str(getattr(u, 'role', '')).lower() in ["prof", "enseignant"]])
 
         # Calcul sécurisé des recettes réelles basées sur la table Paiement pour ces élèves
         total_recettes = 0.0
@@ -102,7 +122,7 @@ def afficher_tableau_de_bord():
             st.metric("Reste à Recouvrer", f"{reste_a_recouvrer:,.0f} FCFA", delta=f"Taux: {taux:.1f}%")
 
         st.markdown("---")
-        st.markdown("### Répartition des Effectifs par Classe")
+        st.markdown(f"### Répartition des Effectifs par Classe — **{cycle_en_cours}**")
 
         if not classes_cycle:
             st.info(f"Aucune classe disponible pour le cycle **{cycle_en_cours}** dans cet établissement.")
@@ -125,3 +145,4 @@ def afficher_tableau_de_bord():
 
 # Alias de compatibilité
 afficher_tableau_de_bord = afficher_tableau_de_bord
+afficher_tableau_bord = afficher_tableau_de_bord

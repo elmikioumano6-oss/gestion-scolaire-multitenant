@@ -338,7 +338,14 @@ def main():
             unsafe_allow_html=True,
         )
 
-        niveau_actif = "Collège"
+        # --- GESTION ROBUSTE DU SÉLECTEUR DE CYCLE ACTIF ---
+        cycles_disponibles = ["Maternelle", "Primaire", "Collège", "Lycée"]
+        cycle_courant_session = st.session_state.get("cycle_actif", "Collège")
+        index_actuel = (
+            cycles_disponibles.index(cycle_courant_session)
+            if cycle_courant_session in cycles_disponibles
+            else 2
+        )
 
         # --- DÉFINITION DES MENUS SELON LE RÔLE ---
         if is_super_admin:
@@ -382,8 +389,8 @@ def main():
             st.info(f"Connecté : **{nom_utilisateur}**")
             niveau_actif = st.selectbox(
                 "Cycle actif",
-                ["Primaire", "Collège", "Lycée"],
-                index=1,
+                cycles_disponibles,
+                index=index_actuel,
                 key="global_niveau_actif_censeur",
             )
             st.session_state["cycle_actif"] = niveau_actif
@@ -448,8 +455,8 @@ def main():
             st.markdown("#### 🏫 Pilotage Administratif")
             niveau_actif = st.selectbox(
                 "Cycle d'enseignement actif",
-                ["Primaire", "Collège", "Lycée"],
-                index=1,
+                cycles_disponibles,
+                index=index_actuel,
                 key="global_niveau_actif",
             )
             st.session_state["cycle_actif"] = niveau_actif
@@ -606,7 +613,8 @@ def main():
             "afficher_super_admin",
         ),
         "Accueil": ("views.accueil", "afficher_accueil"),
-        "Tableau de Bord": ("views.accueil", "afficher_accueil"),
+        # ROUTE CORRIGÉE AVEC LE TIRET BAS (views.tableau_de_bord)
+        "Tableau de Bord": ("views.tableau_de_bord", "afficher_tableau_de_bord"),
         "Année Scolaire": ("views.annee_scolaire", "afficher_annee_scolaire"),
         "Matières & Coeffs": ("views.matieres", "afficher_matieres"),
         "Classes & Tarifs": ("views.classes", "afficher_classes"),

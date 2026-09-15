@@ -1,7 +1,6 @@
-import streamlit as st
-import pandas as pd
 from datetime import datetime, date, time, timedelta
 import io
+import pandas as pd
 from database.db_config import SessionLocal
 from database.models import (
     Classe,
@@ -14,10 +13,12 @@ from database.models import (
     User,
 )
 from sqlalchemy import and_, desc, func, or_
+import streamlit as st
+
 
 @st.cache_data(ttl=30)
 def get_dashboard_stats(school_id, is_super_admin):
-    """Récupère et met en cache toutes les métriques et indicateurs du tableau de bord."""
+    """Récupère et met en cache toutes les métriques et indicateurs macroscopiques globaux."""
     db = SessionLocal()
     try:
         nom_ecole = "Plateforme Scolaire"
@@ -33,7 +34,7 @@ def get_dashboard_stats(school_id, is_super_admin):
                 adresse_ecole = getattr(ecole, "adresse", "Quartier, Niamey - Niger")
                 contacts_ecole = getattr(ecole, "contacts", "N/D")
 
-        # Filtrage des données (avec soft delete)
+        # Filtrage global de l'établissement (tous cycles confondus)
         q_eleves = db.query(Eleve).filter(Eleve.deleted_at.is_(None))
         q_classes = db.query(Classe).filter(Classe.deleted_at.is_(None))
         q_users = db.query(User)
@@ -49,7 +50,7 @@ def get_dashboard_stats(school_id, is_super_admin):
         total_classes = q_classes.count()
         total_utilisateurs = q_users.count()
 
-        # Calcul robuste du corps professoral
+        # Calcul robuste du corps professoral global
         total_profs_db = q_profs_table.count()
         if total_profs_db > 0:
             total_profs = total_profs_db
@@ -62,7 +63,7 @@ def get_dashboard_stats(school_id, is_super_admin):
                 else 0
             )
 
-        # Calculs financiers
+        # Calculs financiers globaux
         q_paiements = db.query(Paiement)
         q_depenses = db.query(Depense)
 
@@ -83,7 +84,7 @@ def get_dashboard_stats(school_id, is_super_admin):
             (total_recettes / total_attendu * 100) if total_attendu > 0 else 0.0
         )
 
-        # Répartition des effectifs par classe
+        # Répartition globale des effectifs par classe (tous cycles)
         classes_list = q_classes.all()
         effectifs_data = []
         if classes_list:
@@ -109,7 +110,7 @@ def get_dashboard_stats(school_id, is_super_admin):
             "total_depenses": float(total_depenses),
             "solde_net": solde_net,
             "taux_recouvrement": taux_recouvrement,
-            "effectifs_data": effectifs_data
+            "effectifs_data": effectifs_data,
         }
     finally:
         db.close()
@@ -124,7 +125,7 @@ def afficher_accueil():
     if username and "rahmat" in username.lower():
         is_super_admin = False
 
-    # Récupération des statistiques via le cache (expiration toutes les 30 secondes)
+    # Récupération des statistiques globales (sans filtre de cycle actif)
     stats = get_dashboard_stats(school_id, is_super_admin)
 
     # --- 2. EN-TÊTE INSTITUTIONNEL ÉPURÉ ---
@@ -141,15 +142,15 @@ def afficher_accueil():
 
     st.subheader("📊 Tableau de Bord ERP & Pilotage Exécutif")
     st.markdown(
-        "Synthèse analytique en temps réel : indicateurs académiques, santé "
-        "financière et flux d'audit de sécurité."
+        "Synthèse analytique globale en temps réel (tous cycles confondus) :"
+        " indicateurs académiques, santé financière et flux d'audit de sécurité."
     )
     st.markdown("---")
 
-    # --- 4. INDICATEURS CLÉS DE PERFORMANCE (KPIs) ---
+    # --- 4. INDICATEURS CLÉS DE PERFORMANCE (KPIs GLOBAUX) ---
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("👨‍🎓 Élèves Actifs", f"{stats['total_eleves']}", delta="Inscrits")
+        st.metric("👨‍🎓 Élèves Actifs", f"{stats['total_eleves']}", delta="Total École")
     with col2:
         st.metric(
             "👩‍🏫 Corps Professoral",
@@ -169,7 +170,7 @@ def afficher_accueil():
     col_f1, col_f2 = st.columns(2)
 
     with col_f1:
-        st.markdown("### 💰 Santé Financière & Trésorerie")
+        st.markdown("### 💰 Santé Financière & Trésorerie Globale")
 
         st.metric("🟢 Recettes Globales", f"{stats['total_recettes']:,.0f} FCFA")
         st.metric("🔴 Dépenses Opérationnelles", f"- {stats['total_depenses']:,.0f} FCFA")
@@ -180,11 +181,11 @@ def afficher_accueil():
             delta_color="normal" if stats['solde_net'] >= 0 else "inverse",
         )
 
-        st.markdown("Progression annuelle des encaissements :")
+        st.markdown("Progression annuelle globale des encaissements :")
         st.progress(min(max(int(stats['taux_recouvrement']), 0), 100) / 100.0)
 
     with col_f2:
-        st.markdown("### 📈 Répartition des Effectifs par Classe")
+        st.markdown("### 📈 Répartition des Effectifs par Classe (Global)")
         if stats['effectifs_data']:
             df_eff = pd.DataFrame(stats['effectifs_data'])
             st.bar_chart(df_eff.set_index("Classe"))
@@ -270,6 +271,7 @@ def afficher_accueil():
             st.info("Utilisez le menu latéral 'Encaissement'.")
         if st.button("📉 Saisir une Dépense", use_container_width=True):
             st.info("Utilisez le menu latéral 'Gestion des Dépenses'.")
+
 
 # Alias de compatibilité
 afficher_accueil = afficher_accueil

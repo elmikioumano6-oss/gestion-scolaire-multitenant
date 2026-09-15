@@ -47,7 +47,7 @@ def afficher_enseignants():
 
     db = SessionLocal()
     try:
-        # Récupération sécurisée des classes et matières de l'école active
+        # Récupération sécurisée des classes et matières de l'école active pour le cycle en cours
         classes_query = db.query(Classe).filter(
             Classe.cycle == cycle_en_cours, Classe.school_id == ecole_active_id
         )
@@ -75,12 +75,22 @@ def afficher_enseignants():
             )
             if hasattr(Enseignant, "deleted_at"):
                 ens_query = ens_query.filter(Enseignant.deleted_at.is_(None))
-            enseignants = ens_query.all()
+            tous_enseignants = ens_query.all()
+
+            # --- FILTRAGE STRICT PAR CYCLE ACTIF ---
+            noms_classes_cycle = {c.libelle for c in classes_cycle}
+            enseignants = []
+            for prof in tous_enseignants:
+                classes_str = getattr(prof, "classes_attribuees", "") or getattr(prof, "classes", "") or ""
+                classes_prof = [c.strip() for c in classes_str.split(",") if c.strip()]
+                
+                # Si l'enseignant n'a pas encore de classe ou enseigne dans au moins une classe du cycle actif
+                if not classes_prof or any(cls in noms_classes_cycle for cls in classes_prof):
+                    enseignants.append(prof)
 
             if not enseignants:
                 st.info(
-                    "Aucun enseignant actif enregistré pour le moment dans cet"
-                    " établissement."
+                    f"Aucun enseignant actif enregistré pour le moment sous le cycle **{cycle_en_cours}** dans cet établissement."
                 )
             else:
                 cols = st.columns([1.5, 1.5, 2, 2, 2])
@@ -257,13 +267,12 @@ def afficher_enseignants():
 
         with tab_ajout:
             st.markdown(
-                f"### Enregistrement d'un Nouvel Enseignant — **{school_name}**"
+                f"### Enregistrement d'un Nouvel Enseignant — **{school_name} ({cycle_en_cours})**"
             )
 
             if not classes_cycle or not matieres_cycle:
                 st.warning(
-                    "⚠️ Veuillez d'abord configurer des classes et des matières dans"
-                    " les modules correspondants."
+                    f"⚠️ Veuillez d'abord configurer des classes et des matières pour le cycle **{cycle_en_cours}** dans les modules correspondants."
                 )
             else:
                 noms_classes = [c.libelle for c in classes_cycle]
@@ -295,7 +304,6 @@ def afficher_enseignants():
                                 "⚠️ Le nom et le prénom de l'enseignant sont obligatoires."
                             )
                         else:
-                            # Vérification anti-doublon par nom et prénom au sein de l'établissement
                             doublon_existant = (
                                 db.query(Enseignant)
                                 .filter(
