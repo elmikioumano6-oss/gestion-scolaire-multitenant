@@ -15,16 +15,9 @@ from database.models import (
 )
 from sqlalchemy import and_, desc, func, or_
 
-def afficher_accueil():
-    # --- 1. RÉCUPÉRATION DYNAMIQUE DE L'ÉCOLE ACTIVE ---
-    school_id = st.session_state.get("school_id")
-    is_super_admin = st.session_state.get("is_super_admin", False)
-    username = st.session_state.get("username", "")
-
-    # 🔒 Confinement strict de l'admin Rahmat
-    if username and "rahmat" in username.lower():
-        is_super_admin = False
-
+@st.cache_data(ttl=30)
+def get_dashboard_stats(school_id, is_super_admin):
+    """Récupère et met en cache toutes les métriques et indicateurs du tableau de bord."""
     db = SessionLocal()
     try:
         nom_ecole = "Plateforme Scolaire"
@@ -40,26 +33,7 @@ def afficher_accueil():
                 adresse_ecole = getattr(ecole, "adresse", "Quartier, Niamey - Niger")
                 contacts_ecole = getattr(ecole, "contacts", "N/D")
 
-        # --- 2. EN-TÊTE INSTITUTIONNEL ÉPURÉ ---
-        st.markdown(
-            f"""
-            <div style="background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%); padding: 25px; border-radius: 12px; border-left: 6px solid #D97706; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 25px;">
-                <h1 style="color: #FFFFFF; font-size: 1.8rem; font-weight: 800; margin: 0 0 8px 0;">🏫 {nom_ecole}</h1>
-                <p style="color: #FBBF24; font-size: 1.05rem; font-weight: 600; margin: 0 0 12px 0;">Devise : {devise_ecole}</p>
-                <p style="color: #94A3B8; font-size: 0.9rem; margin: 0;">📍 <b>Adresse / Quartier :</b> {adresse_ecole} | 📞 <b>Contacts :</b> {contacts_ecole}</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        st.subheader("📊 Tableau de Bord ERP & Pilotage Exécutif")
-        st.markdown(
-            "Synthèse analytique en temps réel : indicateurs académiques, santé "
-            "financière et flux d'audit de sécurité."
-        )
-        st.markdown("---")
-
-        # --- 3. FILTRAGE DES DONNÉES (AVEC SOFT DELETE) ---
+        # Filtrage des données (avec soft delete)
         q_eleves = db.query(Eleve).filter(Eleve.deleted_at.is_(None))
         q_classes = db.query(Classe).filter(Classe.deleted_at.is_(None))
         q_users = db.query(User)
@@ -75,7 +49,7 @@ def afficher_accueil():
         total_classes = q_classes.count()
         total_utilisateurs = q_users.count()
 
-        # Calcul robuste du corps professoral (table Enseignants prioritaire, sinon rôle User)
+        # Calcul robuste du corps professoral
         total_profs_db = q_profs_table.count()
         if total_profs_db > 0:
             total_profs = total_profs_db
@@ -88,7 +62,7 @@ def afficher_accueil():
                 else 0
             )
 
-        # --- CALCULS FINANCIERS (RECETTES, DÉPENSES, SOLDE NET) ---
+        # Calculs financiers
         q_paiements = db.query(Paiement)
         q_depenses = db.query(Depense)
 
@@ -109,74 +83,125 @@ def afficher_accueil():
             (total_recettes / total_attendu * 100) if total_attendu > 0 else 0.0
         )
 
-        # --- 4. INDICATEURS CLÉS DE PERFORMANCE (KPIs) ---
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("👨‍🎓 Élèves Actifs", f"{total_eleves}", delta="Inscrits")
-        with col2:
-            st.metric(
-                "👩‍🏫 Corps Professoral",
-                f"{total_profs if total_profs > 0 else '0'}",
-                delta="Enseignants",
-            )
-        with col3:
-            st.metric("🏫 Classes Actives", f"{total_classes}", delta="Pédagogie")
-        with col4:
-            st.metric(
-                "👤 Comptes Utilisateurs", f"{total_utilisateurs}", delta="Sécurité"
-            )
+        # Répartition des effectifs par classe
+        classes_list = q_classes.all()
+        effectifs_data = []
+        if classes_list:
+            for c in classes_list:
+                nom_c = getattr(c, "libelle", getattr(c, "nom", f"Classe {c.id}"))
+                nb_e = (
+                    db.query(Eleve)
+                    .filter(Eleve.classe_id == c.id, Eleve.deleted_at.is_(None))
+                    .count()
+                )
+                effectifs_data.append({"Classe": nom_c, "Élèves": nb_e})
 
-        st.markdown("---")
+        return {
+            "nom_ecole": nom_ecole,
+            "devise_ecole": devise_ecole,
+            "adresse_ecole": adresse_ecole,
+            "contacts_ecole": contacts_ecole,
+            "total_eleves": total_eleves,
+            "total_classes": total_classes,
+            "total_utilisateurs": total_utilisateurs,
+            "total_profs": total_profs,
+            "total_recettes": float(total_recettes),
+            "total_depenses": float(total_depenses),
+            "solde_net": solde_net,
+            "taux_recouvrement": taux_recouvrement,
+            "effectifs_data": effectifs_data
+        }
+    finally:
+        db.close()
 
-        # --- 5. SECTION FINANCIÈRE & RÉPARTITION ---
-        col_f1, col_f2 = st.columns(2)
 
-        with col_f1:
-            st.markdown("### 💰 Santé Financière & Trésorerie")
+def afficher_accueil():
+    school_id = st.session_state.get("school_id")
+    is_super_admin = st.session_state.get("is_super_admin", False)
+    username = st.session_state.get("username", "")
 
-            st.metric("🟢 Recettes Globales", f"{total_recettes:,.0f} FCFA")
-            st.metric("🔴 Dépenses Opérationnelles", f"- {total_depenses:,.0f} FCFA")
-            st.metric(
-                "💶 Solde Net en Caisse",
-                f"{solde_net:,.0f} FCFA",
-                delta="Disponible",
-                delta_color="normal" if solde_net >= 0 else "inverse",
-            )
+    # 🔒 Confinement strict de l'admin Rahmat
+    if username and "rahmat" in username.lower():
+        is_super_admin = False
 
-            st.markdown("Progression annuelle des encaissements :")
-            st.progress(min(max(int(taux_recouvrement), 0), 100) / 100.0)
+    # Récupération des statistiques via le cache (expiration toutes les 30 secondes)
+    stats = get_dashboard_stats(school_id, is_super_admin)
 
-        with col_f2:
-            st.markdown("### 📈 Répartition des Effectifs par Classe")
-            classes_list = q_classes.all()
+    # --- 2. EN-TÊTE INSTITUTIONNEL ÉPURÉ ---
+    st.markdown(
+        f"""
+        <div style="background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%); padding: 25px; border-radius: 12px; border-left: 6px solid #D97706; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 25px;">
+            <h1 style="color: #FFFFFF; font-size: 1.8rem; font-weight: 800; margin: 0 0 8px 0;">🏫 {stats['nom_ecole']}</h1>
+            <p style="color: #FBBF24; font-size: 1.05rem; font-weight: 600; margin: 0 0 12px 0;">Devise : {stats['devise_ecole']}</p>
+            <p style="color: #94A3B8; font-size: 0.9rem; margin: 0;">📍 <b>Adresse / Quartier :</b> {stats['adresse_ecole']} | 📞 <b>Contacts :</b> {stats['contacts_ecole']}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-            if classes_list:
-                effectifs_data = []
-                for c in classes_list:
-                    nom_c = getattr(c, "libelle", getattr(c, "nom", f"Classe {c.id}"))
-                    nb_e = (
-                        db.query(Eleve)
-                        .filter(Eleve.classe_id == c.id, Eleve.deleted_at.is_(None))
-                        .count()
-                    )
-                    effectifs_data.append({"Classe": nom_c, "Élèves": nb_e})
+    st.subheader("📊 Tableau de Bord ERP & Pilotage Exécutif")
+    st.markdown(
+        "Synthèse analytique en temps réel : indicateurs académiques, santé "
+        "financière et flux d'audit de sécurité."
+    )
+    st.markdown("---")
 
-                df_eff = pd.DataFrame(effectifs_data)
-                st.bar_chart(df_eff.set_index("Classe"))
-            else:
-                st.info("Aucune classe enregistrée pour générer le graphique.")
+    # --- 4. INDICATEURS CLÉS DE PERFORMANCE (KPIs) ---
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("👨‍🎓 Élèves Actifs", f"{stats['total_eleves']}", delta="Inscrits")
+    with col2:
+        st.metric(
+            "👩‍🏫 Corps Professoral",
+            f"{stats['total_profs'] if stats['total_profs'] > 0 else '0'}",
+            delta="Enseignants",
+        )
+    with col3:
+        st.metric("🏫 Classes Actives", f"{stats['total_classes']}", delta="Pédagogie")
+    with col4:
+        st.metric(
+            "👤 Comptes Utilisateurs", f"{stats['total_utilisateurs']}", delta="Sécurité"
+        )
 
-        st.markdown("---")
+    st.markdown("---")
 
-        # --- 6. FLUX D'AUDIT DE SÉCURITÉ & RACCOURCIS ---
-        col_a1, col_a2 = st.columns([1.5, 1])
+    # --- 5. SECTION FINANCIÈRE & RÉPARTITION ---
+    col_f1, col_f2 = st.columns(2)
 
-        with col_a1:
-            st.markdown("### 🛡️ Journal d'Activité (Actions Récentes)")
+    with col_f1:
+        st.markdown("### 💰 Santé Financière & Trésorerie")
 
+        st.metric("🟢 Recettes Globales", f"{stats['total_recettes']:,.0f} FCFA")
+        st.metric("🔴 Dépenses Opérationnelles", f"- {stats['total_depenses']:,.0f} FCFA")
+        st.metric(
+            "💶 Solde Net en Caisse",
+            f"{stats['solde_net']:,.0f} FCFA",
+            delta="Disponible",
+            delta_color="normal" if stats['solde_net'] >= 0 else "inverse",
+        )
+
+        st.markdown("Progression annuelle des encaissements :")
+        st.progress(min(max(int(stats['taux_recouvrement']), 0), 100) / 100.0)
+
+    with col_f2:
+        st.markdown("### 📈 Répartition des Effectifs par Classe")
+        if stats['effectifs_data']:
+            df_eff = pd.DataFrame(stats['effectifs_data'])
+            st.bar_chart(df_eff.set_index("Classe"))
+        else:
+            st.info("Aucune classe enregistrée pour générer le graphique.")
+
+    st.markdown("---")
+
+    # --- 6. FLUX D'AUDIT DE SÉCURITÉ & RACCOURCIS ---
+    col_a1, col_a2 = st.columns([1.5, 1])
+
+    with col_a1:
+        st.markdown("### 🛡️ Journal d'Activité (Actions Récentes)")
+
+        db = SessionLocal()
+        try:
             q_logs = db.query(JournalActivite)
-
-            # 🔒 HIÉRARCHIE RBAC & MULTI-TENANT STRICTE
             if is_super_admin:
                 pass
             else:
@@ -232,20 +257,19 @@ def afficher_accueil():
                     "Aucune activité récente enregistrée dans le journal d'audit pour "
                     "cet établissement."
                 )
+        finally:
+            db.close()
 
-        with col_a2:
-            st.markdown("### ⚡ Raccourcis Opérationnels")
-            if st.button("➕ Inscription Élève", use_container_width=True):
-                st.info("Utilisez le menu latéral 'Inscription Élèves'.")
-            if st.button("📝 Saisie des Notes", use_container_width=True):
-                st.info("Utilisez le menu latéral 'Saisie des notes'.")
-            if st.button("💵 Encaissement", use_container_width=True):
-                st.info("Utilisez le menu latéral 'Encaissement'.")
-            if st.button("📉 Saisir une Dépense", use_container_width=True):
-                st.info("Utilisez le menu latéral 'Gestion des Dépenses'.")
-
-    finally:
-        db.close()
+    with col_a2:
+        st.markdown("### ⚡ Raccourcis Opérationnels")
+        if st.button("➕ Inscription Élève", use_container_width=True):
+            st.info("Utilisez le menu latéral 'Inscription Élèves'.")
+        if st.button("📝 Saisie des Notes", use_container_width=True):
+            st.info("Utilisez le menu latéral 'Saisie des notes'.")
+        if st.button("💵 Encaissement", use_container_width=True):
+            st.info("Utilisez le menu latéral 'Encaissement'.")
+        if st.button("📉 Saisir une Dépense", use_container_width=True):
+            st.info("Utilisez le menu latéral 'Gestion des Dépenses'.")
 
 # Alias de compatibilité
 afficher_accueil = afficher_accueil

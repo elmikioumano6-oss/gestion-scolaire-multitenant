@@ -2,6 +2,7 @@ from datetime import datetime
 import importlib
 import inspect
 import os
+import time
 import bcrypt
 import sentry_sdk
 import streamlit as st
@@ -80,6 +81,8 @@ def init_tenant_context():
 
 
 def main():
+    start_total = time.time()
+
     st.set_page_config(
         page_title="Gestion Scolaire Pro - Plateforme Multi-Tenant",
         page_icon="🚀",  # Icône fusée pour l'onglet du navigateur
@@ -122,11 +125,17 @@ def main():
         unsafe_allow_html=True,
     )
 
-    # --- INITIALISATION ET MIGRATIONS AUTOMATIQUES ---
-    init_db()
+    # --- INITIALISATION ET MIGRATIONS (Exécuté une seule fois par session) ---
+    if not st.session_state.get("db_initialized", False):
+        t0 = time.time()
+        init_db()
+        print(f"⏱️ [DEBUG] init_db (une seule fois) : {time.time() - t0:.2f} s")
+        st.session_state["db_initialized"] = True
 
     # --- INITIALISATION DU CONTEXTE MULTI-TENANT ---
+    t0 = time.time()
     init_tenant_context()
+    print(f"⏱️ [DEBUG] init_tenant_context : {time.time() - t0:.2f} s")
 
     # --- INITIALISATION DE L'ÉTAT DE SESSION ---
     if "authenticated" not in st.session_state:
@@ -169,6 +178,7 @@ def main():
         return
 
     # --- 2. GARDIEN DE SÉCURITÉ (GATEKEEPER) & INTERCEPTION DU MOT DE PASSE ---
+    t0 = time.time()
     nom_utilisateur = st.session_state.get("username")
     role_utilisateur = str(st.session_state.get("role", "")).lower()
     is_super_admin = st.session_state.get("is_super_admin", False)
@@ -278,6 +288,7 @@ def main():
         db_sec.rollback()
     finally:
         db_sec.close()
+    print(f"⏱️ [DEBUG] Gardien de sécurité (DB) : {time.time() - t0:.2f} s")
 
     # --- 3. BARRE LATÉRALE & NAVIGATION ---
     with st.sidebar:
@@ -673,6 +684,7 @@ def main():
         st.stop()
 
     # --- 6. EXÉCUTION DE LA VUE DYNAMIQUE ---
+    t0 = time.time()
     if menu_option in ROUTES:
         module_path, nom_fonction = ROUTES[menu_option]
         try:
@@ -693,6 +705,8 @@ def main():
                 f"⚠️ Le module pour la vue **{menu_option}** est en cours de"
                 f" développement ou n'a pas été trouvé. ({e})"
             )
+    print(f"⏱️ [DEBUG] Exécution de la vue ({menu_option}) : {time.time() - t0:.2f} s")
+    print(f"⏱️ [DEBUG] **TEMPS TOTAL DE CHARGEMENT PAGE** : {time.time() - start_total:.2f} s\n" + "-"*50)
 
 
 if __name__ == "__main__":
