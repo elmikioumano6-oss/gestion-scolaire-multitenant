@@ -12,7 +12,7 @@ def executer_sauvegarde_complete():
                 "date_sauvegarde": str(datetime.now()),
                 "plateforme": "Gestion Scolaire Pro - Multi-Tenant"
             },
-            "schools": [{"id": s.id, "nom": s.nom, "code": s.code, "devise": s.devise} for s in db.query(School].all()],
+            "schools": [{"id": s.id, "nom": s.nom, "code": s.code, "devise": s.devise} for s in db.query(School).all()],
             "users": [{"username": u.username, "role": u.role, "school_id": u.school_id} for u in db.query(User).all()],
             "classes": [{"id": c.id, "libelle": c.libelle, "school_id": c.school_id} for c in db.query(Classe).all()],
             "eleves": [{"id": e.id, "nom": e.nom, "prenom": e.prenom, "classe_id": e.classe_id} for e in db.query(Eleve).all()],
