@@ -9,7 +9,6 @@ showWidgetBorder = true
 
 [server]
 headless = false
-enableXsrProtection = true
 enableCORS = true
 maxUploadSize = 20
 

@@ -87,6 +87,41 @@ def main():
         initial_sidebar_state="expanded",
     )
 
+    # --- INJECTION CSS ULTIME POUR LA VISIBILITÉ DE LA SCROLLBAR DE LA SIDEBAR ---
+    st.markdown(
+        """
+        <style>
+            /* Force l'affichage et la visibilité de la barre de défilement de la sidebar */
+            section[data-testid="stSidebar"] {
+                overflow: visible !important;
+            }
+            section[data-testid="stSidebar"] .block-container {
+                overflow-y: auto !important;
+            }
+            
+            /* Personnalisation agressive Webkit pour forcer la couleur dorée et la largeur */
+            section[data-testid="stSidebar"] ::-webkit-scrollbar {
+                width: 14px !important;
+                display: block !important;
+                visibility: visible !important;
+            }
+            section[data-testid="stSidebar"] ::-webkit-scrollbar-track {
+                background: #0b131d !important;
+                border-radius: 7px !important;
+            }
+            section[data-testid="stSidebar"] ::-webkit-scrollbar-thumb {
+                background: #D4AF37 !important;
+                border-radius: 7px !important;
+                border: 2px solid #0b131d !important;
+            }
+            section[data-testid="stSidebar"] ::-webkit-scrollbar-thumb:hover {
+                background: #ff8800 !important;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     # --- INITIALISATION ET MIGRATIONS AUTOMATIQUES ---
     init_db()
 
