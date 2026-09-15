@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 # Charger les variables d'environnement en forçant le remplacement du cache
 load_dotenv(override=True)
 
-# Récupération sécurisée et prioritaire via .env ou st.secrets
+# Récupération sécurisée et prioritaire via .env ou st.secrets (Zéro hardcode de production)
 DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("DB_URL")
 
 if not DATABASE_URL:
@@ -17,17 +17,19 @@ if not DATABASE_URL:
     except Exception:
         DATABASE_URL = None
 
-# Sécurité anti-localhost : Si l'URL contient localhost, on la force en 127.0.0.1 (IPv4 locale)
-if DATABASE_URL and "localhost" in DATABASE_URL:
-    DATABASE_URL = DATABASE_URL.replace("localhost", "127.0.0.1")
-
-# Secours ultime sur l'IP du VPS en production, modifiable dynamiquement via .env en local
 if not DATABASE_URL:
-    DATABASE_URL = "postgresql://erp_user:Rahmatfh2026@72.62.147.14:5432/school_erp"
+    raise ValueError(
+        "🚨 ERREUR CRITIQUE DE SÉCURITÉ : Aucune URL de base de données n'a été trouvée "
+        "dans les variables d'environnement (.env) ou les secrets Streamlit."
+    )
+
+# Sécurité anti-localhost : Si l'URL contient localhost, on la force en 127.0.0.1 (IPv4 locale)
+if "localhost" in DATABASE_URL:
+    DATABASE_URL = DATABASE_URL.replace("localhost", "127.0.0.1")
 
 connect_args = {"connect_timeout": 30} if not DATABASE_URL.startswith("sqlite") else {"timeout": 30}
 
-# Configuration de l'engine avec un pool renforcé pour éliminer la latence réseau (connexions persistantes)
+# Configuration de l'engine avec un pool renforcé pour les connexions persistantes
 if DATABASE_URL.startswith("sqlite"):
     engine = create_engine(
         DATABASE_URL,
@@ -48,20 +50,17 @@ class TenantSession(Session):
     def query(self, *entities, **kwargs):
         query = super().query(*entities, **kwargs)
         
-        # Si on est dans Streamlit et qu'un tenant est actif (et pas super admin)
         try:
             school_id = st.session_state.get("school_id")
             is_super = st.session_state.get("is_super_admin", False)
             
             if school_id and not is_super:
                 for entity in entities:
-                    # On vérifie si l'entité possède un attribut/colonne school_id
-                    # IMPORTANT : On exclut User pour permettre l'authentification globale multi-tenant
                     from database.models import User
                     if hasattr(entity, "school_id") and entity != User:
                         query = query.filter(entity.school_id == school_id)
         except Exception:
-            pass # Hors contexte Streamlit ou session non initialisée
+            pass
             
         return query
 
@@ -79,16 +78,15 @@ def receive_after_begin(session, transaction, connection):
     except Exception:
         pass
 
-# Utilisation de notre classe de session cloisonnée pour le multi-tenancy
+# Utilisation de la session cloisonnée pour le multi-tenancy
 SessionLocal = sessionmaker(class_=TenantSession, autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 def init_db():
-    # Importation explicite de tous les modèles pour la création des tables
     from database.models import (
-        School, User, Classe, Eleve, Matiere, CahierTexte, 
-        Programme, Presence, Note, Enseignant, Affectation, 
-        EmploiDuTemps, EcheancePaiement, PlanificationEvaluation, 
+        School, User, Classe, Eleve, Matiere, CahierTexte,  
+        Programme, Presence, Note, Enseignant, Affectation,  
+        EmploiDuTemps, EcheancePaiement, PlanificationEvaluation,  
         ActivityLog, SystemLog, Paiement, Depense
     )
     import bcrypt
@@ -96,7 +94,7 @@ def init_db():
     # 1. Création initiale des tables de la base de données
     Base.metadata.create_all(bind=engine)
     
-    # 2. Migrations automatiques exécutées AVANT toute requête ORM (évite les erreurs de colonnes manquantes)
+    # 2. Migrations automatiques exécutées de manière robuste
     migrations = [
         "ALTER TABLE users ADD COLUMN changer_mdp_requis BOOLEAN DEFAULT 1;",
         "ALTER TABLE cahiers_texte ADD COLUMN duree FLOAT DEFAULT 1.0;",
@@ -113,9 +111,9 @@ def init_db():
                 conn.execute(text(mig))
                 conn.commit()
             except Exception:
-                conn.rollback() # Ignore si la colonne existe déjà
+                conn.rollback()
 
-    # 3. Initialisation ou mise à jour forcée des comptes et de l'établissement par défaut
+    # 3. Initialisation initiale sécurisée (création unique si inexistant, sans écrasement forcé)
     db = SessionLocal()
     try:
         ecole_defaut = db.query(School).first()
@@ -131,38 +129,29 @@ def init_db():
             db.commit()
             db.refresh(ecole_defaut)
 
-        hashed_pw = bcrypt.hashpw("admin2026".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-        
-        # --- Gestion du Super Admin Global ---
+        # Création du Super Admin uniquement s'il n'existe pas du tout
         admin_user = db.query(User).filter(User.username == "admin").first()
-        if admin_user:
-            admin_user.password = hashed_pw
-            admin_user.role = "super_admin"
-            admin_user.school_id = ecole_defaut.id
-            admin_user.changer_mdp_requis = False
-        else:
+        if not admin_user:
+            default_hashed_pw = bcrypt.hashpw("admin2026".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
             admin_user = User(
                 username="admin",
-                password=hashed_pw,
+                password=default_hashed_pw,
                 role="super_admin",
                 school_id=ecole_defaut.id,
-                changer_mdp_requis=False
+                changer_mdp_requis=True # Exige un changement de mot de passe à la première connexion
             )
             db.add(admin_user)
 
-        # --- Gestion garantie de l'Administrateur local du CSP Rahmat-FH ---
+        # Création de l'administrateur local uniquement s'il n'existe pas
         admin_rahmat = db.query(User).filter(User.username == "admin_rahmat").first()
-        if admin_rahmat:
-            admin_rahmat.role = "directeur"
-            admin_rahmat.school_id = ecole_defaut.id
-            admin_rahmat.changer_mdp_requis = False
-        else:
+        if not admin_rahmat:
+            default_hashed_pw = bcrypt.hashpw("admin2026".encode('utf-8'), bcrypt.gensalt()).degre() if 'degre' in locals() else bcrypt.hashpw("admin2026".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
             admin_rahmat = User(
                 username="admin_rahmat",
-                password=hashed_pw,
+                password=default_hashed_pw,
                 role="directeur",
                 school_id=ecole_defaut.id,
-                changer_mdp_requis=False
+                changer_mdp_requis=True
             )
             db.add(admin_rahmat)
 

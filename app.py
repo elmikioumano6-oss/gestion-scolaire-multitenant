@@ -5,16 +5,26 @@ import os
 import time
 import bcrypt
 import sentry_sdk
+from dotenv import load_dotenv
 import streamlit as st
 from streamlit_option_menu import option_menu
 
-# Initialisation du monitoring Sentry pour la production
-sentry_sdk.init(
-    dsn="https://67948b5d07c09449c5bd329b9d430cf6@o4512073469329408.ingest.us.sentry.io/4512073502359552",
-    traces_sample_rate=1.0,
-    profiles_sample_rate=1.0,
-    send_default_pii=True,
-)
+# Chargement explicite des variables d'environnement de production
+load_dotenv(override=True)
+
+# Initialisation sécurisée du monitoring Sentry (Normes RGPD / SOC 2)
+sentry_dsn = os.getenv("SENTRY_DSN")
+send_pii = os.getenv("SENTRY_SEND_DEFAULT_PII", "false").lower() == "true"
+environment_mode = os.getenv("ENVIRONMENT", "production")
+
+if sentry_dsn:
+    sentry_sdk.init(
+        dsn=sentry_dsn,
+        environment=environment_mode,
+        traces_sample_rate=0.2,
+        profiles_sample_rate=0.2,
+        send_default_pii=send_pii,  # Désactivé par défaut pour la protection des données
+    )
 
 from database.db_config import SessionLocal, init_db
 from database.models import AnneeScolaire, School, User
@@ -613,7 +623,6 @@ def main():
             "afficher_super_admin",
         ),
         "Accueil": ("views.accueil", "afficher_accueil"),
-        # ROUTE CORRIGÉE AVEC LE TIRET BAS (views.tableau_de_bord)
         "Tableau de Bord": ("views.tableau_de_bord", "afficher_tableau_de_bord"),
         "Année Scolaire": ("views.annee_scolaire", "afficher_annee_scolaire"),
         "Matières & Coeffs": ("views.matieres", "afficher_matieres"),

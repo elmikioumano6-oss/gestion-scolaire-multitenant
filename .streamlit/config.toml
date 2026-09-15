@@ -1,16 +1,12 @@
-[theme]
-primaryColor = "#B7791F"
-backgroundColor = "#F8FAFC"
-secondaryBackgroundColor = "#E8EEF5"
-textColor = "#172033"
-font = "sans-serif"
-baseRadius = "0.75rem"
-showWidgetBorder = true
-
 [server]
-headless = false
-enableCORS = true
-maxUploadSize = 20
+enableCORS = false
+enableXsrfProtection = true
+headless = true
+maxUploadSize = 200
 
-[browser]
-gatherUsageStats = false
+[theme]
+primaryColor = "#ff8800"
+backgroundColor = "#0b131d"
+secondaryBackgroundColor = "#1b263b"
+textColor = "#e0e1dd"
+font = "sans serif"
