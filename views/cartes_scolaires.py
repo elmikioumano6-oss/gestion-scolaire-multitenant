@@ -7,7 +7,6 @@ from datetime import datetime
 from sqlalchemy import text
 from database.db_config import SessionLocal
 from database.models import Classe, Eleve, School, JournalActivite, AnneeScolaire
-from database.queries import get_classes_cached
 
 def obtenir_logo_et_palette(school_name):
     """
@@ -96,42 +95,44 @@ def afficher_cartes_scolaires():
         libelle_annee = getattr(annee_active_obj, 'libelle', None) or getattr(annee_active_obj, 'annee', '2026-2027')
         cycle_en_cours = st.session_state.get("cycle_actif", "Collège")
 
-        classes_query = db.query(Classe).filter(
+        # 1. Récupération des classes du cycle
+        classes_cycle = db.query(Classe).filter(
             Classe.school_id == school_id,
             Classe.cycle == cycle_en_cours,
             Classe.deleted_at.is_(None)
-        )
-        classes_cycle = classes_query.all()
+        ).order_by(Classe.libelle).all()
 
         if not classes_cycle:
             st.info(f"📌 **{school_name}** — Aucune classe disponible pour le cycle **{cycle_en_cours}**.")
             return
 
-        classes_dict = {c.id: c.libelle for c in classes_cycle}
-        classes_ids = list(classes_dict.keys())
-
-        eleves_query = db.query(Eleve).filter(
-            Eleve.school_id == school_id,
-            Eleve.classe_id.in_(classes_ids),
-            Eleve.deleted_at.is_(None)
-        )
-        eleves = eleves_query.order_by(Eleve.nom).all()
-
         st.markdown(f"### Cartes Scolaires — **{school_name} ({cycle_en_cours})**")
 
+        # 2. Filtre par classe pour alléger considérablement la requête et l'affichage
+        col_c1, col_c2 = st.columns(2)
+        with col_c1:
+            classes_dict = {c.libelle: c.id for c in classes_cycle}
+            choix_classe_libelle = st.selectbox("Filtrer par classe", list(classes_dict.keys()))
+            classe_id_selectionnee = classes_dict[choix_classe_libelle]
+
+        # 3. Chargement uniquement des élèves de la classe sélectionnée
+        eleves = db.query(Eleve).filter(
+            Eleve.school_id == school_id,
+            Eleve.classe_id == classe_id_selectionnee,
+            Eleve.deleted_at.is_(None)
+        ).order_by(Eleve.nom).all()
+
         if not eleves:
-            st.info("Aucun élève enregistré pour générer les cartes scolaires dans ce cycle.")
+            st.info(f"Aucun élève enregistré dans la classe **{choix_classe_libelle}**.")
         else:
-            col_f1, col_f2 = st.columns(2)
-            with col_f1:
-                noms_eleves = [f"{e.nom} {e.prenom} (Mat: {getattr(e, 'matricule', 'N/D')} — {classes_dict.get(e.classe_id, 'N/D')})" for e in eleves]
-                choix_eleve = st.selectbox("Sélectionner un élève", noms_eleves)
-            
-            with col_f2:
+            with col_c2:
                 st.markdown("<br>", unsafe_allow_html=True)
                 tracer_audit = st.checkbox("Enregistrer l'impression dans le journal d'audit", value=False)
 
-            eleve_obj = next((e for e in eleves if f"{e.nom} {e.prenom} (Mat: {getattr(e, 'matricule', 'N/D')} — {classes_dict.get(e.classe_id, 'N/D')})" == choix_eleve), None)
+            noms_eleves = [f"{e.nom} {e.prenom} (Mat: {getattr(e, 'matricule', 'N/D')})" for e in eleves]
+            choix_eleve = st.selectbox("Sélectionner un élève", noms_eleves)
+
+            eleve_obj = next((e for e in eleves if f"{e.nom} {e.prenom} (Mat: {getattr(e, 'matricule', 'N/D')})" == choix_eleve), None)
 
             if eleve_obj:
                 st.markdown("---")
@@ -141,7 +142,7 @@ def afficher_cartes_scolaires():
                 nom_eleve = getattr(eleve_obj, 'nom', '')
                 date_naissance = getattr(eleve_obj, 'date_naissance', '01/01/2008')
                 lieu_naissance = getattr(eleve_obj, 'lieu_naissance', 'Niamey')
-                classe_libelle = classes_dict.get(eleve_obj.classe_id, 'N/D')
+                classe_libelle = choix_classe_libelle
                 matricule_val = getattr(eleve_obj, 'matricule', 'N/D')
                 contact_eleve = getattr(eleve_obj, 'contact', 'N/D')
                 
@@ -149,7 +150,6 @@ def afficher_cartes_scolaires():
                 tuteur_tel = getattr(eleve_obj, 'tuteur_tel', None) or getattr(eleve_obj, 'tel_parent', None) or '+227 80 25 51 08'
                 
                 id_carte = f"0000{eleve_obj.id}" if eleve_obj.id < 10000 else str(eleve_obj.id)
-                
                 banniere_contenu = f'<span>{school_name.upper()}</span>'
 
                 # Gestion de la photo de l'élève
@@ -159,7 +159,7 @@ def afficher_cartes_scolaires():
                 else:
                     photo_html = 'PHOTO ÉLÈVE'
 
-                # Génération du QR Code WhatsApp pointant vers le premier numéro de l'école
+                # Génération du QR Code WhatsApp
                 premier_num = "".join(filter(str.isdigit, tel_ecole_brut.split('/')[0]))
                 if not premier_num.startswith("227"):
                     premier_num = "227" + premier_num
@@ -168,7 +168,6 @@ def afficher_cartes_scolaires():
                 whatsapp_url = f"https://wa.me/{premier_num}?text={urllib.parse.quote(texte_msg)}"
                 qr_code_url = f"https://api.qrserver.com/v1/create-qr-code/?size=120x120&data={urllib.parse.quote(whatsapp_url)}"
 
-                # Logo de l'établissement sous l'ID N°
                 if logo_data_uri:
                     logo_sous_id_html = f'<img src="{logo_data_uri}" style="height: 26px; max-width: 70px; object-fit: contain; display: block; margin-top: 2px;" alt="Logo" />'
                 else:
@@ -459,5 +458,3 @@ def afficher_cartes_scolaires():
 
     finally:
         db.close()
-
-afficher_cartes_scolaires = afficher_cartes_scolaires

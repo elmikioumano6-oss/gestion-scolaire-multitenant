@@ -20,7 +20,7 @@ def afficher_planification_evaluations():
     # --- MIGRATION AUTOMATIQUE DE LA COLONNE SEMESTRE ---
     try:
         with engine.connect() as conn:
-            conn.execute(sa.text("ALTER TABLE evaluations ADD COLUMN semestre VARCHAR(50) DEFAULT 'Semestre 1';"))
+            conn.execute(sa.text("ALTER TABLE evaluations ADD COLUMN IF NOT EXISTS semestre VARCHAR(50) DEFAULT 'Semestre 1';"))
             conn.commit()
     except Exception:
         pass
@@ -60,8 +60,10 @@ def afficher_planification_evaluations():
             return
 
         noms_classes = [c.libelle for c in classes_cycle]
+        classes_dict_map = {c.id: c.libelle for c in classes_cycle}
+        matieres_dict_map = {m.id: (m.libelle if hasattr(m, 'libelle') else getattr(m, 'nom', 'N/A')) for m in matieres_disponibles}
 
-        tab1, tab2 = st.tabs(["📅 Calendrier & Suivi des Évaluations", "➕ Planifier une Évaluation (Workflow)"])
+        tab1, tab2 = st.tabs(["📅 Calendrier & Suivi des Évaluations", "⚡ Saisie Rapide en Grille"])
 
         with tab1:
             st.markdown(f"### Calendrier Officiel ({annee_en_cours}) — **{school_name} ({cycle_en_cours})**")
@@ -87,15 +89,14 @@ def afficher_planification_evaluations():
             else:
                 data_tableau = []
                 for ev in evaluations_list:
-                    classe_obj = db.query(Classe).get(ev.classe_id)
-                    matiere_obj = db.query(Matiere).get(ev.matiere_id) if ev.matiere_id else None
-                    mat_lib = (matiere_obj.libelle if hasattr(matiere_obj, 'libelle') else getattr(matiere_obj, 'nom', 'N/A')) if matiere_obj else "N/A"
+                    classe_lib = classes_dict_map.get(ev.classe_id, "N/A")
+                    mat_lib = matieres_dict_map.get(ev.matiere_id, "N/A") if ev.matiere_id else "N/A"
                     data_tableau.append({
                         "ID": ev.id,
                         "Semestre": getattr(ev, 'semestre', 'Semestre 1'),
                         "Date": ev.date_evaluation.strftime("%d/%m/%Y") if ev.date_evaluation else "",
                         "Horaire": f"{ev.heure_debut} - {ev.heure_fin}",
-                        "Classe": classe_obj.libelle if classe_obj else "N/A",
+                        "Classe": classe_lib,
                         "Matière": mat_lib,
                         "Type": ev.type_evaluation,
                         "Intitulé": ev.intitule,
@@ -203,7 +204,6 @@ def afficher_planification_evaluations():
                     )
 
                 with col_exp3:
-                    # Bouton d'impression direct via JavaScript
                     components.html(
                         """
                         <button onclick="parent.window.print()" style="
@@ -245,51 +245,77 @@ def afficher_planification_evaluations():
                             st.rerun()
 
         with tab2:
-            st.markdown(f"### Nouvelle Programmation & Anti-Collision ({annee_en_cours}) — **{school_name} ({cycle_en_cours})**")
-            
+            st.markdown(f"### ⚡ Saisie Rapide en Grille ({annee_en_cours}) — **{school_name} ({cycle_en_cours})**")
+            st.markdown("Renseignez directement les informations d'évaluation pour plusieurs matières simultanément sous forme de tableau interactif.")
+
             if not matieres_disponibles:
                 st.warning("⚠️ Veuillez d'abord créer des matières dans le module 'Matières & Coeffs' pour pouvoir planifier une évaluation.")
             else:
-                noms_matieres = [m.libelle if hasattr(m, 'libelle') else getattr(m, 'nom', '') for m in matieres_disponibles]
-                with st.form("form_add_evaluation"):
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        classe_choisie = st.selectbox("Classe concernée", noms_classes)
-                        matiere_choisie = st.selectbox("Matière / Discipline", noms_matieres)
-                        semestre_eval = st.selectbox("Sélectionner le semestre", ["Semestre 1", "Semestre 2"])
-                        type_eval = st.selectbox("Type d'évaluation", ["Interro 1", "Interro 2", "Devoir 1", "Devoir 2", "Compo"])
-                        titre = st.text_input("Intitulé de l'évaluation (ex: Devoir N°1 de Mathématiques)")
-                    with col2:
-                        date_eval = st.date_input("Date de l'évaluation")
-                        heure_debut = st.text_input("Heure de début (ex: 08h00)", value="08h00")
-                        heure_fin = st.text_input("Heure de fin (ex: 10h00)", value="10h00")
-                        salle = st.text_input("Salle attribuée (ex: Salle 04)", value="Salle Principale")
-                        surveillant = st.text_input("Enseignant(s) surveillant(s)")
+                col_g1, col_g2, col_g3 = st.columns(3)
+                with col_g1:
+                    classe_choisie = st.selectbox("Classe concernée (Grille)", noms_classes, key="grille_classe")
+                with col_g2:
+                    semestre_eval = st.selectbox("Sélectionner le semestre (Grille)", ["Semestre 1", "Semestre 2"], key="grille_semestre")
+                with col_g3:
+                    type_eval = st.selectbox("Type d'évaluation (Global)", ["Interro 1", "Interro 2", "Devoir 1", "Devoir 2", "Compo"], key="grille_type")
 
-                    submitted = st.form_submit_button("Enregistrer et Soumettre pour Validation")
-                    if submitted:
-                        if not titre:
-                            st.error("⚠️ L'intitulé de l'évaluation est obligatoire.")
-                        else:
-                            target_school_id = school_id
-                            if is_super_admin and not target_school_id:
-                                ecole_defaut = db.query(School).first()
-                                target_school_id = ecole_defaut.id if ecole_defaut else 1
+                lignes_grille = []
+                for m in matieres_disponibles:
+                    mat_lib = m.libelle if hasattr(m, 'libelle') else getattr(m, 'nom', 'Matière')
+                    lignes_grille.append({
+                        "Matière": mat_lib,
+                        "Intitulé": f"{type_eval} de {mat_lib}",
+                        "Date": date.today(),
+                        "Heure Début": "08h00",
+                        "Heure Fin": "10h00",
+                        "Salle": "Salle Principale",
+                        "Surveillant": ""
+                    })
 
-                            classe_obj = db.query(Classe).filter(Classe.libelle == classe_choisie, Classe.school_id == target_school_id).first()
-                            matiere_obj = db.query(Matiere).filter((Matiere.libelle == matiere_choisie) | (Matiere.nom == matiere_choisie), Matiere.school_id == target_school_id).first()
+                df_saisie = pd.DataFrame(lignes_grille)
 
-                            # 🔒 CONTROLE ANTI-COLLISION INTERNATIONAL
+                st.markdown("#### ✏️ Tableau d'édition rapide (Modifiable)")
+                df_modifie = st.data_editor(
+                    df_saisie,
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    key="table_saisie_evals"
+                )
+
+                if st.button("💾 Enregistrer toutes les évaluations de la grille", type="primary"):
+                    target_school_id = school_id
+                    if is_super_admin and not target_school_id:
+                        ecole_defaut = db.query(School).first()
+                        target_school_id = ecole_defaut.id if ecole_defaut else 1
+
+                    classe_obj = db.query(Classe).filter(Classe.libelle == classe_choisie, Classe.school_id == target_school_id).first()
+                    
+                    if not classe_obj:
+                        st.error("❌ Erreur : Classe introuvable en base de données.")
+                    else:
+                        success_count = 0
+                        for _, row in df_modifie.iterrows():
+                            mat_nom = row["Matière"]
+                            matiere_obj = db.query(Matiere).filter((Matiere.libelle == mat_nom) | (Matiere.nom == mat_nom), Matiere.school_id == target_school_id).first()
+                            
+                            titre_eval = str(row["Intitulé"]).strip()
+                            date_ev = row["Date"]
+                            h_debut = str(row["Heure Début"]).strip()
+                            h_fin = str(row["Heure Fin"]).strip()
+                            salle_val = str(row["Salle"]).strip()
+                            surv_val = str(row["Surveillant"]).strip()
+
+                            if not titre_eval or not mat_nom:
+                                continue
+
                             conflit = db.query(Evaluation).filter(
                                 Evaluation.school_id == target_school_id,
                                 Evaluation.classe_id == classe_obj.id,
-                                Evaluation.date_evaluation == date_eval,
-                                Evaluation.heure_debut == heure_debut
+                                Evaluation.date_evaluation == date_ev,
+                                Evaluation.heure_debut == h_debut
                             ).first()
 
-                            if conflit:
-                                st.error(f"❌ Conflit d'horaire détecté ! Une évaluation ('{conflit.intitule}') est déjà planifiée pour la classe **{classe_choisie}** le {date_eval.strftime('%d/%m/%Y')} à {heure_debut}.")
-                            else:
+                            if not conflit:
                                 nouvelle_eval = Evaluation(
                                     school_id=target_school_id,
                                     cycle=cycle_en_cours,
@@ -297,30 +323,33 @@ def afficher_planification_evaluations():
                                     matiere_id=matiere_obj.id if matiere_obj else None,
                                     semestre=semestre_eval,
                                     type_evaluation=type_eval,
-                                    intitule=titre.strip(),
-                                    date_evaluation=date_eval,
-                                    heure_debut=heure_debut,
-                                    heure_fin=heure_fin,
-                                    salle=salle.strip(),
-                                    surveillant=surveillant.strip(),
+                                    intitule=titre_eval,
+                                    date_evaluation=date_ev,
+                                    heure_debut=h_debut,
+                                    heure_fin=h_fin,
+                                    salle=salle_val,
+                                    surveillant=surv_val,
                                     statut="Brouillon",
                                     cree_par=username
                                 )
                                 db.add(nouvelle_eval)
+                                success_count += 1
 
-                                nouveau_log = ActivityLog(
-                                    school_id=target_school_id,
-                                    timestamp=datetime.now(),
-                                    username=username,
-                                    action=f"Planification évaluation ({semestre_eval}) : {titre} ({classe_choisie}, {matiere_choisie})",
-                                    module="Planification des Évaluations",
-                                    statut="Succès"
-                                )
-                                db.add(nouveau_log)
-                                db.commit()
-
-                                st.success(f"✅ Évaluation '{titre}' ({semestre_eval} - {type_eval}) programmée avec succès et placée en statut 'Brouillon' pour la classe de **{classe_choisie}** !")
-                                st.rerun()
+                        if success_count > 0:
+                            nouveau_log = ActivityLog(
+                                school_id=target_school_id,
+                                timestamp=datetime.now(),
+                                username=username,
+                                action=f"Planification en masse ({semestre_eval}) : {success_count} évaluations pour {classe_choisie}",
+                                module="Planification des Évaluations",
+                                statut="Succès"
+                            )
+                            db.add(nouveau_log)
+                            db.commit()
+                            st.success(f"🎉 {success_count} évaluations programmées et enregistrées avec succès en mode grille pour la classe de **{classe_choisie}** !")
+                            st.rerun()
+                        else:
+                            st.warning("⚠️ Aucune nouvelle évaluation valide n'a pu être enregistrée (vérifiez les conflits d'horaires ou les champs vides).")
 
     finally:
         db.close()
