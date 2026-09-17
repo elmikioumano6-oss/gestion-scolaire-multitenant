@@ -1,14 +1,15 @@
 import os
-from sqlalchemy import create_engine, text, event
+from sqlalchemy import create_engine, text, event, exc
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 import streamlit as st
 from dotenv import load_dotenv
+import bcrypt
 
 # Charger les variables d'environnement en forçant le remplacement du cache
 load_dotenv(override=True)
 
-# Récupération sécurisée et prioritaire via .env ou st.secrets (Zéro hardcode de production)
+# Récupération sécurisée et prioritaire via .env ou st.secrets
 DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("DB_URL")
 
 if not DATABASE_URL:
@@ -27,9 +28,9 @@ if not DATABASE_URL:
 if "localhost" in DATABASE_URL:
     DATABASE_URL = DATABASE_URL.replace("localhost", "127.0.0.1")
 
-connect_args = {"connect_timeout": 30} if not DATABASE_URL.startswith("sqlite") else {"timeout": 30}
+connect_args = {"connect_timeout": 10} if not DATABASE_URL.startswith("sqlite") else {"timeout": 10}
 
-# Configuration de l'engine avec un pool renforcé pour les connexions persistantes
+# Configuration de l'engine avec un pool renforcé et anti-microcoupures
 if DATABASE_URL.startswith("sqlite"):
     engine = create_engine(
         DATABASE_URL,
@@ -38,18 +39,27 @@ if DATABASE_URL.startswith("sqlite"):
 else:
     engine = create_engine(
         DATABASE_URL,
-        pool_size=20,
-        max_overflow=40,
-        pool_pre_ping=True,
-        pool_recycle=1800,
+        pool_size=10,
+        max_overflow=20,
+        pool_pre_ping=True,      # Vérifie la santé de la connexion avant chaque requête
+        pool_recycle=1800,       # Recycle les connexions toutes les 30 minutes
         connect_args=connect_args
     )
+
+# Écouteur d'événements pour contrer les micro-coupures réseau (ping de reconnexion automatique)
+@event.listens_for(engine, "checkout")
+def ping_connection(dbapi_connection, connection_record, connection_proxy):
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("SELECT 1")
+    except Exception:
+        raise exc.DisconnectionError()
+    cursor.close()
 
 class TenantSession(Session):
     """Session SQLAlchemy personnalisée qui isole automatiquement les données par school_id."""
     def query(self, *entities, **kwargs):
         query = super().query(*entities, **kwargs)
-        
         try:
             school_id = st.session_state.get("school_id")
             is_super = st.session_state.get("is_super_admin", False)
@@ -61,7 +71,6 @@ class TenantSession(Session):
                         query = query.filter(entity.school_id == school_id)
         except Exception:
             pass
-            
         return query
 
 # Synchronisation automatique de la variable RLS PostgreSQL à chaque début de transaction
@@ -83,81 +92,94 @@ SessionLocal = sessionmaker(class_=TenantSession, autocommit=False, autoflush=Fa
 Base = declarative_base()
 
 def init_db():
-    from database.models import (
-        School, User, Classe, Eleve, Matiere, CahierTexte,  
-        Programme, Presence, Note, Enseignant, Affectation,  
-        EmploiDuTemps, EcheancePaiement, PlanificationEvaluation,  
-        ActivityLog, SystemLog, Paiement, Depense
-    )
-    import bcrypt
-    
-    # 1. Création initiale des tables de la base de données
-    Base.metadata.create_all(bind=engine)
-    
-    # 2. Migrations automatiques exécutées de manière robuste
-    migrations = [
-        "ALTER TABLE users ADD COLUMN changer_mdp_requis BOOLEAN DEFAULT 1;",
-        "ALTER TABLE cahiers_texte ADD COLUMN duree FLOAT DEFAULT 1.0;",
-        "ALTER TABLE users ADD COLUMN deleted_at TIMESTAMP;",
-        "ALTER TABLE schools ADD COLUMN deleted_at TIMESTAMP;",
-        "ALTER TABLE schools ADD COLUMN subdomain VARCHAR;",
-        "ALTER TABLE classes ADD COLUMN deleted_at TIMESTAMP;",
-        "ALTER TABLE eleves ADD COLUMN deleted_at TIMESTAMP;"
-    ]
-
-    with engine.connect() as conn:
-        for mig in migrations:
-            try:
-                conn.execute(text(mig))
-                conn.commit()
-            except Exception:
-                conn.rollback()
-
-    # 3. Initialisation initiale sécurisée (création unique si inexistant, sans écrasement forcé)
-    db = SessionLocal()
+    """Initialise la base de données et gère les erreurs de connexion SSH/PostgreSQL proprement."""
     try:
-        ecole_defaut = db.query(School).first()
-        if not ecole_defaut:
-            ecole_defaut = School(
-                nom="Complexe Scolaire Privé Rahmat-FH",
-                code="CSP-RAHMAT",
-                devise="Excellence - Travail - Succès",
-                adresse="Niamey, Niger",
-                contacts="99797163"
-            )
-            db.add(ecole_defaut)
+        from database.models import (
+            School, User, Classe, Eleve, Matiere, CahierTexte,  
+            Programme, Presence, Note, Enseignant, Affectation,  
+            EmploiDuTemps, EcheancePaiement, PlanificationEvaluation,  
+            ActivityLog, SystemLog, Paiement, Depense
+        )
+        
+        # Test rapide de la connexion avant d'exécuter les créations/migrations
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+
+        # 1. Création initiale des tables de la base de données
+        Base.metadata.create_all(bind=engine)
+        
+        # 2. Migrations automatiques exécutées de manière robuste
+        migrations = [
+            "ALTER TABLE users ADD COLUMN changer_mdp_requis BOOLEAN DEFAULT 1;",
+            "ALTER TABLE cahiers_texte ADD COLUMN duree FLOAT DEFAULT 1.0;",
+            "ALTER TABLE users ADD COLUMN deleted_at TIMESTAMP;",
+            "ALTER TABLE schools ADD COLUMN deleted_at TIMESTAMP;",
+            "ALTER TABLE schools ADD COLUMN subdomain VARCHAR;",
+            "ALTER TABLE classes ADD COLUMN deleted_at TIMESTAMP;",
+            "ALTER TABLE eleves ADD COLUMN deleted_at TIMESTAMP;"
+        ]
+
+        with engine.connect() as conn:
+            for mig in migrations:
+                try:
+                    conn.execute(text(mig))
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+
+        # 3. Initialisation initiale sécurisée
+        db = SessionLocal()
+        try:
+            ecole_defaut = db.query(School).first()
+            if not ecole_defaut:
+                ecole_defaut = School(
+                    nom="Complexe Scolaire Privé Rahmat-FH",
+                    code="CSP-RAHMAT",
+                    devise="Excellence - Travail - Succès",
+                    adresse="Niamey, Niger",
+                    contacts="99797163"
+                )
+                db.add(ecole_defaut)
+                db.commit()
+                db.refresh(ecole_defaut)
+
+            # Création du Super Admin
+            admin_user = db.query(User).filter(User.username == "admin").first()
+            if not admin_user:
+                default_hashed_pw = bcrypt.hashpw("admin2026".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+                admin_user = User(
+                    username="admin",
+                    password=default_hashed_pw,
+                    role="super_admin",
+                    school_id=ecole_defaut.id,
+                    changer_mdp_requis=True
+                )
+                db.add(admin_user)
+
+            # Création de l'administrateur local
+            admin_rahmat = db.query(User).filter(User.username == "admin_rahmat").first()
+            if not admin_rahmat:
+                default_hashed_pw = bcrypt.hashpw("admin2026".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+                admin_rahmat = User(
+                    username="admin_rahmat",
+                    password=default_hashed_pw,
+                    role="directeur",
+                    school_id=ecole_defaut.id,
+                    changer_mdp_requis=True
+                )
+                db.add(admin_rahmat)
+
             db.commit()
-            db.refresh(ecole_defaut)
+        except Exception as e:
+            db.rollback()
+            st.error(f"Erreur lors de la configuration des données initiales : {e}")
+        finally:
+            db.close()
 
-        # Création du Super Admin uniquement s'il n'existe pas du tout
-        admin_user = db.query(User).filter(User.username == "admin").first()
-        if not admin_user:
-            default_hashed_pw = bcrypt.hashpw("admin2026".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-            admin_user = User(
-                username="admin",
-                password=default_hashed_pw,
-                role="super_admin",
-                school_id=ecole_defaut.id,
-                changer_mdp_requis=True # Exige un changement de mot de passe à la première connexion
-            )
-            db.add(admin_user)
-
-        # Création de l'administrateur local uniquement s'il n'existe pas
-        admin_rahmat = db.query(User).filter(User.username == "admin_rahmat").first()
-        if not admin_rahmat:
-            default_hashed_pw = bcrypt.hashpw("admin2026".encode('utf-8'), bcrypt.gensalt()).degre() if 'degre' in locals() else bcrypt.hashpw("admin2026".encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-            admin_rahmat = User(
-                username="admin_rahmat",
-                password=default_hashed_pw,
-                role="directeur",
-                school_id=ecole_defaut.id,
-                changer_mdp_requis=True
-            )
-            db.add(admin_rahmat)
-
-        db.commit()
     except Exception as e:
-        db.rollback()
-        st.error(f"Erreur lors de l'initialisation de la base de données : {e}")
-    finally:
-        db.close()
+        st.error(
+            "❌ **Impossible de joindre la base de données via le tunnel SSH ou le serveur PostgreSQL.**\n\n"
+            f"Détails techniques : `{e}`\n\n"
+            "👉 *Veuillez vérifier que votre script de tunnel SSH est bien actif et que le port local est correct.*"
+        )
+        st.stop()

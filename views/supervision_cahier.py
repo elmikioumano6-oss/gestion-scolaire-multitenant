@@ -1,6 +1,7 @@
 from datetime import datetime
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 from database.db_config import SessionLocal
 from database.models import (
     ActivityLog,
@@ -16,6 +17,41 @@ from sqlalchemy import or_
 
 
 def afficher_supervision_cahier():
+    # --- STYLE CSS DÉDIÉ POUR L'IMPRESSION SUR PAGE A4 BIEN CADRÉ ---
+    st.markdown(
+        """
+    <style>
+        @media print {
+            body {
+                background-color: white !important;
+                color: black !important;
+            }
+            .stButton, .stSelectbox, sidebar, header, footer, [data-testid="stSidebar"] {
+                display: none !important;
+            }
+            .printable-area {
+                width: 100% !important;
+                padding: 10px !important;
+                margin: 0 !important;
+            }
+            .print-footer {
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                text-align: center;
+                font-size: 8pt;
+                border-top: 1px solid #ccc;
+                padding-top: 8px;
+                color: #333;
+                background-color: white;
+            }
+        }
+    </style>
+    """,
+        unsafe_allow_html=True,
+    )
+
     st.subheader(
         "📋 Contrôle d'Inspection Pédagogique, Archivage & Registre Officiel"
     )
@@ -45,17 +81,32 @@ def afficher_supervision_cahier():
                 if ecole_courante
                 else "Excellence - Persévérance - Réussite"
             )
+            school_adresse = (
+                ecole_courante.adresse
+                if ecole_courante and ecole_courante.adresse
+                else "Niamey - Niger"
+            )
+            school_contacts = (
+                ecole_courante.contacts
+                if ecole_courante and ecole_courante.contacts
+                else "N/D"
+            )
         else:
             school_name = st.session_state.get("school_name", "Établissement")
             school_devise = "Excellence - Persévérance - Réussite"
+            school_adresse = "Niamey - Niger"
+            school_contacts = "N/D"
 
         # Récupération de l'année scolaire active
         annee_active = (
             db.query(AnneeScolaire)
-            .filter(AnneeScolaire.school_id == school_id, AnneeScolaire.active == True)
+            .filter(
+                AnneeScolaire.school_id == school_id,
+                AnneeScolaire.active == True,
+            )
             .first()
         )
-        libelle_annee = annee_active.libelle if annee_active else "2026-2027"
+        libelle_annee = annee_active.libelle if annee_active else "2026"
     finally:
         db.close()
 
@@ -72,11 +123,16 @@ def afficher_supervision_cahier():
             ecole_defaut = db.query(School).first()
             target_school_id = ecole_defaut.id if ecole_defaut else 1
 
-        # --- En-tête Institutionnel Administratif ---
-        st.markdown(f"### 🏫 **{school_name}** — Cycle : **{cycle_en_cours}**")
+        # --- ZONE IMPRIMABLE DÉBUT ---
+        st.markdown('<div class="printable-area">', unsafe_allow_html=True)
+
+        # --- En-tête Institutionnel Administratif & Année ---
+        st.markdown(
+            f"### 🏫 **{school_name}** — Cycle : **{cycle_en_cours}**"
+        )
         st.caption(
-            f"Devise : {school_devise} | Année Scolaire : {libelle_annee} | Niamey,"
-            " Niger"
+            f"Devise : {school_devise} | Année Scolaire : **{libelle_annee}** |"
+            f" {school_adresse}"
         )
 
         classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours)
@@ -93,12 +149,20 @@ def afficher_supervision_cahier():
                 f"⚠️ Aucune classe enregistrée pour le cycle **{cycle_en_cours}**"
                 f" dans l'établissement **{school_name}**."
             )
+            st.markdown("</div>", unsafe_allow_html=True)
             return
 
         # Filtres de supervision avancés
         col_f1, col_f2 = st.columns(2)
         with col_f1:
-            noms_classes = [c.libelle if hasattr(c, 'libelle') and c.libelle else getattr(c, 'nom', f"Classe {c.id}") for c in classes_cycle]
+            noms_classes = [
+                (
+                    c.libelle
+                    if hasattr(c, "libelle") and c.libelle
+                    else getattr(c, "nom", f"Classe {c.id}")
+                )
+                for c in classes_cycle
+            ]
             classe_suivie = st.selectbox(
                 "Sélectionner la classe à inspecter",
                 noms_classes,
@@ -117,16 +181,51 @@ def afficher_supervision_cahier():
             )
 
         classe_obj = next(
-            (c for c in classes_cycle if (c.libelle if hasattr(c, 'libelle') and c.libelle else getattr(c, 'nom', f"Classe {c.id}")) == classe_suivie), None
+            (
+                c
+                for c in classes_cycle
+                if (
+                    c.libelle
+                    if hasattr(c, "libelle") and c.libelle
+                    else getattr(c, "nom", f"Classe {c.id}")
+                )
+                == classe_suivie
+            ),
+            None,
         )
         st.info(
-            f"🔍 Registre d'inspection actif pour la classe de **{classe_suivie}** ("
-            f"{periode_inspection})."
+            f"🔍 Registre d'inspection actif pour la classe de **{classe_suivie}**"
+            f" ({periode_inspection})."
         )
 
-        matieres_query = db.query(Matiere).filter(Matiere.cycle == cycle_en_cours)
+        # --- BOUTON D'IMPRESSION DIRECTE ---
+        col_p1, _ = st.columns([1, 4])
+        with col_p1:
+            components.html(
+                """
+                <button onclick="parent.window.print()" style="
+                    background-color: #2563eb;
+                    color: white;
+                    border: none;
+                    padding: 0.5rem 1.2rem;
+                    font-size: 0.9rem;
+                    font-weight: 600;
+                    border-radius: 6px;
+                    cursor: pointer;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                    font-family: sans-serif;
+                ">🖨️ Imprimer le Rapport</button>
+                """,
+                height=45,
+            )
+
+        matieres_query = db.query(Matiere).filter(
+            Matiere.cycle == cycle_en_cours
+        )
         if not is_super_admin and school_id:
-            matieres_query = matieres_query.filter(Matiere.school_id == school_id)
+            matieres_query = matieres_query.filter(
+                Matiere.school_id == school_id
+            )
         else:
             matieres_query = matieres_query.filter(
                 Matiere.school_id == target_school_id
@@ -134,14 +233,21 @@ def afficher_supervision_cahier():
         matieres_cycle = matieres_query.all()
 
         if not matieres_cycle or not classe_obj:
-            st.info(f"Aucune matière configurée pour le cycle **{cycle_en_cours}**.")
+            st.info(
+                f"Aucune matière configurée pour le cycle **{cycle_en_cours}**."
+            )
+            st.markdown("</div>", unsafe_allow_html=True)
             return
 
         data_suivi = []
         for mat in matieres_cycle:
-            mat_lib = mat.libelle if hasattr(mat, 'libelle') and mat.libelle else getattr(mat, 'nom', 'Matière')
-            mat_code = getattr(mat, 'code', '') or ''
-            
+            mat_lib = (
+                mat.libelle
+                if hasattr(mat, "libelle") and mat.libelle
+                else getattr(mat, "nom", "Matière")
+            )
+            mat_code = getattr(mat, "code", "") or ""
+
             # Récupération exacte des heures prévues depuis les programmes importés
             prog_obj = (
                 db.query(Programme)
@@ -198,13 +304,22 @@ def afficher_supervision_cahier():
                     if len(contenu_cours) > 60
                     else (contenu_cours if contenu_cours else "N/D")
                 )
-                
-                # Sécurisation robuste pour éviter l'erreur SQLAlchemy liée aux relations
+
                 enseignant_ref = "Corps professoral"
                 try:
-                    if hasattr(dernier_cours, "enseignant_user") and dernier_cours.enseignant_user:
-                        enseignant_ref = getattr(dernier_cours.enseignant_user, "username", "Corps professoral")
-                    elif hasattr(dernier_cours, "auteur_saisie") and dernier_cours.auteur_saisie:
+                    if (
+                        hasattr(dernier_cours, "enseignant_user")
+                        and dernier_cours.enseignant_user
+                    ):
+                        enseignant_ref = getattr(
+                            dernier_cours.enseignant_user,
+                            "username",
+                            "Corps professoral",
+                        )
+                    elif (
+                        hasattr(dernier_cours, "auteur_saisie")
+                        and dernier_cours.auteur_saisie
+                    ):
                         enseignant_ref = dernier_cours.auteur_saisie
                 except Exception:
                     enseignant_ref = "Corps professoral"
@@ -264,7 +379,11 @@ def afficher_supervision_cahier():
             with col_v1:
                 qualite_visiteur = st.selectbox(
                     "Qualité du signataire",
-                    ["Censeur / Directeur des Études", "Inspecteur Pédagogique", "Proviseur"],
+                    [
+                        "Censeur / Directeur des Études",
+                        "Inspecteur Pédagogique",
+                        "Proviseur",
+                    ],
                 )
             with col_v2:
                 statut_registre = st.selectbox(
@@ -290,8 +409,8 @@ def afficher_supervision_cahier():
                     timestamp=datetime.now(),
                     username=username,
                     action=(
-                        f"Visa officiel [{qualite_visiteur}] - Classe {classe_suivie}"
-                        f" [{statut_registre}]"
+                        f"Visa officiel [{qualite_visiteur}] - Classe"
+                        f" {classe_suivie} [{statut_registre}]"
                     ),
                     module="Supervision Cahier",
                     statut="Certifié" if certifie_conforme else "En cours",
@@ -300,9 +419,9 @@ def afficher_supervision_cahier():
                 db.add(nouveau_log)
                 db.commit()
                 st.success(
-                    f"✅ Le registre de la classe **{classe_suivie}** a été officiellement"
-                    f" visé par **{qualite_visiteur}** et archivé dans les registres"
-                    " sécurisés de l'établissement."
+                    f"✅ Le registre de la classe **{classe_suivie}** a été"
+                    f" officiellement visé par **{qualite_visiteur}** et"
+                    " archivé dans les registres sécurisés de l'établissement."
                 )
 
         # Enregistrement du log de consultation standard pour l'historique
@@ -317,8 +436,20 @@ def afficher_supervision_cahier():
         db.add(nouveau_log_consult)
         db.commit()
 
+        # --- PIED DE PAGE INSTITUTIONNEL (Intégré en bas de la page et de l'impression A4) ---
+        st.markdown(
+            f"""
+            <div class="print-footer">
+                <b>{school_name}</b> | Adresse : {school_adresse} | Contacts : {school_contacts} | Devise : <i>{school_devise}</i>
+            </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
     finally:
         db.close()
+
 
 # Alias de compatibilité
 afficher_supervision_cahier = afficher_supervision_cahier

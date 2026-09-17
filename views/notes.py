@@ -130,7 +130,6 @@ def afficher_notes():
                     " matières)."
                 )
 
-                # Utilisation de Note.semestre
                 notes_existantes = (
                     db.query(Note)
                     .join(Eleve)
@@ -154,9 +153,12 @@ def afficher_notes():
                         "Matricule": e.matricule,
                         "Nom & Prénom": f"{e.nom} {e.prenom}",
                     }
+                    
                     for mat in matieres_cycle:
                         mat_lib = mat.libelle if hasattr(mat, 'libelle') else getattr(mat, 'nom', '')
-                        ligne[mat_lib] = float(dict_notes.get((e.id, mat.id), 0.0))
+                        val_note = float(dict_notes.get((e.id, mat.id), 0.0))
+                        ligne[mat_lib] = val_note
+
                     data_matrice.append(ligne)
 
                 df_matrice = pd.DataFrame(data_matrice)
@@ -170,21 +172,49 @@ def afficher_notes():
                 }
                 for mat in matieres_cycle:
                     mat_lib = mat.libelle if hasattr(mat, 'libelle') else getattr(mat, 'nom', '')
+                    max_val = 18.0 if "conduite" in mat_lib.lower() else 20.0
                     column_config[mat_lib] = st.column_config.NumberColumn(
                         mat_lib,
                         min_value=0.0,
-                        max_value=20.0,
+                        max_value=max_val,
                         step=0.25,
                         format="%.2f",
                     )
 
+                editor_key = f"editor_matrix_{classe_choisie}_{semestre_choisi}_{type_eval}"
                 edited_df = st.data_editor(
                     df_matrice,
                     column_config=column_config,
                     hide_index=True,
                     use_container_width=True,
-                    key=f"editor_matrix_{classe_choisie}_{semestre_choisi}_{type_eval}",
+                    key=editor_key,
                 )
+
+                # --- CALCUL DYNAMIQUE DE LA MOYENNE BASÉ SUR LES DONNÉES SAISIES ---
+                dict_coeffs = { (mat.libelle if hasattr(mat, 'libelle') else getattr(mat, 'nom', '')): (mat.coefficient or 1.0) for mat in matieres_cycle }
+                
+                rows_with_moyenne = []
+                for _, row in edited_df.iterrows():
+                    r_dict = row.to_dict()
+                    total_pts = 0.0
+                    total_coefs = 0.0
+                    for mat in matieres_cycle:
+                        mat_lib = mat.libelle if hasattr(mat, 'libelle') else getattr(mat, 'nom', '')
+                        val = float(r_dict.get(mat_lib, 0.0) or 0.0)
+                        coef = dict_coeffs.get(mat_lib, 1.0)
+                        total_pts += val * coef
+                        total_coefs += coef
+                    
+                    moy = round(total_pts / total_coefs, 2) if total_coefs > 0 else 0.0
+                    r_dict["Moyenne calculée"] = f"{moy:.2f} / 20"
+                    rows_with_moyenne.append(r_dict)
+
+                df_display_preview = pd.DataFrame(rows_with_moyenne)
+                liste_noms_mat = [mat.libelle if hasattr(mat, 'libelle') else getattr(mat, 'nom', '') for mat in matieres_cycle]
+                cols_to_show = ["Matricule", "Nom & Prénom"] + liste_noms_mat + ["Moyenne calculée"]
+                
+                st.markdown("#### 📋 Aperçu dynamique des moyennes en temps réel")
+                st.dataframe(df_display_preview[[c for c in cols_to_show if c in df_display_preview.columns]], use_container_width=True, hide_index=True)
 
                 if st.button("💾 Enregistrer toutes les notes de la classe", type="primary"):
                     modifications_count = 0

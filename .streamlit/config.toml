@@ -1,7 +1,7 @@
 [server]
 enableCORS = false
 enableXsrfProtection = true
-headless = true
+headless = false
 maxUploadSize = 200
 
 [theme]

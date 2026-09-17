@@ -23,7 +23,7 @@ if sentry_dsn:
         environment=environment_mode,
         traces_sample_rate=0.2,
         profiles_sample_rate=0.2,
-        send_default_pii=send_pii,  # Désactivé par défaut pour la protection des données
+        send_default_pii=send_pii,
     )
 
 from database.db_config import SessionLocal, init_db
@@ -95,24 +95,21 @@ def main():
 
     st.set_page_config(
         page_title="Gestion Scolaire Pro - Plateforme Multi-Tenant",
-        page_icon="🚀",  # Icône fusée pour l'onglet du navigateur
+        page_icon="🚀",
         layout="wide",
         initial_sidebar_state="expanded",
     )
 
-    # --- INJECTION CSS ULTIME POUR LA VISIBILITÉ DE LA SCROLLBAR DE LA SIDEBAR ---
+    # --- INJECTION CSS POUR LA VISIBILITÉ DE LA SCROLLBAR DE LA SIDEBAR ---
     st.markdown(
         """
         <style>
-            /* Force l'affichage et la visibilité de la barre de défilement de la sidebar */
             section[data-testid="stSidebar"] {
                 overflow: visible !important;
             }
             section[data-testid="stSidebar"] .block-container {
                 overflow-y: auto !important;
             }
-            
-            /* Personnalisation agressive Webkit pour forcer la couleur dorée et la largeur */
             section[data-testid="stSidebar"] ::-webkit-scrollbar {
                 width: 14px !important;
                 display: block !important;
@@ -162,9 +159,7 @@ def main():
         st.session_state["is_super_admin"] = False
 
     # --- 1. GESTION DE LA DÉCONNEXION OU DE L'ÉTAT NON AUTHENTIFIÉ ---
-    if not st.session_state.get("authenticated") or not st.session_state.get(
-        "username"
-    ):
+    if not st.session_state.get("authenticated") or not st.session_state.get("username"):
         st.query_params.clear()
         st.markdown(
             """
@@ -182,18 +177,17 @@ def main():
             st.error(f"Erreur lors du chargement de la page de connexion : {e}")
             if "Invalid salt" in str(e):
                 st.warning(
-                    "⚠️ L'ancien mot de passe en base utilise un format incompatible."
-                    " Veuillez réinitialiser le mot de passe administrateur."
+                    "⚠️ L'ancien mot de passe en base utilise un format incompatible. "
+                    "Veuillez réinitialiser le mot de passe administrateur."
                 )
         return
 
-    # --- 2. GARDIEN DE SÉCURITÉ (GATEKEEPER) & INTERCEPTION DU MOT DE PASSE ---
+    # --- 2. GARDIEN DE SÉCURITÉ (GATEKEEPER) ---
     t0 = time.time()
     nom_utilisateur = st.session_state.get("username")
     role_utilisateur = str(st.session_state.get("role", "")).lower()
     is_super_admin = st.session_state.get("is_super_admin", False)
 
-    # 🔒 CONFINEMENT MULTI-TENANT STRICT : admin_rahmat ne doit jamais être super admin global
     if nom_utilisateur and "rahmat" in nom_utilisateur.lower():
         is_super_admin = False
         st.session_state["is_super_admin"] = False
@@ -205,10 +199,10 @@ def main():
         )
         if not current_user:
             db_sec.close()
+            st.warning("⚠️ Session expirée ou utilisateur introuvable. Veuillez vous reconnecter.")
             st.session_state.clear()
-            st.rerun()
+            return
 
-        # Vérification si l'établissement a été suspendu par le Super Admin
         if current_user.school_id and not is_super_admin:
             ecole_verif = (
                 db_sec.query(School)
@@ -219,15 +213,12 @@ def main():
                 db_sec.close()
                 st.session_state.clear()
                 st.error(
-                    f"⛔ L'établissement '{ecole_verif.nom}' a été suspendu. Veuillez"
-                    " contacter l'administrateur de la plateforme."
+                    f"⛔ L'établissement '{ecole_verif.nom}' a été suspendu. Veuillez "
+                    "contacter l'administrateur de la plateforme."
                 )
                 st.stop()
 
-        # 🔒 INTERCEPTION OBLIGATOIRE SI CHANGEMENT DE MOT DE PASSE REQUIS
-        if not is_super_admin and getattr(
-            current_user, "changer_mdp_requis", False
-        ):
+        if not is_super_admin and getattr(current_user, "changer_mdp_requis", False):
             st.markdown(
                 """
                     <style>
@@ -238,14 +229,14 @@ def main():
             )
 
             st.markdown(
-                "<br><h2 style='text-align: center; color: #C5A059;'>🔒 Sécurité"
-                " Obligatoire de Première Connexion</h2>",
+                "<br><h2 style='text-align: center; color: #C5A059;'>🔒 Sécurité "
+                "Obligatoire de Première Connexion</h2>",
                 unsafe_allow_html=True,
             )
             st.markdown(
-                "<p style='text-align: center; color: #6c757d;'>Vous êtes connecté"
-                " avec un mot de passe provisoire. Veuillez définir votre nouveau"
-                " mot de passe personnel pour accéder à la plateforme.</p>",
+                "<p style='text-align: center; color: #6c757d;'>Vous êtes connecté "
+                "avec un mot de passe provisoire. Veuillez définir votre nouveau "
+                "mot de passe personnel pour accéder à la plateforme.</p>",
                 unsafe_allow_html=True,
             )
 
@@ -266,9 +257,7 @@ def main():
 
                     if submit_btn:
                         if len(nouveau_p) < 6:
-                            st.error(
-                                "⚠️ Le mot de passe doit contenir au moins 6 caractères."
-                            )
+                            st.error("⚠️ Le mot de passe doit contenir au moins 6 caractères.")
                         elif nouveau_p != confirme_p:
                             st.error("⚠️ Les mots de passe ne correspondent pas.")
                         else:
@@ -278,20 +267,14 @@ def main():
                                 current_user.password = hashed.decode("utf-8")
                                 current_user.changer_mdp_requis = False
                                 db_sec.commit()
-                                st.success(
-                                    "✅ Mot de passe mis à jour avec succès ! Chargement de"
-                                    " l'application..."
-                                )
+                                st.success("✅ Mot de passe mis à jour avec succès ! Chargement...")
                                 st.rerun()
                             except Exception as ex:
                                 db_sec.rollback()
-                                st.error(
-                                    f"Erreur lors de la mise à jour du mot de passe : {ex}"
-                                )
+                                st.error(f"Erreur lors de la mise à jour du mot de passe : {ex}")
             db_sec.close()
-            return  # Bloque totalement l'accès au reste tant que le MDP n'est pas changé
+            return
 
-        # Mise à jour de la dernière activité (pour l'audit)
         current_user.derniere_activite = datetime.now()
         db_sec.commit()
     except Exception:
@@ -319,19 +302,11 @@ def main():
                 if logo_file and os.path.exists(logo_file):
                     st.image(logo_file, width=100)
                 else:
-                    st.markdown(
-                        "<div style='text-align: center;'><h3>🏫</h3></div>",
-                        unsafe_allow_html=True,
-                    )
+                    st.markdown("<div style='text-align: center;'><h3>🏫</h3></div>", unsafe_allow_html=True)
         except Exception:
-            st.markdown(
-                "<div style='text-align: center;'><h3>🏫</h3></div>",
-                unsafe_allow_html=True,
-            )
+            st.markdown("<div style='text-align: center;'><h3>🏫</h3></div>", unsafe_allow_html=True)
 
-        nom_affiche_ecole = st.session_state.get(
-            "school_name", "Gestion Scolaire Pro"
-        )
+        nom_affiche_ecole = st.session_state.get("school_name", "Gestion Scolaire Pro")
         st.markdown(
             f"""
                 <div style="text-align: left; margin-top: -5px; margin-bottom: 0px;">
@@ -342,13 +317,8 @@ def main():
             unsafe_allow_html=True,
         )
 
-        st.markdown(
-            "<hr style='margin: 0.5rem 0 0.8rem 0; border-color: rgba(197, 160, 89,"
-            " 0.3);'>",
-            unsafe_allow_html=True,
-        )
+        st.markdown("<hr style='margin: 0.5rem 0 0.8rem 0; border-color: rgba(197, 160, 89, 0.3);'>", unsafe_allow_html=True)
 
-        # --- GESTION ROBUSTE DU SÉLECTEUR DE CYCLE ACTIF ---
         cycles_disponibles = ["Maternelle", "Primaire", "Collège", "Lycée"]
         cycle_courant_session = st.session_state.get("cycle_actif", "Collège")
         index_actuel = (
@@ -357,7 +327,6 @@ def main():
             else 2
         )
 
-        # --- DÉFINITION DES MENUS SELON LE RÔLE ---
         if is_super_admin:
             st.markdown("#### 🏛️ Gouvernance ERP")
             st.info(f"Connecté : **{nom_utilisateur}**")
@@ -369,29 +338,14 @@ def main():
                 "💾 Infrastructure & Backup",
                 "⚙️ Paramètres Système",
             ]
-            icons_menu = [
-                "speedometer2",
-                "globe",
-                "shield-lock",
-                "clock-history",
-                "database",
-                "gear",
-            ]
+            icons_menu = ["speedometer2", "globe", "shield-lock", "clock-history", "database", "gear"]
             menu_key_val = "menu_super_admin_erp"
 
         elif role_utilisateur == "inspecteur":
             st.markdown("#### 🔍 Portail Inspecteur")
             st.info(f"Connecté : **{nom_utilisateur}**")
-            options_menu = [
-                "Espace Inspection",
-                "Suivi des Programmes",
-                "Supervision cahier",
-            ]
-            icons_menu = [
-                "clipboard-check",
-                "graph-up",
-                "eye",
-            ]
+            options_menu = ["Espace Inspection", "Suivi des Programmes", "Supervision cahier"]
+            icons_menu = ["clipboard-check", "graph-up", "eye"]
             menu_key_val = "menu_inspecteur"
 
         elif role_utilisateur == "censeur":
@@ -404,46 +358,17 @@ def main():
                 key="global_niveau_actif_censeur",
             )
             st.session_state["cycle_actif"] = niveau_actif
-            st.markdown(
-                "<hr style='margin: 0.5rem 0 0.5rem 0; border-color:"
-                " rgba(255,255,255,0.1);'>",
-                unsafe_allow_html=True,
-            )
+            st.markdown("<hr style='margin: 0.5rem 0 0.5rem 0; border-color: rgba(255,255,255,0.1);'>", unsafe_allow_html=True)
             options_menu = [
-                "Accueil",
-                "Tableau de Bord",
-                "Matières & Coeffs",
-                "Classes & Tarifs",
-                "Emploi du temps",
-                "Planification des évaluations",
-                "Cahier de Texte",
-                "Supervision cahier",
-                "Présence",
-                "Conseil de classe",
-                "Bulletins",
-                "Alerte Performance",
-                "Suivi des Programmes",
-                "Enseignants",
-                "Paramètres",
-                "Messages",
+                "Accueil", "Tableau de Bord", "Matières & Coeffs", "Classes & Tarifs",
+                "Emploi du temps", "Planification des évaluations", "Cahier de Texte",
+                "Supervision cahier", "Présence", "Conseil de classe", "Bulletins",
+                "Alerte Performance", "Suivi des Programmes", "Enseignants", "Paramètres", "Messages",
             ]
             icons_menu = [
-                "house",
-                "speedometer2",
-                "book",
-                "grid",
-                "calendar-week",
-                "clock",
-                "journal-text",
-                "eye",
-                "check-circle",
-                "award",
-                "journal-richtext",
-                "exclamation-triangle",
-                "graph-up",
-                "person-badge",
-                "gear",
-                "chat-dots",
+                "house", "speedometer2", "book", "grid", "calendar-week", "clock",
+                "journal-text", "eye", "check-circle", "award", "journal-richtext",
+                "exclamation-triangle", "graph-up", "person-badge", "gear", "chat-dots",
             ]
             menu_key_val = "menu_censeur"
 
@@ -461,7 +386,7 @@ def main():
             icons_menu = ["house-heart", "chat-dots"]
             menu_key_val = "menu_parent"
 
-        else:  # Administrateur de l'école (Tenant Admin)
+        else:
             st.markdown("#### 🏫 Pilotage Administratif")
             niveau_actif = st.selectbox(
                 "Cycle d'enseignement actif",
@@ -470,84 +395,27 @@ def main():
                 key="global_niveau_actif",
             )
             st.session_state["cycle_actif"] = niveau_actif
-            st.markdown(
-                "<hr style='margin: 0.5rem 0 0.5rem 0; border-color:"
-                " rgba(255,255,255,0.1);'>",
-                unsafe_allow_html=True,
-            )
+            st.markdown("<hr style='margin: 0.5rem 0 0.5rem 0; border-color: rgba(255,255,255,0.1);'>", unsafe_allow_html=True)
             options_menu = [
-                "Accueil",
-                "Tableau de Bord",
-                "Année Scolaire",
-                "Matières & Coeffs",
-                "Classes & Tarifs",
-                "Inscription Élèves",
-                "Cartes Scolaires",
-                "Emploi du temps",
-                "Planification des évaluations",
-                "Cahier de Texte",
-                "Supervision cahier",
-                "Présence",
-                "Saisie des notes",
-                "Consultations des notes",
-                "Espace Inspection",
-                "Conseil de classe",
-                "Bulletins",
-                "Alerte Performance",
-                "Espace Enseignants",
-                "Suivi des Programmes",
-                "Enseignants",
-                "Personnels et rôles",
-                "Gestion Comptes",
-                "Import Programmes PDF",
-                "Encaissement",
-                "Stats Encaissements",
-                "Tableau Finances",
-                "Soldes & Impayés",
-                "Dépenses",
-                "Rapports",
-                "Paramètres",
-                "Journal d'activité",
-                "Messages",
-                "Espace Parent",
-                "Backup",
+                "Accueil", "Tableau de Bord", "Année Scolaire", "Matières & Coeffs",
+                "Classes & Tarifs", "Inscription Élèves", "Cartes Scolaires", "Emploi du temps",
+                "Planification des évaluations", "Cahier de Texte", "Supervision cahier",
+                "Présence", "Saisie des notes", "Consultations des notes", "Espace Inspection",
+                "Conseil de classe", "Bulletins", "Alerte Performance", "Espace Enseignants",
+                "Suivi des Programmes", "Enseignants", "Personnels et rôles", "Gestion Comptes",
+                "Import Programmes PDF", "Encaissement", "Stats Encaissements", "Tableau Finances",
+                "Soldes & Impayés", "Dépenses", "Fiches de Paie", "Rapports", "Paramètres", "Journal d'activité",
+                "Messages", "Espace Parent", "Backup",
             ]
             icons_menu = [
-                "house",
-                "speedometer2",
-                "calendar",
-                "book",
-                "grid",
-                "person-plus",
-                "card-text",
-                "calendar-week",
-                "clock",
-                "journal-text",
-                "eye",
-                "check-circle",
-                "pencil-square",
-                "search",
-                "clipboard-check",
-                "award",
-                "journal-richtext",
-                "exclamation-triangle",
-                "person-video3",
-                "graph-up",
-                "person-badge",
-                "shield-lock",
-                "people",
-                "file-pdf",
-                "cash-coin",
-                "bar-chart-fill",
-                "wallet2",
-                "receipt",
-                "file-earmark-bar-graph",
-                "file-earmark-bar-graph",
-                "gear",
-                "clock-history",
-                "chat-dots",
-                "house-heart",
-                "database",
+                "house", "speedometer2", "calendar", "book", "grid", "person-plus",
+                "card-text", "calendar-week", "clock", "journal-text", "eye",
+                "check-circle", "pencil-square", "search", "clipboard-check", "award",
+                "journal-richtext", "exclamation-triangle", "person-video3", "graph-up",
+                "person-badge", "shield-lock", "people", "file-pdf", "cash-coin",
+                "bar-chart-fill", "wallet2", "receipt", "file-earmark-text", "file-earmark-bar-graph",
+                "file-earmark-bar-graph", "gear", "clock-history", "chat-dots",
+                "house-heart", "database",
             ]
             menu_key_val = "menu_principal_admin"
 
@@ -587,41 +455,29 @@ def main():
         st.query_params["page"] = menu_option
 
         st.markdown("---")
-
         libelle_annee = get_libelle_annee_courante()
-
         st.markdown(
-            f"<div style='text-align: center; color: #C5A059; font-size: 0.75rem;'>Année"
-            f" Scolaire : <b>{libelle_annee}</b><br>Niamey, Niger</div>",
+            f"<div style='text-align: center; color: #C5A059; font-size: 0.75rem;'>Année "
+            f"Scolaire : <b>{libelle_annee}</b><br>Niamey, Niger</div>",
             unsafe_allow_html=True,
         )
         st.markdown("<br>", unsafe_allow_html=True)
 
-        if st.button(
-            "🚪 Se déconnecter", use_container_width=True, type="secondary"
-        ):
+        if st.button("🚪 Se déconnecter", use_container_width=True, type="secondary"):
             st.session_state.clear()
             st.query_params.clear()
             st.success("Déconnexion réussie !")
             st.rerun()
 
-    # --- 4. DICTIONNAIRE DE ROUTAGE (ERP STANDARD) ---
+    # --- 4. DICTIONNAIRE DE ROUTAGE ---
     ROUTES = {
-        # Piliers Super Admin ERP
         "📊 Pilotage & BI": ("views.accueil", "afficher_accueil"),
         "🏢 Gestion des Tenants": ("views.super_admin", "afficher_super_admin"),
-        "👥 IAM & Sécurité": (
-            "views.gestion_utilisateurs",
-            "afficher_gestion_utilisateurs",
-        ),
+        "👥 IAM & Sécurité": ("views.gestion_utilisateurs", "afficher_gestion_utilisateurs"),
         "📜 Piste d'Audit": ("views.journal_activite", "afficher_journal_activite"),
         "💾 Infrastructure & Backup": ("views.backup", "afficher_backup"),
         "⚙️ Paramètres Système": ("views.parametres", "afficher_parametres"),
-        # Modules standards administration et autres rôles
-        "Administration Globale": (
-            "views.super_admin",
-            "afficher_super_admin",
-        ),
+        "Administration Globale": ("views.super_admin", "afficher_super_admin"),
         "Accueil": ("views.accueil", "afficher_accueil"),
         "Tableau de Bord": ("views.tableau_de_bord", "afficher_tableau_de_bord"),
         "Année Scolaire": ("views.annee_scolaire", "afficher_annee_scolaire"),
@@ -630,66 +486,31 @@ def main():
         "Inscription Élèves": ("views.eleves", "afficher_eleves"),
         "Cartes Scolaires": ("views.cartes_scolaires", "afficher_cartes_scolaires"),
         "Emploi du temps": ("views.emploi_du_temps", "afficher_emploi_temps"),
-        "Planification des évaluations": (
-            "views.planification",
-            "afficher_planification_evaluations",
-        ),
+        "Planification des évaluations": ("views.planification", "afficher_planification_evaluations"),
         "Cahier de Texte": ("views.cahier_texte", "afficher_cahier_texte"),
-        "Supervision cahier": (
-            "views.supervision_cahier",
-            "afficher_supervision_cahier",
-        ),
+        "Supervision cahier": ("views.supervision_cahier", "afficher_supervision_cahier"),
         "Présence": ("views.presence", "afficher_presence"),
         "Saisie des notes": ("views.notes", "afficher_notes"),
-        "Consultations des notes": (
-            "views.consultation_notes",
-            "afficher_consultation_notes",
-        ),
-        "Espace Inspection": (
-            "views.espace_inspection",
-            "afficher_espace_inspection",
-        ),
+        "Consultations des notes": ("views.consultation_notes", "afficher_consultation_notes"),
+        "Espace Inspection": ("views.espace_inspection", "afficher_espace_inspection"),
         "Conseil de classe": ("views.conseil_classe", "afficher_conseil_classe"),
         "Bulletins": ("views.bulletins", "afficher_bulletins"),
-        "Alerte Performance": (
-            "views.alerte_performance",
-            "afficher_alerte_performance",
-        ),
-        "Espace Enseignants": (
-            "views.espace_enseignants",
-            "afficher_espace_enseignants",
-        ),
-        "Suivi des Programmes": (
-            "views.supervision_progression",
-            "afficher_supervision_progression",
-        ),
+        "Alerte Performance": ("views.alerte_performance", "afficher_alerte_performance"),
+        "Espace Enseignants": ("views.espace_enseignants", "afficher_espace_enseignants"),
+        "Suivi des Programmes": ("views.supervision_progression", "afficher_supervision_progression"),
         "Enseignants": ("views.enseignants", "afficher_enseignants"),
         "Personnels et rôles": ("views.personnels_roles", "afficher_personnels"),
-        "Gestion Comptes": (
-            "views.gestion_utilisateurs",
-            "afficher_gestion_utilisateurs",
-        ),
-        "Import Programmes PDF": (
-            "views.upload_programmes",
-            "afficher_upload_programmes",
-        ),
+        "Gestion Comptes": ("views.gestion_utilisateurs", "afficher_gestion_utilisateurs"),
+        "Import Programmes PDF": ("views.upload_programmes", "afficher_upload_programmes"),
         "Encaissement": ("views.scolarite", "afficher_encaissement"),
-        "Stats Encaissements": (
-            "views.stats_encaissements",
-            "afficher_stats_encaissements",
-        ),
-        "Tableau Finances": (
-            "views.tableau_finances",
-            "afficher_tableau_finances",
-        ),
+        "Stats Encaissements": ("views.stats_encaissements", "afficher_stats_encaissements"),
+        "Tableau Finances": ("views.tableau_finances", "afficher_tableau_finances"),
         "Soldes & Impayés": ("views.soldes_impayes", "afficher_soldes_impayes"),
         "Dépenses": ("views.depenses", "afficher_depenses"),
+        "Fiches de Paie": ("views.paie", "afficher_paie"),
         "Rapports": ("views.rapports", "afficher_rapports"),
         "Paramètres": ("views.parametres", "afficher_parametres"),
-        "Journal d'activité": (
-            "views.journal_activite",
-            "afficher_journal_activite",
-        ),
+        "Journal d'activité": ("views.journal_activite", "afficher_journal_activite"),
         "Messages": ("views.messages", "afficher_messages"),
         "Espace Parent": ("views.parent_space", "afficher_espace_parent"),
         "Backup": ("views.backup", "backup"),
@@ -719,8 +540,8 @@ def main():
                 fonction()
         except (ImportError, AttributeError) as e:
             st.error(
-                f"⚠️ Le module pour la vue **{menu_option}** est en cours de"
-                f" développement ou n'a pas été trouvé. ({e})"
+                f"⚠️ Le module pour la vue **{menu_option}** est en cours de "
+                f"développement ou n'a pas été trouvé. ({e})"
             )
     print(f"⏱️ [DEBUG] Exécution de la vue ({menu_option}) : {time.time() - t0:.2f} s")
     print(f"⏱️ [DEBUG] **TEMPS TOTAL DE CHARGEMENT PAGE** : {time.time() - start_total:.2f} s\n" + "-"*50)

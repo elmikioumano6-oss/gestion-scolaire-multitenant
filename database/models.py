@@ -204,6 +204,7 @@ class Enseignant(Base):
     specialite = Column(String, nullable=True)
     qualite = Column(String, nullable=True)
     telephone = Column(String, nullable=True)
+    email = Column(String, nullable=True)  # <-- AJOUTÉ ICI
     statut = Column(String, default="Permanent")
     volume_horaire = Column(Float, default=18.0)
     classes_attribuees = Column(String, nullable=True)

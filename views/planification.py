@@ -1,9 +1,16 @@
 from datetime import datetime, date, time, timedelta
+import io
 import sqlalchemy as sa
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 from database.db_config import SessionLocal, engine
 from database.models import Classe, Matiere, Evaluation, ActivityLog, School
+import reportlab
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 def afficher_planification_evaluations():
     st.subheader("📋 Planification Avancée des Évaluations (SIA)")
@@ -23,6 +30,7 @@ def afficher_planification_evaluations():
     school_name = st.session_state.get("school_name", "Établissement")
     cycle_en_cours = st.session_state.get("cycle_actif", "Collège")
     username = st.session_state.get("username", "admin")
+    annee_en_cours = datetime.now().year
 
     if not school_id and not is_super_admin:
         st.warning("⚠️ Veuillez vous connecter pour accéder à cette section.")
@@ -30,7 +38,12 @@ def afficher_planification_evaluations():
 
     db = SessionLocal()
     try:
-        # Isolation stricte multi-écoles et multi-cycles pour les classes et matières
+        ecole_courante = None
+        if school_id:
+            ecole_courante = db.query(School).filter(School.id == school_id).first()
+            if ecole_courante:
+                school_name = ecole_courante.nom
+
         classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours)
         matieres_query = db.query(Matiere)
         
@@ -51,7 +64,7 @@ def afficher_planification_evaluations():
         tab1, tab2 = st.tabs(["📅 Calendrier & Suivi des Évaluations", "➕ Planifier une Évaluation (Workflow)"])
 
         with tab1:
-            st.markdown(f"### Calendrier Officiel — **{school_name} ({cycle_en_cours})**")
+            st.markdown(f"### Calendrier Officiel ({annee_en_cours}) — **{school_name} ({cycle_en_cours})**")
             
             col_filt1, col_filt2 = st.columns(2)
             with col_filt1:
@@ -59,11 +72,11 @@ def afficher_planification_evaluations():
             with col_filt2:
                 semestre_filtre = st.selectbox("Filtrer par semestre", ["Tous les semestres", "Semestre 1", "Semestre 2"], key="filtre_eval_semestre")
             
-            eval_query = db.query(Evaluation).join(Classe).filter(Classe.cycle == cycle_en_cours)
+            eval_query = db.query(Evaluation).join(Classe, Evaluation.classe_id == Classe.id).filter(Classe.cycle == cycle_en_cours)
             if not is_super_admin and school_id:
                 eval_query = eval_query.filter(Evaluation.school_id == school_id)
             if classe_filtre != "Toutes les classes":
-                eval_query = eval_query.join(Classe, Evaluation.classe_id == Classe.id).filter(Classe.libelle == classe_filtre)
+                eval_query = eval_query.filter(Classe.libelle == classe_filtre)
             if semestre_filtre != "Tous les semestres" and hasattr(Evaluation, 'semestre'):
                 eval_query = eval_query.filter(Evaluation.semestre == semestre_filtre)
             
@@ -92,6 +105,124 @@ def afficher_planification_evaluations():
                     })
                 
                 df_evals = pd.DataFrame(data_tableau)
+
+                # --- BOUTONS D'EXPORTATION (EXCEL, PDF A4 PAYSAGE & IMPRESSION) ---
+                col_exp1, col_exp2, col_exp3, _ = st.columns([1.3, 1.3, 1.3, 3])
+
+                with col_exp1:
+                    output_excel = io.BytesIO()
+                    with pd.ExcelWriter(output_excel, engine="openpyxl") as writer:
+                        df_evals.to_excel(writer, index=False, sheet_name=f"Evaluations_{annee_en_cours}")
+                    excel_data = output_excel.getvalue()
+                    st.download_button(
+                        label="📥 Excel",
+                        data=excel_data,
+                        file_name=f"Calendrier_Evaluations_{annee_en_cours}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+
+                with col_exp2:
+                    pdf_buffer = io.BytesIO()
+                    doc = SimpleDocTemplate(
+                        pdf_buffer,
+                        pagesize=landscape(A4),
+                        rightMargin=30,
+                        leftMargin=30,
+                        topMargin=30,
+                        bottomMargin=50
+                    )
+
+                    elements = []
+                    styles = getSampleStyleSheet()
+
+                    title_style = ParagraphStyle(
+                        "TitleStyle",
+                        parent=styles["Heading1"],
+                        fontSize=14,
+                        textColor=colors.HexColor("#1e3a8a"),
+                        alignment=1,
+                        spaceAfter=15
+                    )
+
+                    elements.append(Paragraph(f"CALENDRIER OFFICIEL DES ÉVALUATIONS ({annee_en_cours}) — {school_name} ({cycle_en_cours})", title_style))
+                    elements.append(Spacer(1, 10))
+
+                    df_pdf = df_evals.drop(columns=["ID"]) if "ID" in df_evals.columns else df_evals
+                    table_data = [list(df_pdf.columns)]
+                    for _, row in df_pdf.iterrows():
+                        table_data.append([str(val) for val in row])
+
+                    col_widths = [780 / len(df_pdf.columns)] * len(df_pdf.columns)
+                    t = Table(table_data, colWidths=col_widths)
+                    t.setStyle(TableStyle([
+                        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#1e3a8a")),
+                        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+                        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                        ('FONTSIZE', (0,0), (-1,0), 8),
+                        ('BOTTOMPADDING', (0,0), (-1,0), 8),
+                        ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#f8fafc")),
+                        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cbd5e1")),
+                        ('FONTNAME', (0,1), (-1,-1), 'Helvetica'),
+                        ('FONTSIZE', (0,1), (-1,-1), 8),
+                        ('BOTTOMPADDING', (0,1), (-1,-1), 5),
+                        ('TOPPADDING', (0,1), (-1,-1), 5),
+                    ]))
+                    elements.append(t)
+
+                    def add_footer(canvas, doc_obj):
+                        canvas.saveState()
+                        footer_y = 22
+                        s_nom = ecole_courante.nom if ecole_courante else school_name
+                        s_adr = ecole_courante.adresse if ecole_courante and ecole_courante.adresse else "Niamey - Niger"
+                        s_cont = ecole_courante.contacts if ecole_courante and ecole_courante.contacts else "N/D"
+                        s_dev = ecole_courante.devise if ecole_courante and ecole_courante.devise else "Excellence - Persévérance - Réussite"
+
+                        footer_text = f"<b>{s_nom}</b> | Adresse : {s_adr} | Contacts : {s_cont} | Devise : <i>{s_dev}</i>"
+                        footer_style = ParagraphStyle(
+                            "FooterStyle",
+                            parent=styles["Normal"],
+                            fontSize=8,
+                            textColor=colors.HexColor("#475569"),
+                            alignment=1
+                        )
+                        p = Paragraph(footer_text, footer_style)
+                        p.wrap(doc_obj.pagesize[0] - 60, footer_y)
+                        p.drawOn(canvas, 30, footer_y)
+                        canvas.restoreState()
+
+                    doc.build(elements, onFirstPage=add_footer)
+                    pdf_data = pdf_buffer.getvalue()
+
+                    st.download_button(
+                        label="📥 PDF",
+                        data=pdf_data,
+                        file_name=f"Calendrier_Evaluations_{annee_en_cours}.pdf",
+                        mime="application/pdf"
+                    )
+
+                with col_exp3:
+                    # Bouton d'impression direct via JavaScript
+                    components.html(
+                        """
+                        <button onclick="parent.window.print()" style="
+                            background-color: #2563eb;
+                            color: white;
+                            border: none;
+                            padding: 0.45rem 1rem;
+                            font-size: 0.85rem;
+                            font-weight: 500;
+                            border-radius: 6px;
+                            cursor: pointer;
+                            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                            font-family: sans-serif;
+                        ">🖨️ Imprimer</button>
+                        """,
+                        height=40,
+                    )
+
+                st.markdown("<br>", unsafe_allow_html=True)
                 st.dataframe(df_evals, use_container_width=True)
 
                 st.markdown("#### ⚙️ Gestion du Workflow des Évaluations")
@@ -114,7 +245,7 @@ def afficher_planification_evaluations():
                             st.rerun()
 
         with tab2:
-            st.markdown(f"### Nouvelle Programmation & Anti-Collision — **{school_name} ({cycle_en_cours})**")
+            st.markdown(f"### Nouvelle Programmation & Anti-Collision ({annee_en_cours}) — **{school_name} ({cycle_en_cours})**")
             
             if not matieres_disponibles:
                 st.warning("⚠️ Veuillez d'abord créer des matières dans le module 'Matières & Coeffs' pour pouvoir planifier une évaluation.")
@@ -177,7 +308,6 @@ def afficher_planification_evaluations():
                                 )
                                 db.add(nouvelle_eval)
 
-                                # Traçabilité dans le journal d'activité
                                 nouveau_log = ActivityLog(
                                     school_id=target_school_id,
                                     timestamp=datetime.now(),

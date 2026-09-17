@@ -99,6 +99,7 @@ def afficher_messages():
 
         def get_parent_phone(e):
           for attr in [
+              "tuteur",
               "telephone_parent",
               "tuteur_tel",
               "tel_parent",
