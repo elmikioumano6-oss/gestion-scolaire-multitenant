@@ -7,12 +7,13 @@ echo ========================================================
 
 :: 0. Validation et sauvegarde conditionnelle sur staging
 echo [0/7] Verification et sauvegarde des modifications sur staging...
-git status --porcelain > nul
+git diff-index --quiet HEAD --
 if %errorlevel% neq 0 (
-    echo [INFO] Aucun changement detecte ou erreur git.
-) else (
+    echo [INFO] Modifications detectees. Sauvegarde en cours...
     git add .
-    git commit -m "chore: sauvegarde automatique de staging avant fusion" || echo [INFO] Rien a commiter.
+    git commit -m "chore: sauvegarde automatique de staging avant fusion"
+) else (
+    echo [INFO] Aucun changement detecte sur staging.
 )
 
 :: 1. Passage sur la branche main (production)
@@ -47,9 +48,9 @@ if %errorlevel% neq 0 (
     goto :error
 )
 
-:: 6. Verification de sante de l'application en ligne
-echo [6/7] Verification de la sante de l'application en ligne...
-curl -s -o nul -w "%%{http_code}" http://72.62.147.14:8503 > temp_status.txt
+:: 6. Verification de sante de l'application en ligne (Adaptez le port si necessaire, ex: 8501)
+echo [6/7] Verification de sante de l'application en ligne...
+curl -s -o nul -w "%%{http_code}" http://72.62.147.14:8501 > temp_status.txt
 set /p HTTP_STATUS=<temp_status.txt
 del temp_status.txt
 
