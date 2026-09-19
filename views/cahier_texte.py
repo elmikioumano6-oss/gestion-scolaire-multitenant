@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import datetime
 from database.db_config import SessionLocal
 from database.models import Classe, Matiere, School, ActivityLog, CahierTexte
+from database.queries import get_classes_cached, get_matieres_cached
 
 def afficher_cahier_texte():
     st.subheader("📖 Cahier de Texte Numérique")
@@ -28,7 +29,9 @@ def afficher_cahier_texte():
             ecole_defaut = db.query(School).first()
             target_school_id = ecole_defaut.id if ecole_defaut else 1
 
-        # Isolation multi-écoles et multi-cycles pour les classes et matières
+        ecole_active_id = school_id if school_id else target_school_id
+
+        # Isolation multi-écoles et multi-cycles pour les classes et matières (avec requêtes filtrées ou objets ORM)
         classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours)
         matieres_query = db.query(Matiere).filter(Matiere.cycle == cycle_en_cours)
         
@@ -48,7 +51,7 @@ def afficher_cahier_texte():
             return
 
         noms_classes = [c.libelle for c in classes_cycle]
-        noms_matieres = [m.libelle for m in matieres_cycle]
+        noms_matieres = [m.libelle if hasattr(m, 'libelle') else getattr(m, 'nom', '') for m in matieres_cycle]
 
         tab1, tab2 = st.tabs(["📖 Consulter le Cahier de Texte", "✍️ Saisir un Cours / Devoir (Enseignant ou Substitution Censeur)"])
 
@@ -71,7 +74,7 @@ def afficher_cahier_texte():
                     data_tableau = []
                     for e in entrees_db:
                         matiere_obj = db.query(Matiere).filter(Matiere.id == e.matiere_id).first()
-                        nom_matiere = matiere_obj.libelle if matiere_obj else "Matière non spécifiée"
+                        nom_matiere = (matiere_obj.libelle if hasattr(matiere_obj, 'libelle') else getattr(matiere_obj, 'nom', 'Matière non spécifiée')) if matiere_obj else "Matière non spécifiée"
                         date_str = e.date.strftime('%d/%m/%Y') if e.date else "N/D"
                         duree_val = getattr(e, 'duree', 1.0)
                         
@@ -113,7 +116,7 @@ def afficher_cahier_texte():
                         st.error("⚠️ Veuillez remplir le titre et le contenu détaillé de la séance.")
                     else:
                         cls_obj = next(c for c in classes_cycle if c.libelle == classe_choisie)
-                        mat_obj = next(m for m in matieres_cycle if m.libelle == matiere_choisie)
+                        mat_obj = next(m for m in matieres_cycle if (getattr(m, 'libelle', None) == matiere_choisie or getattr(m, 'nom', None) == matiere_choisie))
 
                         # Formatage combiné du titre et du contenu
                         contenu_formate = f"**[{titre_cours.strip()}]**\n{contenu.strip()}"

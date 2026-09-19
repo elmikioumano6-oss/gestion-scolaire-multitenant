@@ -2,20 +2,37 @@ import streamlit as st
 import pandas as pd
 from database.db_config import SessionLocal
 from database.models import Eleve, Classe
+from database.queries import get_classes_cached, get_matieres_cached
 
 # La fonction reçoit désormais le "niveau_actif" (Primaire, Collège, Lycée) envoyé par main.py
 def afficher_scolarite(niveau_actif):
     st.subheader(f"🎓 Gestion des Élèves - {niveau_actif}")
     db = SessionLocal()
 
-    # 1. On récupère UNIQUEMENT les classes du niveau sélectionné en haut de l'écran
-    classes_du_niveau = db.query(Classe).filter(Classe.cycle == niveau_actif).all()
+    school_id = st.session_state.get("school_id")
+    is_super_admin = st.session_state.get("is_super_admin", False)
+
+    # 1. On récupère UNIQUEMENT les classes du niveau sélectionné en haut de l'écran avec isolation multi-tenant
+    classes_query = db.query(Classe).filter(Classe.cycle == niveau_actif)
+    if not is_super_admin and school_id:
+        classes_query = classes_query.filter(Classe.school_id == school_id)
+    if hasattr(Classe, "deleted_at"):
+        classes_query = classes_query.filter(Classe.deleted_at.is_(None))
+    
+    classes_du_niveau = classes_query.all()
 
     # Sécurité : on empêche d'inscrire un élève si aucune classe n'existe pour ce cycle
     if not classes_du_niveau:
         st.warning(f"⚠️ Aucune classe n'est configurée pour le {niveau_actif}. Veuillez d'abord créer une classe dans le module 'Classes'.")
         db.close()
         return
+
+    # Helper pour récupérer le nom/libellé de la classe de façon robuste
+    def get_classe_nom(c):
+        for attr in ['libelle', 'nom', 'name', 'titre']:
+            if hasattr(c, attr) and getattr(c, attr):
+                return getattr(c, attr)
+        return f"Classe {c.id}"
 
     # --- FORMULAIRE D'AJOUT ---
     with st.form("form_ajout_eleve", clear_on_submit=True):
@@ -31,22 +48,32 @@ def afficher_scolarite(niveau_actif):
             contact_parent = st.text_input("Contact du Parent (ex: 90123456)")
             
             # Le menu déroulant ne propose QUE les classes du niveau actif !
-            noms_classes = [c.nom for c in classes_du_niveau]
+            noms_classes = [get_classe_nom(c) for c in classes_du_niveau]
             classe_choisie = st.selectbox("Classe *", noms_classes)
 
         submit = st.form_submit_button("Enregistrer l'élève", type="primary")
 
         if submit:
             if nom.strip() and prenom.strip() and matricule.strip():
-                # Vérifier si le matricule est déjà utilisé dans toute l'école
-                existe = db.query(Eleve).filter(Eleve.matricule == matricule.strip()).first()
+                # Vérifier si le matricule est déjà utilisé dans l'établissement
+                query_exist = db.query(Eleve).filter(Eleve.matricule == matricule.strip())
+                if not is_super_admin and school_id:
+                    query_exist = query_exist.filter(Eleve.school_id == school_id)
+                existe = query_exist.first()
+
                 if existe:
                     st.error(f"❌ Le matricule {matricule} est déjà utilisé par un autre élève !")
                 else:
                     # Retrouver l'ID de la classe choisie pour l'affecter à l'élève
-                    classe_id = next(c.id for c in classes_du_niveau if c.nom == classe_choisie)
+                    classe_id = next(c.id for c in classes_du_niveau if get_classe_nom(c) == classe_choisie)
                     
+                    target_school_id = school_id
+                    if is_super_admin and not target_school_id:
+                        ecole_defaut = db.query(School).first() if 'School' in globals() or 'database.models' in globals() else None
+                        target_school_id = 1
+
                     nouvel_eleve = Eleve(
+                        school_id=school_id if school_id else 1,
                         nom=nom.strip().upper(),  # Met le nom en majuscules proprement
                         prenom=prenom.strip().title(), # Met la 1ère lettre du prénom en majuscule
                         matricule=matricule.strip(),
@@ -67,19 +94,27 @@ def afficher_scolarite(niveau_actif):
     st.markdown(f"### Liste des élèves du {niveau_actif}")
     
     # LE FILTRE MAGIQUE : On récupère uniquement les élèves dont la classe appartient au cycle choisi
-    eleves = db.query(Eleve).join(Classe).filter(Classe.cycle == niveau_actif).all()
+    eleves_query = db.query(Eleve).join(Classe).filter(Classe.cycle == niveau_actif)
+    if not is_super_admin and school_id:
+        eleves_query = eleves_query.filter(Eleve.school_id == school_id)
+    if hasattr(Eleve, "deleted_at"):
+        eleves_query = eleves_query.filter(Eleve.deleted_at.is_(None))
+    
+    eleves = eleves_query.all()
 
     if eleves:
         # Préparation des données pour faire un beau tableau interactif
         donnees = []
         for e in eleves:
+            c_obj = db.query(Classe).filter(Classe.id == e.classe_id).first() if e.classe_id else None
+            c_nom = (c_obj.libelle if hasattr(c_obj, 'libelle') and c_obj.libelle else getattr(c_obj, 'nom', 'N/A')) if c_obj else "N/A"
             donnees.append({
                 "Matricule": e.matricule,
                 "Nom": e.nom,
                 "Prénom": e.prenom,
                 "Sexe": getattr(e, 'sexe', 'N/A'),
-                "Classe": e.classe.nom if e.classe else "N/A",
-                "Contact Parent": getattr(e, 'contact_parent', 'Non renseigné')
+                "Classe": c_nom,
+                "Contact Parent": getattr(e, 'contact_parent', None) or getattr(e, 'tuteur_tel', 'Non renseigné')
             })
             
         df = pd.DataFrame(donnees)
@@ -101,3 +136,7 @@ def afficher_scolarite(niveau_actif):
         st.info(f"Aucun élève n'est encore inscrit au {niveau_actif}.")
 
     db.close()
+
+# Alias de compatibilité
+afficher_scolarite = afficher_scolarite
+afficher_gestion_eleves = afficher_scolarite

@@ -27,7 +27,13 @@ def afficher_encaissement(niveau_actif="Collège"):
             st.warning(f"Aucune classe trouvée pour le cycle {niveau_actif}.")
             return
 
-        options_classes = {c.libelle: c.id for c in classes}
+        def get_classe_libelle(c):
+            for attr in ['libelle', 'nom', 'name', 'titre']:
+                if hasattr(c, attr) and getattr(c, attr):
+                    return getattr(c, attr)
+            return f"Classe {c.id}"
+
+        options_classes = {get_classe_libelle(c): c.id for c in classes}
         choix_classe = st.selectbox("Sélectionner la classe", list(options_classes.keys()))
         
         classe_id_sel = options_classes[choix_classe]
@@ -75,7 +81,8 @@ def afficher_encaissement(niveau_actif="Collège"):
                 montant_transport = st.number_input("Montant Transport (FCFA)", min_value=0.0, value=0.0, step=1000.0)
 
                 mode_reglement = st.selectbox("Mode de règlement", ["Espèces", "Orange Money / Moov Money", "Virement Bancaire", "Chèque"])
-                nom_payeur = st.text_input("Nom du payeur (Parent / Tuteur)", value=eleve_actif.tuteur or "")
+                tuteur_val = getattr(eleve_actif, 'tuteur', None) or getattr(eleve_actif, 'nom_parent', None) or ''
+                nom_payeur = st.text_input("Nom du payeur (Parent / Tuteur)", value=tuteur_val)
 
             total_versement = (
                 (montant_scolarite if payer_scolarite else 0) +
