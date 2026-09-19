@@ -11,9 +11,9 @@ import streamlit as st
 def afficher_rapports():
     st.subheader("📑 Rapports & Bilan Financier Consolidé")
     st.markdown(
-        "Synthèse macroscopique des flux de trésorerie avec ventilation"
-        " analytique des salaires (fixes et vacations horaires) et des charges"
-        " opérationnelles."
+        "Synthèse macroscopique des flux de trésorerie avec ventilation "
+        "analytique des salaires (fixes et vacations horaires) et des charges "
+        "opérationnelles."
     )
     st.markdown("---")
 
@@ -28,28 +28,27 @@ def afficher_rapports():
 
     db = SessionLocal()
     try:
-        # Récupération des classes du cycle
+        # Récupération des classes du cycle (filtrées strictement par school_id si présent)
         classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours)
         if hasattr(Classe, "deleted_at"):
             classes_query = classes_query.filter(Classe.deleted_at.is_(None))
-        if not is_super_admin and school_id:
+        if school_id:
             classes_query = classes_query.filter(Classe.school_id == school_id)
         classes_cycle = classes_query.all()
 
         classes_dict = {c.id: c for c in classes_cycle}
         classes_ids = list(classes_dict.keys())
 
-        # Récupération sécurisée des élèves (ISOLATION STRICTE PAR CYCLE)
+        # Récupération sécurisée des élèves (ISOLATION STRICTE PAR ÉCOLE ET PAR CYCLE)
         eleves_query = db.query(Eleve)
         if hasattr(Eleve, "deleted_at"):
             eleves_query = eleves_query.filter(Eleve.deleted_at.is_(None))
-        if not is_super_admin and school_id:
+        if school_id:
             eleves_query = eleves_query.filter(Eleve.school_id == school_id)
             
         if classes_ids:
             eleves_query = eleves_query.filter(Eleve.classe_id.in_(classes_ids))
         else:
-            # CORRECTION : Si aucune classe n'existe pour ce cycle, on renvoie une liste vide
             eleves_query = eleves_query.filter(Eleve.classe_id == -1)
 
         eleves = eleves_query.all()
@@ -95,9 +94,9 @@ def afficher_rapports():
                     "Mois", options=list(mois_options.keys()), key="filtre_mois_depenses"
                 )
 
-            # Récupération et ventilation analytique des dépenses et salaires avec filtrage temporel
+            # Récupération et ventilation analytique des dépenses filtrées par école active
             depenses_query = db.query(Depense).filter(Depense.cycle == cycle_en_cours)
-            if not is_super_admin and school_id:
+            if school_id:
                 depenses_query = depenses_query.filter(Depense.school_id == school_id)
             depenses_list = depenses_query.all()
 
@@ -123,7 +122,6 @@ def afficher_rapports():
                 elif (
                     "vacation" in cat
                     or "vacation" in lib
-                    .lower()
                     or "salaires & vacations" in cat
                 ):
                     total_salaires_vacations += montant_d
@@ -132,7 +130,6 @@ def afficher_rapports():
 
             resultat_net = total_recettes - total_depenses
 
-            # Calcul du montant total attendu pour le taux de recouvrement global
             total_attendu_global = 0.0
             for classe in classes_cycle:
                 frais_base = float(classe.frais_scolarite or 0.0) + float(
@@ -178,8 +175,8 @@ def afficher_rapports():
 
             st.markdown("---")
             st.markdown(
-                f"### Bilan Consolidé & Impayés par Classe — **{school_name}"
-                f" ({cycle_en_cours})**"
+                f"### Bilan Consolidé & Impayés par Classe — **{school_name} "
+                f"({cycle_en_cours})**"
             )
 
             if not classes_cycle:
@@ -241,12 +238,12 @@ def afficher_rapports():
 
         with tab_postes:
             st.markdown(
-                f"### Ventilation Théorique par Poste de Recette —"
-                f" **{cycle_en_cours}**"
+                f"### Ventilation Théorique par Poste de Recette — "
+                f"**{cycle_en_cours}**"
             )
             st.markdown(
-                "Analyse des redevances attendues ventilées par poste (Scolarité,"
-                " Inscription, COGES, Cantine, Transport)."
+                "Analyse des redevances attendues ventilées par poste (Scolarité, "
+                "Inscription, COGES, Cantine, Transport)."
             )
 
             total_scolarite = 0.0
@@ -307,12 +304,12 @@ def afficher_rapports():
 
         with tab_reductions:
             st.markdown(
-                f"### Registre Nominatif des Réductions & Exonérations —"
-                f" **{cycle_en_cours}**"
+                f"### Registre Nominatif des Réductions & Exonérations — "
+                f"**{cycle_en_cours}**"
             )
             st.markdown(
-                "Suivi détaillé de tous les élèves bénéficiant d'une remise sur leur"
-                " scolarité."
+                "Suivi détaillé de tous les élèves bénéficiant d'une remise sur leur "
+                "scolarité."
             )
 
             eleves_avec_reduction = [
@@ -323,8 +320,8 @@ def afficher_rapports():
 
             if not eleves_avec_reduction:
                 st.info(
-                    f"📌 Aucune réduction ou exonération n'a été enregistrée pour les"
-                    f" élèves du cycle **{cycle_en_cours}**."
+                    f"📌 Aucune réduction ou exonération n'a été enregistrée pour les "
+                    f"élèves du cycle **{cycle_en_cours}**."
                 )
             else:
                 data_red = []
