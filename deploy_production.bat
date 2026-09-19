@@ -3,12 +3,12 @@ setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
 echo ========================================================
-echo    MODE DIAGNOSTIC : DEPLOIEMENT STAGING VERS MAIN
+echo    DEPLOIEMENT OFFICIEL : STAGING VERS PRODUCTION (MAIN)
 echo ========================================================
 
 :: 1. Sauvegarde et validation sur staging
 echo [1/5] Sauvegarde et validation des modifications sur staging...
-git checkout staging
+git checkout staging >nul 2>&1
 if errorlevel 1 goto :DEBUG_ERREUR
 
 git add -A
@@ -25,28 +25,31 @@ echo [2/5] Passage sur main...
 git checkout -f main
 if errorlevel 1 goto :DEBUG_ERREUR
 
-:: 3. Pull main
+:: 3. Synchronisation de main
 echo [3/5] Synchronisation de main...
 git pull origin main
 if errorlevel 1 goto :DEBUG_ERREUR
 
-:: 4. Merge staging
+:: 4. Fusion securisee en forcant la priorite sur staging en cas de conflit sur le script
 echo [4/5] Fusion des modifications...
-git merge staging --no-edit -m "Release: merge staging into main"
-if errorlevel 1 goto :DEBUG_ERREUR
+git merge staging -X theirs --no-edit -m "Release: merge staging into main"
+if errorlevel 1 (
+    git merge --abort
+    goto :DEBUG_ERREUR
+)
 
 git push origin main
 if errorlevel 1 goto :DEBUG_ERREUR
 
-:: 5. Retour sur staging
-echo [5/5] Retour sur staging...
+:: 5. Retour et alignement absolu sur staging
+echo [5/5] Alignement de l'environnement de staging...
 git checkout -f staging
 git pull origin main
 git push origin staging
 
 echo.
 echo ========================================================
-echo    SUCCES TOTAL !
+echo    SUCCES TOTAL : TOUT EST SYNCHRONISE !
 echo ========================================================
 pause
 exit /b 0
@@ -56,5 +59,6 @@ echo.
 echo ========================================================
 echo    [ERREUR BLOQUEE] LE SCRIPT S'EST ARRETE ICI.
 echo ========================================================
+git checkout -f staging 2>nul
 pause
 exit /b 1
