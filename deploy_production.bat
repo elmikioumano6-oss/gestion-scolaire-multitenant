@@ -6,8 +6,8 @@ echo =================================================================
 echo    DEPLOIEMENT OFFICIEL : STAGING VERS PRODUCTION (MAIN)
 echo =================================================================
 
-:: 1. Enregistrement des derniers changements sur staging s'il y en a
-echo [1/5] Sauvegarde des modifications en cours sur staging...
+:: 0. Nettoyage et sauvegarde des modifications en cours sur staging
+echo [0/5] Preparation de l'environnement staging...
 git add .
 git diff --cached --quiet
 if errorlevel 1 (
@@ -15,10 +15,14 @@ if errorlevel 1 (
 )
 git push origin staging
 
+:: 1. Forcer le stockage temporaire du script de déploiement si besoin
+git add Deploy_Production.bat 2>nul
+git add deploy_production.bat 2>nul
+
 :: 2. Bascule sur main et recuperation
 echo.
 echo [2/5] Passage sur la branche main (production)...
-git checkout main
+git checkout -f main
 git pull origin main
 
 :: 3. Fusion de staging vers main en forçant les nouveautés
