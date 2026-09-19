@@ -4,4 +4,4 @@ __pycache__/
 database.db
 sauvegardes_locales/
 .streamlit/secrets.toml
-fusion.bat
+fusion.batdeploy_production.bat 
