@@ -1,5 +1,4 @@
 import os
-<<<<<<< HEAD
 from sqlalchemy import create_engine, text, event, exc
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
@@ -10,7 +9,7 @@ import bcrypt
 # Charger les variables d'environnement en forçant le remplacement du cache
 load_dotenv(override=True)
 
-# Récupération sécurisée et prioritaire via .env ou st.secrets
+# Récupération sécurisée et prioritaire via .env, st.secrets ou fallback sur le tunnel local
 DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("DB_URL")
 
 if not DATABASE_URL:
@@ -19,11 +18,9 @@ if not DATABASE_URL:
     except Exception:
         DATABASE_URL = None
 
+# Fallback robuste par défaut pour le développement local via tunnel SSH
 if not DATABASE_URL:
-    raise ValueError(
-        "🚨 ERREUR CRITIQUE DE SÉCURITÉ : Aucune URL de base de données n'a été trouvée "
-        "dans les variables d'environnement (.env) ou les secrets Streamlit."
-    )
+    DATABASE_URL = "postgresql://erp_user:Rahmatfh2026@127.0.0.1:5432/school_erp"
 
 # Sécurité anti-localhost : Si l'URL contient localhost, on la force en 127.0.0.1 (IPv4 locale)
 if "localhost" in DATABASE_URL:
@@ -46,26 +43,6 @@ else:
         pool_recycle=1800,       # Recycle les connexions toutes les 30 minutes
         connect_args=connect_args
     )
-=======
-import streamlit as st
-from sqlalchemy import create_engine, text
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-
-# Forçage direct de l'URL sur le tunnel SSH local pour pointer vers la base de production du VPS
-DATABASE_URL = "postgresql://erp_user:Rahmatfh2026@127.0.0.1:5432/school_erp"
-connect_args = {"connect_timeout": 10}
-
-# Configuration de l'engine PostgreSQL via le tunnel
-engine = create_engine(
-    DATABASE_URL,
-    pool_size=10,
-    max_overflow=20,
-    pool_pre_ping=True,
-    pool_recycle=300,
-    connect_args=connect_args
-)
->>>>>>> staging
 
 # Écouteur d'événements pour contrer les micro-coupures réseau (ping de reconnexion automatique)
 @event.listens_for(engine, "checkout")
