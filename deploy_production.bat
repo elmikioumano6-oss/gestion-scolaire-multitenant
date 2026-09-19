@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
-echo ================================= =======================
+echo ========================================================
 echo    DEPLOIEMENT OFFICIEL : STAGING VERS PRODUCTION (MAIN)
 echo ========================================================
 
