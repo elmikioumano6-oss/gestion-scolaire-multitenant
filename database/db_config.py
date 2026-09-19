@@ -1,4 +1,5 @@
 import os
+<<<<<<< HEAD
 from sqlalchemy import create_engine, text, event, exc
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
@@ -45,6 +46,26 @@ else:
         pool_recycle=1800,       # Recycle les connexions toutes les 30 minutes
         connect_args=connect_args
     )
+=======
+import streamlit as st
+from sqlalchemy import create_engine, text
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+
+# Forçage direct de l'URL sur le tunnel SSH local pour pointer vers la base de production du VPS
+DATABASE_URL = "postgresql://erp_user:Rahmatfh2026@127.0.0.1:5432/school_erp"
+connect_args = {"connect_timeout": 10}
+
+# Configuration de l'engine PostgreSQL via le tunnel
+engine = create_engine(
+    DATABASE_URL,
+    pool_size=10,
+    max_overflow=20,
+    pool_pre_ping=True,
+    pool_recycle=300,
+    connect_args=connect_args
+)
+>>>>>>> staging
 
 # Écouteur d'événements pour contrer les micro-coupures réseau (ping de reconnexion automatique)
 @event.listens_for(engine, "checkout")
