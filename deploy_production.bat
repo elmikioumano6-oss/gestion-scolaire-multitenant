@@ -24,6 +24,7 @@ if errorlevel 1 goto :ERREUR
 
 git diff --cached --quiet
 if errorlevel 1 (
+    echo Creation d'un commit de synchronisation...
     git commit -m "chore: sync staging"
     if errorlevel 1 goto :ERREUR
 ) else (
