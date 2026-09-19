@@ -152,6 +152,7 @@ class Matiere(Base):
     libelle = Column(String, index=True, nullable=True)
     code = Column(String, nullable=True)
     coefficient = Column(Float, default=1.0)
+    volume_horaire = Column(Float, default=0.0)  # <-- Ajouté pour correspondre à l'import
     cycle = Column(String, default="Collège", nullable=False)
 
     school = relationship("School", back_populates="matieres")
@@ -204,7 +205,7 @@ class Enseignant(Base):
     specialite = Column(String, nullable=True)
     qualite = Column(String, nullable=True)
     telephone = Column(String, nullable=True)
-    email = Column(String, nullable=True)  # <-- AJOUTÉ ICI
+    email = Column(String, nullable=True)
     statut = Column(String, default="Permanent")
     volume_horaire = Column(Float, default=18.0)
     classes_attribuees = Column(String, nullable=True)
@@ -266,7 +267,7 @@ class CahierTexte(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     
     date_cours = Column(DateTime, nullable=True)
-    date = synonym("date_cours")  # Synonyme SQLAlchemy pour supporter .desc() et les requêtes SQL
+    date = synonym("date_cours")
     
     duree_seance = Column(String(20), default="1 heure")
     titre = Column(String(255), nullable=True)

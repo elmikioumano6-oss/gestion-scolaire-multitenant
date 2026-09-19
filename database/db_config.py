@@ -40,7 +40,7 @@ else:
         pool_size=10,
         max_overflow=20,
         pool_pre_ping=True,      # Vérifie la santé de la connexion avant chaque requête
-        pool_recycle=1800,       # Recycle les connexions toutes les 30 minutes
+        pool_recycle=1800,        # Recycle les connexions toutes les 30 minutes
         connect_args=connect_args
     )
 
@@ -114,7 +114,8 @@ def init_db():
             "ALTER TABLE schools ADD COLUMN deleted_at TIMESTAMP;",
             "ALTER TABLE schools ADD COLUMN subdomain VARCHAR;",
             "ALTER TABLE classes ADD COLUMN deleted_at TIMESTAMP;",
-            "ALTER TABLE eleves ADD COLUMN deleted_at TIMESTAMP;"
+            "ALTER TABLE eleves ADD COLUMN deleted_at TIMESTAMP;",
+            "ALTER TABLE matieres ADD COLUMN volume_horaire FLOAT DEFAULT 0.0;"  # Ajouté ici
         ]
 
         with engine.connect() as conn:
