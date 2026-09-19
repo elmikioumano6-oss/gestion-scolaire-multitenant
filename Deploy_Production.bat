@@ -3,46 +3,37 @@ setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
 echo =================================================================
-echo    DEPLOIEMENT OFFICIEL EN PRODUCTION (BRANCHE MAIN)
+echo    DEPLOIEMENT OFFICIEL : STAGING VERS PRODUCTION (MAIN)
 echo =================================================================
-echo.
 
-:: --- 1. VERIFICATION DE L'ENVIRONNEMENT ---
-echo [etape 1/4] Verification de l'environnement Git...
-git --version >nul 2>&1
+:: 1. Sauvegarde et envoi des modifications en cours sur staging
+echo [1/4] Validation et envoi de staging vers GitHub...
+git add .
+git diff --cached --quiet
 if errorlevel 1 (
-    echo [ERREUR] Git n'est pas installe ou introuvable.
-    goto ERREUR_FIN
+    git commit -m "Mise a jour staging"
 )
+git push origin staging
 
-:: --- 2. BASCULE ET FUSION DEPUIS STAGING ---
+:: 2. Bascule forcee sur main et mise a jour
 echo.
-echo [etape 2/4] Bascule sur main et recuperation de staging...
-git checkout main
-if errorlevel 1 (
-    echo [ERREUR CRITIQUE] Impossible de basculer sur main.
-    goto ERREUR_FIN
-)
-
+echo [2/4] Passage sur la branche main (production)...
+git checkout -f main
 git pull origin main
-git merge staging -m "Merge branch 'staging' into main (Mise en production)"
-if errorlevel 1 (
-    echo [ERREUR CRITIQUE] Conflit détecté lors de la fusion avec staging. Veuillez le résoudre manuellement.
-    goto ERREUR_FIN
-)
 
-:: --- 3. ENVOI VERS GITHUB (PRODUCTION) ---
+:: 3. Fusion propre de staging vers main
 echo.
-echo [etape 3/4] Envoi de la production vers GitHub (main)...
+echo [3/4] Fusion des modifications de staging vers main...
+git merge staging -X theirs
 git push origin main
 if errorlevel 1 (
-    echo [ERREUR CRITIQUE] Echec du push GitHub sur main.
+    echo [ERREUR] Echec du push GitHub sur main.
     goto ERREUR_FIN
 )
 
-:: --- 4. RETOUR SUR STAGING POUR CONTINUER LE TRAVAIL ---
+:: 4. Retour sécurisé sur staging
 echo.
-echo [etape 4/4] Retour sur la branche staging pour la suite du dev...
+echo [4/4] Retour sur la branche staging...
 git checkout staging
 
 echo.
@@ -54,10 +45,9 @@ goto FIN
 :ERREUR_FIN
 echo.
 echo =================================================================
-echo    [ERREUR] LE DEPLOIEMENT EN PRODUCTION A ECHOUE.
+echo    [ERREUR CRITIQUE] LE DEPLOIEMENT A ETE ARRETE.
 echo =================================================================
-color 0C
+git checkout staging
 
 :FIN
 pause
-color 07
