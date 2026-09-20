@@ -7,3 +7,4 @@ sauvegardes_locales/
 fusion.batdeploy_production.bat 
 Deploy_Production.bat 
 deploy_production.bat 
+staging.db
