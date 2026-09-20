@@ -65,6 +65,7 @@ class Classe(Base):
     school = relationship("School", back_populates="classes")
     eleves = relationship("Eleve", back_populates="classe", cascade="all, delete-orphan")
     cahiers_texte = relationship("CahierTexte", back_populates="classe", cascade="all, delete-orphan")
+    matieres = relationship("Matiere", back_populates="classe", cascade="all, delete-orphan")
 
     @property
     def nom(self):
@@ -146,13 +147,16 @@ class Matiere(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False, index=True)
+    classe_id = Column(Integer, ForeignKey("classes.id"), nullable=True, index=True)
     libelle = Column(String, index=True, nullable=True)
     code = Column(String, nullable=True)
     coefficient = Column(Float, default=1.0)
     volume_horaire = Column(Float, default=0.0)
     cycle = Column(String, default="Collège", nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
 
     school = relationship("School", back_populates="matieres")
+    classe = relationship("Classe", back_populates="matieres")
     cahiers_texte = relationship("CahierTexte", back_populates="matiere", cascade="all, delete-orphan")
 
     @property
