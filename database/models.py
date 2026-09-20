@@ -16,11 +16,10 @@ class School(Base):
     contacts = Column(String(255), default="N/D")
     logo = Column(String(255), nullable=True)
     actif = Column(Boolean, default=True)
-    deleted_at = Column(DateTime, nullable=True)  # Soft Delete ERP
+    deleted_at = Column(DateTime, nullable=True)
     date_expiration = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.now)
 
-    # Nouveaux champs pour la gestion des comptes Démo / Essai
     is_trial = Column(Boolean, default=False)
     trial_expires_at = Column(DateTime, nullable=True)
 
@@ -61,7 +60,7 @@ class Classe(Base):
     frais_cantine = Column(Float, default=0.0)
     frais_coges = Column(Float, default=0.0)
 
-    deleted_at = Column(DateTime, nullable=True)  # Soft Delete ERP
+    deleted_at = Column(DateTime, nullable=True)
 
     school = relationship("School", back_populates="classes")
     eleves = relationship("Eleve", back_populates="classe", cascade="all, delete-orphan")
@@ -88,15 +87,13 @@ class Eleve(Base):
     cycle = Column(String, default="Collège")
     classe_id = Column(Integer, ForeignKey("classes.id"), nullable=True, index=True)
     tuteur = Column(String, nullable=True)
-
     photo = Column(Text, nullable=True)
 
     type_reduction = Column(String, default="Aucune")
     montant_reduction = Column(Float, default=0.0)
     document_justificatif = Column(String, nullable=True)
     parent_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
-
-    deleted_at = Column(DateTime, nullable=True)  # Soft Delete ERP
+    deleted_at = Column(DateTime, nullable=True)
 
     school = relationship("School", back_populates="eleves")
     classe = relationship("Classe", back_populates="eleves")
@@ -116,7 +113,7 @@ class User(Base):
 
     derniere_activite = Column(DateTime, nullable=True)
     changer_mdp_requis = Column(Boolean, default=True)
-    deleted_at = Column(DateTime, nullable=True)  # Soft Delete ERP
+    deleted_at = Column(DateTime, nullable=True)
 
     enseignant_id = Column(Integer, ForeignKey("enseignants.id"), nullable=True, index=True)
     eleve_id = Column(Integer, ForeignKey("eleves.id"), nullable=True, index=True)
@@ -152,7 +149,7 @@ class Matiere(Base):
     libelle = Column(String, index=True, nullable=True)
     code = Column(String, nullable=True)
     coefficient = Column(Float, default=1.0)
-    volume_horaire = Column(Float, default=0.0)  # <-- Ajouté pour correspondre à l'import
+    volume_horaire = Column(Float, default=0.0)
     cycle = Column(String, default="Collège", nullable=False)
 
     school = relationship("School", back_populates="matieres")

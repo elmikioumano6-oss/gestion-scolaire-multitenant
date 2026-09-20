@@ -2,18 +2,34 @@ from datetime import datetime
 from database.audit import log_action_erp
 from database.db_config import SessionLocal
 from database.models import ActivityLog, Classe, Eleve, Matiere, Note, School
-from database.queries import get_classes_cached, get_matieres_cached
 import pandas as pd
 import streamlit as st
+import unicodedata
 
+SYNONYMES_MATIERES = {
+    "sciences physiques": "physique chimie",
+    "physique chimie": "physique chimie",
+    "svt": "science de la vie et de la terre",
+    "science de la vie et de la terre": "science de la vie et de la terre",
+    "eps": "education physique et sportive",
+    "education physique et sportive": "education physique et sportive",
+    "economie familiale": "economie familiale et sociale",
+    "economie familiale et sociale": "economie familiale et sociale",
+    "histoire geographie": "histoire geographie",
+    "histoire-geographie": "histoire geographie",
+}
+
+def normaliser_chaine(texte):
+    if not texte or pd.isna(texte):
+        return ""
+    nfkd = unicodedata.normalize("NFKD", str(texte))
+    sans_accent = "".join([c for c in nfkd if not unicodedata.combining(c)])
+    nettoye = " ".join(sans_accent.lower().replace("-", " ").replace("_", " ").split())
+    return SYNONYMES_MATIERES.get(nettoye, nettoye)
 
 def afficher_notes():
     st.subheader("📝 Saisie Globale des Notes (Mode Grille Matricielle)")
-    st.markdown(
-        "Interface matricielle : les élèves en lignes, les matières en colonnes,"
-        " avec sélection de la période et du type d'évaluation (incluant Compo)"
-        " pour une persistance directe en base de données."
-    )
+    st.markdown("Interface matricielle : les élèves en lignes, les matières en colonnes unifiées.")
     st.markdown("---")
 
     school_id = st.session_state.get("school_id")
@@ -22,21 +38,14 @@ def afficher_notes():
     db = SessionLocal()
     try:
         if school_id:
-            ecole_courante = (
-                db.query(School).filter(School.id == school_id).first()
-            )
-            school_name = (
-                ecole_courante.nom
-                if ecole_courante
-                else st.session_state.get("school_name", "Établissement")
-            )
+            ecole_courante = db.query(School).filter(School.id == school_id).first()
+            school_name = ecole_courante.nom if ecole_courante else st.session_state.get("school_name", "Établissement")
         else:
             school_name = st.session_state.get("school_name", "Établissement")
     finally:
         db.close()
 
     cycle_en_cours = st.session_state.get("cycle_actif", "Collège")
-
     if not school_id and not is_super_admin:
         st.warning("⚠️ Veuillez vous connecter pour accéder à cette section.")
         return
@@ -48,173 +57,88 @@ def afficher_notes():
             ecole_defaut = db.query(School).first()
             target_school_id = ecole_defaut.id if ecole_defaut else 1
 
-        classes_query = db.query(Classe).filter(
-            Classe.cycle == cycle_en_cours, Classe.deleted_at.is_(None)
-        )
+        classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours, Classe.deleted_at.is_(None))
+        matieres_query = db.query(Matiere).filter(Matiere.cycle == cycle_en_cours)
+
         if not is_super_admin and school_id:
             classes_query = classes_query.filter(Classe.school_id == school_id)
-        else:
-            classes_query = classes_query.filter(
-                Classe.school_id == target_school_id
-            )
-        classes_cycle = classes_query.all()
-
-        matieres_query = db.query(Matiere).filter(Matiere.cycle == cycle_en_cours)
-        if not is_super_admin and school_id:
             matieres_query = matieres_query.filter(Matiere.school_id == school_id)
         else:
-            matieres_query = matieres_query.filter(
-                Matiere.school_id == target_school_id
-            )
-        matieres_cycle = matieres_query.all()
+            classes_query = classes_query.filter(Classe.school_id == target_school_id)
+            matieres_query = matieres_query.filter(Matiere.school_id == target_school_id)
 
-        st.markdown(
-            f"### Saisie Matricielle des Notes — **{school_name} ({cycle_en_cours})**"
-        )
+        classes_cycle = classes_query.all()
+        matieres_brutes = matieres_query.all()
+
+        # DÉDUPLICATION DES MATIÈRES
+        matieres_uniques_dict = {}
+        for mat in matieres_brutes:
+            nom_brut = mat.libelle if hasattr(mat, 'libelle') and mat.libelle else getattr(mat, 'nom', 'Matière')
+            norm_key = normaliser_chaine(nom_brut)
+            if norm_key not in matieres_uniques_dict:
+                matieres_uniques_dict[norm_key] = mat
+        matieres_cycle = list(matieres_uniques_dict.values())
+
+        st.markdown(f"### Saisie Matricielle des Notes — **{school_name} ({cycle_en_cours})**")
 
         if not classes_cycle or not matieres_cycle:
-            st.warning(
-                f"⚠️ Veuillez vous assurer que des classes et des matières sont"
-                f" configurées pour le cycle **{cycle_en_cours}** dans l'établissement"
-                f" **{school_name}**."
-            )
+            st.warning(f"⚠️ Veuillez configurer des classes et des matières pour le cycle **{cycle_en_cours}**.")
             return
 
         noms_classes = [c.libelle for c in classes_cycle]
-
         col_f1, col_f2, col_f3 = st.columns(3)
         with col_f1:
-            classe_choisie = st.selectbox(
-                "Classe", noms_classes, key="notes_classe_matrix"
-            )
+            classe_choisie = st.selectbox("Classe", noms_classes, key="notes_classe_matrix")
         with col_f2:
-            semestre_choisi = st.selectbox(
-                "Période / Semestre",
-                [
-                    "Semestre 1",
-                    "Semestre 2",
-                    "Trimestre 1",
-                    "Trimestre 2",
-                    "Trimestre 3",
-                ],
-                key="notes_semestre_matrix",
-            )
+            semestre_choisi = st.selectbox("Période / Semestre", ["Semestre 1", "Semestre 2", "Trimestre 1", "Trimestre 2", "Trimestre 3"], key="notes_semestre_matrix")
         with col_f3:
-            type_eval = st.selectbox(
-                "Type d'évaluation",
-                ["Interro 1", "Interro 2", "Devoir 1", "Devoir 2", "Compo"],
-                key="notes_type_eval_matrix",
-            )
+            type_eval = st.selectbox("Type d'évaluation", ["Interro 1", "Interro 2", "Devoir 1", "Devoir 2", "Compo"], key="notes_type_eval_matrix")
 
-        classe_obj = next(
-            (c for c in classes_cycle if c.libelle == classe_choisie), None
-        )
+        classe_obj = next((c for c in classes_cycle if c.libelle == classe_choisie), None)
         if classe_obj:
-            eleves_query = db.query(Eleve).filter(
-                Eleve.classe_id == classe_obj.id, Eleve.deleted_at.is_(None)
-            )
+            eleves_query = db.query(Eleve).filter(Eleve.classe_id == classe_obj.id, Eleve.deleted_at.is_(None))
             if not is_super_admin and school_id:
                 eleves_query = eleves_query.filter(Eleve.school_id == school_id)
             else:
-                eleves_query = eleves_query.filter(
-                    Eleve.school_id == target_school_id
-                )
+                eleves_query = eleves_query.filter(Eleve.school_id == target_school_id)
             eleves = eleves_query.order_by(Eleve.nom).all()
 
             if not eleves:
                 st.info(f"Aucun élève enregistré dans la classe **{classe_choisie}**.")
             else:
-                st.success(
-                    f"Grille active pour **{classe_choisie}** | **{semestre_choisi}** |"
-                    f" **{type_eval}** ({len(eleves)} élèves, {len(matieres_cycle)}"
-                    " matières)."
-                )
+                st.success(f"Grille active pour **{classe_choisie}** | **{semestre_choisi}** | **{type_eval}** ({len(eleves)} élèves).")
 
-                notes_existantes = (
-                    db.query(Note)
-                    .join(Eleve)
-                    .filter(
-                        Note.school_id == target_school_id,
-                        Eleve.classe_id == classe_obj.id,
-                        Note.semestre == semestre_choisi,
-                        Note.type_evaluation == type_eval,
-                    )
-                    .all()
-                )
+                notes_existantes = db.query(Note).join(Eleve).filter(
+                    Note.school_id == target_school_id,
+                    Eleve.classe_id == classe_obj.id,
+                    Note.semestre == semestre_choisi,
+                    Note.type_evaluation == type_eval,
+                ).all()
 
-                dict_notes = {
-                    (n.eleve_id, n.matiere_id): n.valeur for n in notes_existantes
-                }
+                dict_notes = {(n.eleve_id, n.matiere_id): n.valeur for n in notes_existantes}
 
                 data_matrice = []
                 for e in eleves:
-                    ligne = {
-                        "eleve_id": e.id,
-                        "Matricule": e.matricule,
-                        "Nom & Prénom": f"{e.nom} {e.prenom}",
-                    }
-                    
+                    ligne = {"eleve_id": e.id, "Matricule": e.matricule, "Nom & Prénom": f"{e.nom} {e.prenom}"}
                     for mat in matieres_cycle:
-                        mat_lib = mat.libelle if hasattr(mat, 'libelle') else getattr(mat, 'nom', '')
+                        mat_lib = (mat.libelle if hasattr(mat, 'libelle') else getattr(mat, 'nom', '')).title()
                         val_note = float(dict_notes.get((e.id, mat.id), 0.0))
                         ligne[mat_lib] = val_note
-
                     data_matrice.append(ligne)
 
                 df_matrice = pd.DataFrame(data_matrice)
-
                 column_config = {
                     "eleve_id": None,
                     "Matricule": st.column_config.TextColumn("Matricule", disabled=True),
-                    "Nom & Prénom": st.column_config.TextColumn(
-                        "Nom & Prénom", disabled=True
-                    ),
+                    "Nom & Prénom": st.column_config.TextColumn("Nom & Prénom", disabled=True),
                 }
                 for mat in matieres_cycle:
-                    mat_lib = mat.libelle if hasattr(mat, 'libelle') else getattr(mat, 'nom', '')
+                    mat_lib = (mat.libelle if hasattr(mat, 'libelle') else getattr(mat, 'nom', '')).title()
                     max_val = 18.0 if "conduite" in mat_lib.lower() else 20.0
-                    column_config[mat_lib] = st.column_config.NumberColumn(
-                        mat_lib,
-                        min_value=0.0,
-                        max_value=max_val,
-                        step=0.25,
-                        format="%.2f",
-                    )
+                    column_config[mat_lib] = st.column_config.NumberColumn(mat_lib, min_value=0.0, max_value=max_val, step=0.25, format="%.2f")
 
                 editor_key = f"editor_matrix_{classe_choisie}_{semestre_choisi}_{type_eval}"
-                edited_df = st.data_editor(
-                    df_matrice,
-                    column_config=column_config,
-                    hide_index=True,
-                    use_container_width=True,
-                    key=editor_key,
-                )
-
-                # --- CALCUL DYNAMIQUE DE LA MOYENNE BASÉ SUR LES DONNÉES SAISIES ---
-                dict_coeffs = { (mat.libelle if hasattr(mat, 'libelle') else getattr(mat, 'nom', '')): (mat.coefficient or 1.0) for mat in matieres_cycle }
-                
-                rows_with_moyenne = []
-                for _, row in edited_df.iterrows():
-                    r_dict = row.to_dict()
-                    total_pts = 0.0
-                    total_coefs = 0.0
-                    for mat in matieres_cycle:
-                        mat_lib = mat.libelle if hasattr(mat, 'libelle') else getattr(mat, 'nom', '')
-                        val = float(r_dict.get(mat_lib, 0.0) or 0.0)
-                        coef = dict_coeffs.get(mat_lib, 1.0)
-                        total_pts += val * coef
-                        total_coefs += coef
-                    
-                    moy = round(total_pts / total_coefs, 2) if total_coefs > 0 else 0.0
-                    r_dict["Moyenne calculée"] = f"{moy:.2f} / 20"
-                    rows_with_moyenne.append(r_dict)
-
-                df_display_preview = pd.DataFrame(rows_with_moyenne)
-                liste_noms_mat = [mat.libelle if hasattr(mat, 'libelle') else getattr(mat, 'nom', '') for mat in matieres_cycle]
-                cols_to_show = ["Matricule", "Nom & Prénom"] + liste_noms_mat + ["Moyenne calculée"]
-                
-                st.markdown("#### 📋 Aperçu dynamique des moyennes en temps réel")
-                st.dataframe(df_display_preview[[c for c in cols_to_show if c in df_display_preview.columns]], use_container_width=True, hide_index=True)
+                edited_df = st.data_editor(df_matrice, column_config=column_config, hide_index=True, use_container_width=True, key=editor_key)
 
                 if st.button("💾 Enregistrer toutes les notes de la classe", type="primary"):
                     modifications_count = 0
@@ -222,29 +146,22 @@ def afficher_notes():
                         eleve_id = row["eleve_id"]
                         nom_eleve = row["Nom & Prénom"]
                         for mat in matieres_cycle:
-                            mat_lib = mat.libelle if hasattr(mat, 'libelle') else getattr(mat, 'nom', '')
+                            mat_lib = (mat.libelle if hasattr(mat, 'libelle') else getattr(mat, 'nom', '')).title()
                             valeur_saisie = float(row[mat_lib])
                             ancienne_valeur = dict_notes.get((eleve_id, mat.id), 0.0)
 
                             if ancienne_valeur != valeur_saisie:
-                                note_obj = (
-                                    db.query(Note)
-                                    .filter(
-                                        Note.school_id == target_school_id,
-                                        Note.eleve_id == eleve_id,
-                                        Note.matiere_id == mat.id,
-                                        Note.semestre == semestre_choisi,
-                                        Note.type_evaluation == type_eval,
-                                    )
-                                    .first()
-                                )
+                                note_obj = db.query(Note).filter(
+                                    Note.school_id == target_school_id,
+                                    Note.eleve_id == eleve_id,
+                                    Note.matiere_id == mat.id,
+                                    Note.semestre == semestre_choisi,
+                                    Note.type_evaluation == type_eval,
+                                ).first()
 
                                 if note_obj:
                                     note_obj.valeur = valeur_saisie
-                                    action_desc = (
-                                        f"Modification de note ({type_eval} - {mat_lib}) pour"
-                                        f" {nom_eleve}"
-                                    )
+                                    action_desc = f"Modification de note ({type_eval} - {mat_lib}) pour {nom_eleve}"
                                     statut_log = "Critique"
                                 else:
                                     note_obj = Note(
@@ -256,35 +173,20 @@ def afficher_notes():
                                         type_evaluation=type_eval,
                                     )
                                     db.add(note_obj)
-                                    action_desc = (
-                                        f"Attribution de note ({type_eval} - {mat_lib}) à"
-                                        f" {nom_eleve}"
-                                    )
+                                    action_desc = f"Attribution de note ({type_eval} - {mat_lib}) à {nom_eleve}"
                                     statut_log = "Succès"
 
                                 modifications_count += 1
-
-                                log_action_erp(
-                                    module="Saisie des notes",
-                                    action=action_desc,
-                                    statut=statut_log,
-                                    valeur_avant=f"{ancienne_valeur} / 20",
-                                    valeur_apres=f"{valeur_saisie} / 20",
-                                )
+                                log_action_erp(module="Saisie des notes", action=action_desc, statut=statut_log, valeur_avant=f"{ancienne_valeur} / 20", valeur_apres=f"{valeur_saisie} / 20")
 
                     db.commit()
-
-                    st.success(
-                        f"✅ Enregistrement réussi ! {modifications_count} modification(s)"
-                        " tracée(s) avec le Diff Avant/Après dans l'ERP."
-                    )
+                    st.success(f"✅ Enregistrement réussi ! {modifications_count} modification(s) tracée(s).")
                     st.rerun()
 
     finally:
         db.close()
 
-
-# Alias de compatibilité complète pour le routeur
+# Expositions de compatibilité pour le routeur
 afficher_saisie_notes = afficher_notes
 afficher_gestion_notes = afficher_notes
 afficher_notes = afficher_notes
