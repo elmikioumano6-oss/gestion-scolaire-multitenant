@@ -145,8 +145,9 @@ def afficher_bulletins(niveau_actif="Collège"):
         db.add(nouveau_log)
         db.commit()
 
+        # --- Filtrage strict par classe_id ---
         matieres_query = db.query(Matiere).filter(
-            Matiere.cycle == niveau_actif
+            Matiere.classe_id == classe_id
         )
         if hasattr(Matiere, "deleted_at"):
             matieres_query = matieres_query.filter(Matiere.deleted_at.is_(None))
@@ -160,28 +161,49 @@ def afficher_bulletins(niveau_actif="Collège"):
                 Matiere.school_id == target_school_id
             )
 
-        matieres_brutes = matieres_query.all()
-        matieres_dict_unique = {}
-        for m in matieres_brutes:
-            nom_m = get_label(m)
-            if nom_m not in matieres_dict_unique:
-                matieres_dict_unique[nom_m] = m
-
-        matieres_toutes = list(matieres_dict_unique.values())
+        matieres = matieres_query.all()
 
         is_troisieme = (
             "3" in classe_choisie.upper()
             or "TROISIEME" in classe_choisie.upper()
         )
-        matieres = []
-        for m in matieres_toutes:
+        matieres_filtrees = []
+        for m in matieres:
             nom_m_lower = get_label(m).lower()
             if is_troisieme and (
                 "economie familiale" in nom_m_lower
                 or "familiale et sociale" in nom_m_lower
             ):
                 continue
-            matieres.append(m)
+            matieres_filtrees.append(m)
+        matieres = matieres_filtrees
+
+        # --- TRI PÉDAGOGIQUE STRICT ET HIÉRARCHISÉ DES MATIÈRES ---
+        ordre_matieres = [
+            "français", "francais", "littérature", "litterature", "philosophie", "philo",
+            "mathématiques", "mathematiques", "maths",
+            "sciences physiques", "physique-chimie",
+            "science de la vie et de la terre", "sciences de la vie et de la terre", "svt", "sciences naturelles", "science naturelle",
+            "histoire-géographie", "histoire-geographie", "histoire", "géographie", "geographie",
+            "anglais", "espagnol", "allemand", "arabe",
+            "éducation civique", "education civique", "civique",
+            "économie familiale", "economie familiale", "économie familiale et sociale", "economie familiale et sociale",
+            "eps", "éducation physique", "education physique",
+            "physique", "chimie",
+            "arts plastiques", "musique"
+        ]
+
+        def get_priorite_matiere(m):
+            nom_m = get_label(m).lower().strip()
+            coef = int(getattr(m, "coefficient", 2) or 2)
+            if "conduite" in nom_m:
+                return (2, 999, -coef, nom_m)
+            for index, mot_cle in enumerate(ordre_matieres):
+                if mot_cle in nom_m:
+                    return (1, index, -coef, nom_m)
+            return (1, 500, -coef, nom_m)
+
+        matieres = sorted(matieres, key=get_priorite_matiere)
 
         toutes_notes_classe = (
             db.query(Note).join(Eleve).filter(Eleve.classe_id == classe_id).all()
@@ -228,6 +250,18 @@ def afficher_bulletins(niveau_actif="Collège"):
 
         matrice_notes, moyennes_generales = calculer_moyennes_notes(notes_periode)
         _, moyennes_s1 = calculer_moyennes_notes(notes_s1)
+
+        # --- CALCUL DYNAMIQUE DE LA CONDUITE DE LA CLASSE ---
+        conduite_obj_global = next(
+            (m for m in matieres if "conduite" in get_label(m).lower()), None
+        )
+        conduite_classe_val = 0.0  
+        if conduite_obj_global:
+            toutes_notes_conduite = [
+                float(n.valeur) for n in notes_periode if getattr(n, "matiere_id", None) == conduite_obj_global.id
+            ]
+            if toutes_notes_conduite:
+                conduite_classe_val = round(sum(toutes_notes_conduite) / len(toutes_notes_conduite), 2)
 
         moyennes_annuelles = {}
         for e in eleves:
@@ -322,34 +356,47 @@ def afficher_bulletins(niveau_actif="Collège"):
                 ),
                 None,
             )
-            note_conduite_eleve = 18.0
+
+            box_checked = '<span style="display:inline-block; width:11px; height:11px; border:1px solid #000; text-align:center; line-height:10px; font-weight:bold; font-size:9px; background-color:#e2e8f0; margin-right:3px;">X</span>'
+            box_unchecked = '<span style="display:inline-block; width:11px; height:11px; border:1px solid #000; margin-right:3px; vertical-align:middle;"></span>'
+
+            # Gestion dynamique de la conduite
+            chk_bien = box_unchecked
+            chk_passable = box_unchecked
+            chk_mal = box_unchecked
+            chk_avertissement = box_unchecked
+            chk_blame = box_unchecked
+
             if conduite_obj:
                 notes_cond_list = matrice_notes.get(eleve_obj.id, {}).get(
                     conduite_obj.id, []
                 )
                 if notes_cond_list:
-                    note_conduite_eleve = sum(notes_cond_list) / len(
-                        notes_cond_list
-                    )
+                    note_conduite_eleve = sum(notes_cond_list) / len(notes_cond_list)
+                    chk_bien = box_checked if note_conduite_eleve >= 14 else box_unchecked
+                    chk_passable = box_checked if 10 <= note_conduite_eleve < 14 else box_unchecked
+                    chk_mal = box_checked if 8 <= note_conduite_eleve < 10 else box_unchecked
+                    chk_avertissement = box_checked if 6 <= note_conduite_eleve < 8 else box_unchecked
+                    chk_blame = box_checked if note_conduite_eleve < 6 else box_unchecked
 
-            box_checked = '<span style="display:inline-block; width:11px; height:11px; border:1px solid #000; text-align:center; line-height:10px; font-weight:bold; font-size:9px; background-color:#e2e8f0; margin-right:3px;">X</span>'
-            box_unchecked = '<span style="display:inline-block; width:11px; height:11px; border:1px solid #000; margin-right:3px; vertical-align:middle;"></span>'
+            # Gestion dynamique du tableau d'honneur
+            chk_inscrit = box_unchecked
+            chk_felicitations = box_unchecked
+            chk_encouragements = box_unchecked
+            chk_non_inscrit = box_unchecked
 
-            chk_bien = box_checked if note_conduite_eleve >= 14 else box_unchecked
-            chk_passable = box_checked if 10 <= note_conduite_eleve < 14 else box_unchecked
-            chk_mal = box_checked if 8 <= note_conduite_eleve < 10 else box_unchecked
-            chk_avertissement = box_checked if 6 <= note_conduite_eleve < 8 else box_unchecked
-            chk_blame = box_checked if note_conduite_eleve < 6 else box_unchecked
+            notes_eleve = matrice_notes.get(eleve_obj.id, {})
+            has_notes = any(notes_eleve.get(m.id) for m in matieres if m.id != (conduite_obj.id if conduite_obj else None))
 
-            chk_inscrit = box_checked if moy_eleve >= 10 else box_unchecked
-            chk_felicitations = box_checked if moy_eleve >= 16 else box_unchecked
-            chk_encouragements = box_checked if 14 <= moy_eleve < 16 else box_unchecked
-            chk_non_inscrit = box_checked if moy_eleve < 10 else box_unchecked
+            if has_notes:
+                chk_inscrit = box_checked if moy_eleve >= 10 else box_unchecked
+                chk_felicitations = box_checked if moy_eleve >= 16 else box_unchecked
+                chk_encouragements = box_checked if 14 <= moy_eleve < 16 else box_unchecked
+                chk_non_inscrit = box_checked if moy_eleve < 10 else box_unchecked
 
             lignes_html = ""
             total_coef = 0
             total_moyen_coef = 0
-            notes_eleve = matrice_notes.get(eleve_obj.id, {})
 
             for m in matieres:
                 m_nom = get_label(m)
@@ -384,19 +431,19 @@ def afficher_bulletins(niveau_actif="Collège"):
                     note_classe_str = ""
                     note_compo_str = ""
                     moyen_coef_str = ""
-                    appreciation = "Non noté"
+                    appreciation = ""
                     rang_str = ""
 
                 lignes_html += f"""
-                            <tr style="height: 28px; min-height: 28px; max-height: 28px;">
-                                <td style="border: 1px solid #000080; padding: 4px 8px; text-align: left; font-size: 0.8rem; height: 28px; line-height: 18px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;">{m_nom}</td>
-                                <td style="border: 1px solid #000080; padding: 4px 8px; text-align: center; font-size: 0.8rem; height: 28px; line-height: 18px;">{note_classe_str}</td>
-                                <td style="border: 1px solid #000080; padding: 4px 8px; text-align: center; font-size: 0.8rem; height: 28px; line-height: 18px;">{note_compo_str}</td>
-                                <td style="border: 1px solid #000080; padding: 4px 8px; text-align: center; font-size: 0.8rem; height: 28px; line-height: 18px;">{coef}</td>
-                                <td style="border: 1px solid #000080; padding: 4px 8px; text-align: center; font-size: 0.8rem; height: 28px; line-height: 18px;">{moyen_coef_str}</td>
-                                <td style="border: 1px solid #000080; padding: 4px 8px; text-align: center; font-size: 0.8rem; height: 28px; line-height: 18px;">{rang_str}</td>
-                                <td style="border: 1px solid #000080; padding: 4px 8px; text-align: center; font-size: 0.8rem; height: 28px; line-height: 18px;">{appreciation if note_classe_str else ''}</td>
-                                <td style="border: 1px solid #000080; padding: 4px 8px; text-align: center; font-size: 0.8rem; height: 28px; line-height: 18px;"></td>
+                            <tr style="height: 28px; min-height: 28px;">
+                                <td style="border: 1px solid #000080; padding: 4px 6px; text-align: left; font-size: 0.75rem; line-height: 14px; word-break: break-word;">{m_nom}</td>
+                                <td style="border: 1px solid #000080; padding: 4px 8px; text-align: center; font-size: 0.8rem;">{note_classe_str}</td>
+                                <td style="border: 1px solid #000080; padding: 4px 8px; text-align: center; font-size: 0.8rem;">{note_compo_str}</td>
+                                <td style="border: 1px solid #000080; padding: 4px 8px; text-align: center; font-size: 0.8rem;">{coef}</td>
+                                <td style="border: 1px solid #000080; padding: 4px 8px; text-align: center; font-size: 0.8rem;">{moyen_coef_str}</td>
+                                <td style="border: 1px solid #000080; padding: 4px 8px; text-align: center; font-size: 0.8rem;">{rang_str}</td>
+                                <td style="border: 1px solid #000080; padding: 4px 8px; text-align: center; font-size: 0.8rem;">{appreciation}</td>
+                                <td style="border: 1px solid #000080; padding: 4px 8px; text-align: center; font-size: 0.8rem;"></td>
                             </tr>
                         """
 
@@ -414,8 +461,6 @@ def afficher_bulletins(niveau_actif="Collège"):
 
             verification_url = f"https://api.whatsapp.com/send?phone=22799797163&text=Bonjour,%20je%20souhaite%20verifier%20l'authenticite%20du%20bulletin%20de%20l'eleve%20{getattr(eleve_obj, 'nom', '')}%20{getattr(eleve_obj, 'prenom', '')}%20(Matricule:%20{getattr(eleve_obj, 'matricule', 'N/A')})."
             qr_code_api = f"https://api.qrserver.com/v1/create-qr-code/?size=100x100&data={verification_url}"
-
-            conduite_classe_val = 18.0
 
             bulletin_html = f"""
                     <!DOCTYPE html>
@@ -525,14 +570,14 @@ def afficher_bulletins(niveau_actif="Collège"):
 
                             <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-bottom: 6px; table-layout: fixed;">
                                 <colgroup>
-                                    <col style="width: 24%;">
-                                    <col style="width: 10%;">
+                                    <col style="width: 28%;">
+                                    <col style="width: 9%;">
+                                    <col style="width: 9%;">
+                                    <col style="width: 6%;">
                                     <col style="width: 10%;">
                                     <col style="width: 7%;">
-                                    <col style="width: 11%;">
-                                    <col style="width: 8%;">
+                                    <col style="width: 15%;">
                                     <col style="width: 16%;">
-                                    <col style="width: 14%;">
                                 </colgroup>
                                 <thead>
                                     <tr style="background-color: #800020; color: #FFFFFF; text-align: center; height: 28px;">
