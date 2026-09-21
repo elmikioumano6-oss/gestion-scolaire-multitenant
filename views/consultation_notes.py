@@ -1,5 +1,4 @@
 from datetime import datetime
-from io import BytesIO
 from database.db_config import SessionLocal
 from database.models import ActivityLog, AnneeScolaire, Classe, Eleve, Matiere, Note, School
 import pandas as pd
@@ -88,26 +87,13 @@ def afficher_consultation_notes():
             target_school_id = ecole_defaut.id if ecole_defaut else 1
 
         classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours)
-        matieres_query = db.query(Matiere).filter(Matiere.cycle == cycle_en_cours)
 
         if not is_super_admin and school_id:
             classes_query = classes_query.filter(Classe.school_id == school_id)
-            matieres_query = matieres_query.filter(Matiere.school_id == school_id)
         else:
             classes_query = classes_query.filter(Classe.school_id == target_school_id)
-            matieres_query = matieres_query.filter(Matiere.school_id == target_school_id)
 
         classes_cycle = classes_query.all()
-        matieres_brutes = matieres_query.all()
-
-        # DÉDUPLICATION INTELLIGENTE DES MATIÈRES VIA LE DICTIONNAIRE DE SYNONYMES
-        matieres_uniques_dict = {}
-        for mat in matieres_brutes:
-            nom_brut = mat.libelle if hasattr(mat, 'libelle') and mat.libelle else getattr(mat, 'nom', 'Matière')
-            norm_key = normaliser_chaine(nom_brut)
-            if norm_key not in matieres_uniques_dict:
-                matieres_uniques_dict[norm_key] = mat
-        matieres_cycle = list(matieres_uniques_dict.values())
 
         st.markdown('<div class="printable-area">', unsafe_allow_html=True)
         st.markdown(f"### Consultation des Notes ({libelle_annee}) — **{school_name} ({cycle_en_cours})**")
@@ -129,6 +115,17 @@ def afficher_consultation_notes():
 
         classe_obj = next((c for c in classes_cycle if c.libelle == classe_choisie), None)
         if classe_obj:
+            # --- RÉCUPÉRATION STRICTE DES MATIÈRES DE LA CLASSE SÉLECTIONNÉE ---
+            matieres_query = db.query(Matiere).filter(Matiere.classe_id == classe_obj.id)
+            if not is_super_admin and school_id:
+                matieres_query = matieres_query.filter(Matiere.school_id == school_id)
+            else:
+                matieres_query = matieres_query.filter(Matiere.school_id == target_school_id)
+            if hasattr(Matiere, "deleted_at"):
+                matieres_query = matieres_query.filter(Matiere.deleted_at.is_(None))
+            
+            matieres_classe = matieres_query.all()
+
             eleves_query = db.query(Eleve).filter(Eleve.classe_id == classe_obj.id)
             if not is_super_admin and school_id:
                 eleves_query = eleves_query.filter(Eleve.school_id == school_id)
@@ -136,7 +133,10 @@ def afficher_consultation_notes():
                 eleves_query = eleves_query.filter(Eleve.school_id == target_school_id)
             eleves = eleves_query.order_by(Eleve.nom).all()
 
-            if not eleves:
+            if not matieres_classe:
+                st.info(f"Aucune matière configurée pour la classe de **{classe_choisie}**.")
+                st.markdown("</div>", unsafe_allow_html=True)
+            elif not eleves:
                 st.info(f"Aucun élève enregistré dans la classe de **{classe_choisie}**.")
                 st.markdown("</div>", unsafe_allow_html=True)
             else:
@@ -151,7 +151,7 @@ def afficher_consultation_notes():
                     ).all()
 
                     dict_notes = {(n.eleve_id, n.matiere_id): float(n.valeur) for n in notes_db if n.valeur is not None}
-                    dict_coeffs = {m.id: (m.coefficient or 1.0) for m in matieres_cycle}
+                    dict_coeffs = {m.id: (m.coefficient or 1.0) for m in matieres_classe}
 
                     data_tableau = []
                     for e in eleves:
@@ -160,7 +160,7 @@ def afficher_consultation_notes():
                         total_pts = 0.0
                         total_coefs = 0.0
 
-                        for mat in matieres_cycle:
+                        for mat in matieres_classe:
                             mat_lib = (mat.libelle if hasattr(mat, 'libelle') else getattr(mat, 'nom', '')).title()
                             val_note = dict_notes.get((e.id, mat.id), 0.0)
                             ligne[mat_lib] = f"{val_note:.2f}"

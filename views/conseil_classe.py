@@ -5,15 +5,37 @@ from database.models import ActivityLog, Classe, Eleve, Matiere, Note, School
 from database.queries import get_classes_cached, get_matieres_cached
 import pandas as pd
 import streamlit as st
+import unicodedata
+
+SYNONYMES_MATIERES = {
+    "sciences physiques": "physique chimie",
+    "physique chimie": "physique chimie",
+    "svt": "science de la vie et de la terre",
+    "science de la vie et de la terre": "science de la vie et de la terre",
+    "eps": "education physique et sportive",
+    "education physique et sportive": "education physique et sportive",
+    "economie familiale": "economie familiale et sociale",
+    "economie familiale et sociale": "economie familiale et sociale",
+    "histoire geographie": "histoire geographie",
+    "histoire-geographie": "histoire geographie",
+}
+
+def normaliser_chaine(texte):
+    if not texte or pd.isna(texte):
+        return ""
+    nfkd = unicodedata.normalize("NFKD", str(texte))
+    sans_accent = "".join([c for c in nfkd if not unicodedata.combining(c)])
+    nettoye = " ".join(sans_accent.lower().replace("-", " ").replace("_", " ").split())
+    return SYNONYMES_MATIERES.get(nettoye, nettoye)
 
 
 def afficher_conseil_classe():
     st.subheader("🏆 Conseil de Classe & Délibérations Officielles")
     st.markdown(
-        "Synthèse des résultats, attribution automatique des décisions"
-        " réglementaires (Admission, Redoublement), mentions, clôture des"
-        " délibérations et export Excel professionnel aux normes de"
-        " l'enseignement au Niger."
+        "Synthèse des résultats, attribution automatique des décisions "
+        "réglementaires (Admission, Redoublement), mentions, clôture des "
+        "délibérations et export Excel professionnel aux normes de "
+        "l'enseignement au Niger."
     )
     st.markdown("---")
 
@@ -49,7 +71,7 @@ def afficher_conseil_classe():
             ecole_defaut = db.query(School).first()
             target_school_id = ecole_defaut.id if ecole_defaut else 1
 
-        ecole_active_id = school_id if school_id else target_school_id
+        resolved_school_id = school_id if school_id else target_school_id
 
         classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours)
         if not is_super_admin and school_id:
@@ -79,7 +101,7 @@ def afficher_conseil_classe():
         col_cc1, col_cc2 = st.columns(2)
         with col_cc1:
             classe_choisie = st.selectbox(
-                "Sélectionner la classe pour les délibérations", noms_classes
+                "Sélectionner la classe pour les délibérations", noms_classes, key="conseil_classe_sel"
             )
         with col_cc2:
             periode_choisie = st.selectbox(
@@ -92,6 +114,7 @@ def afficher_conseil_classe():
                     "Trimestre 3",
                     "Annuel",
                 ],
+                key="conseil_periode_sel"
             )
 
         classe_obj = next(
@@ -109,16 +132,18 @@ def afficher_conseil_classe():
                 eleves_query = eleves_query.filter(Eleve.deleted_at.is_(None))
             eleves = eleves_query.order_by(Eleve.nom).all()
 
-            matieres_cycle = (
-                db.query(Matiere)
-                .filter(
-                    Matiere.cycle == cycle_en_cours,
-                    Matiere.school_id == target_school_id,
-                )
-                .all()
+            # --- RÉCUPÉRATION EXACTE DES MATIÈRES DE LA CLASSE (Même logique que le module notes) ---
+            matieres_query = db.query(Matiere).filter(
+                Matiere.classe_id == classe_obj.id,
+                Matiere.school_id == resolved_school_id
             )
+            if hasattr(Matiere, "deleted_at"):
+                matieres_query = matieres_query.filter(Matiere.deleted_at.is_(None))
+            matieres_classe = matieres_query.all()
 
-            if not eleves:
+            if not matieres_classe:
+                st.warning(f"Aucune matière configurée pour la classe de **{classe_choisie}**.")
+            elif not eleves:
                 st.info(
                     f"Aucun élève enregistré dans la classe de **{classe_choisie}**."
                 )
@@ -141,7 +166,7 @@ def afficher_conseil_classe():
                     notes_query = notes_query.filter(Note.semestre == periode_choisie)
                 toutes_notes = notes_query.all()
 
-                dict_coeffs = {m.id: m.coefficient for m in matieres_cycle}
+                dict_coeffs = {m.id: float(getattr(m, 'coefficient', 1.0) or 1.0) for m in matieres_classe}
                 stats_eleves = {}
                 for e in eleves:
                     stats_eleves[e.id] = {"total_points": 0.0, "total_coeffs": 0.0}
@@ -149,7 +174,7 @@ def afficher_conseil_classe():
                 for n in toutes_notes:
                     if n.eleve_id in stats_eleves:
                         coeff = dict_coeffs.get(n.matiere_id, 1.0)
-                        stats_eleves[n.eleve_id]["total_points"] += n.valeur * coeff
+                        stats_eleves[n.eleve_id]["total_points"] += float(n.valeur) * coeff
                         stats_eleves[n.eleve_id]["total_coeffs"] += coeff
 
                 synthese_data = []

@@ -373,7 +373,7 @@ def afficher_espace_enseignants():
                     db.commit()
                     st.success("✅ Feuille d'appel validée avec succès !")
 
-        # --- 4. HORAIRES & RESTE À FAIRE (LOGIQUE STRICTE IDENTIQUE À LA SUPERVISION) ---
+        # --- 4. HORAIRES & RESTE À FAIRE ---
         with tab_charge:
             st.markdown(
                 f"#### 📊 Suivi de la Charge Horaire & Reste à Faire —"
@@ -407,19 +407,26 @@ def afficher_espace_enseignants():
                 if prog_classe and prog_classe.volume_horaire and prog_classe.volume_horaire > 0:
                     heures_prevues = float(prog_classe.volume_horaire)
                 else:
-                    # 2. Barème officiel du collège identique à la supervision
-                    BAREME_COLLEGE = {
-                        "6ème": {"francais": 205, "anglais": 140, "histoire geographie": 70, "mathematiques": 240, "physique chimie": 35, "science de la vie et de la terre": 70, "economie familiale et sociale": 35, "education physique et sportive": 70, "education civique": 35},
-                        "5ème": {"francais": 140, "anglais": 140, "histoire geographie": 70, "mathematiques": 175, "physique chimie": 35, "science de la vie et de la terre": 70, "economie familiale et sociale": 35, "education physique et sportive": 70, "education civique": 35},
-                        "4ème": {"francais": 140, "anglais": 140, "histoire geographie": 70, "mathematiques": 175, "physique chimie": 105, "science de la vie et de la terre": 70, "economie familiale et sociale": 35, "education physique et sportive": 70, "education civique": 35},
-                        "3ème": {"francais": 140, "anglais": 140, "histoire geographie": 70, "mathematiques": 175, "physique chimie": 105, "science de la vie et de la terre": 105, "economie familiale et sociale": 35, "education physique et sportive": 70, "education civique": 35},
-                    }
-                    if niveau_cible in BAREME_COLLEGE and norm_key in BAREME_COLLEGE[niveau_cible]:
-                        heures_prevues = float(BAREME_COLLEGE[niveau_cible][norm_key])
-                    elif hasattr(matiere_obj, "volume_horaire") and matiere_obj.volume_horaire:
-                        heures_prevues = float(matiere_obj.volume_horaire)
+                    # 2. Barème officiel appliqué STRICTEMENT si le cycle actif est le Collège
+                    if cycle_en_cours.lower() == "collège" or cycle_en_cours.lower() == "college":
+                        BAREME_COLLEGE = {
+                            "6ème": {"francais": 205, "anglais": 140, "histoire geographie": 70, "mathematiques": 240, "physique chimie": 35, "science de la vie et de la terre": 70, "economie familiale et sociale": 35, "education physique et sportive": 70, "education civique": 35},
+                            "5ème": {"francais": 140, "anglais": 140, "histoire geographie": 70, "mathematiques": 175, "physique chimie": 35, "science de la vie et de la terre": 70, "economie familiale et sociale": 35, "education physique et sportive": 70, "education civique": 35},
+                            "4ème": {"francais": 140, "anglais": 140, "histoire geographie": 70, "mathematiques": 175, "physique chimie": 105, "science de la vie et de la terre": 70, "economie familiale et sociale": 35, "education physique et sportive": 70, "education civique": 35},
+                            "3ème": {"francais": 140, "anglais": 140, "histoire geographie": 70, "mathematiques": 175, "physique chimie": 105, "science de la vie et de la terre": 105, "economie familiale et sociale": 35, "education physique et sportive": 70, "education civique": 35},
+                        }
+                        if niveau_cible in BAREME_COLLEGE and norm_key in BAREME_COLLEGE[niveau_cible]:
+                            heures_prevues = float(BAREME_COLLEGE[niveau_cible][norm_key])
+                        elif hasattr(matiere_obj, "volume_horaire") and matiere_obj.volume_horaire:
+                            heures_prevues = float(matiere_obj.volume_horaire)
+                        else:
+                            heures_prevues = 0.0
                     else:
-                        heures_prevues = 45.0
+                        # Pour le Lycée, si aucun programme n'est saisi, on retourne strictement 0 pour prouver que le filtre marche
+                        if hasattr(matiere_obj, "volume_horaire") and matiere_obj.volume_horaire:
+                            heures_prevues = float(matiere_obj.volume_horaire)
+                        else:
+                            heures_prevues = 0.0
 
                 volume_total_prevu = heures_prevues
 

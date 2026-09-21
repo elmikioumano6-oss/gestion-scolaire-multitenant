@@ -1,4 +1,5 @@
 from datetime import datetime
+from io import BytesIO
 import unicodedata
 import pandas as pd
 import streamlit as st
@@ -152,7 +153,6 @@ def afficher_supervision_cahier():
                 key="sup_classe_select",
             )
         with col_f2:
-            # CORRECTION : Remplacement des trimestres par les semestres officiels
             periode_inspection = st.selectbox(
                 "Période d'évaluation / Semestre",
                 [
@@ -188,32 +188,31 @@ def afficher_supervision_cahier():
                 height=45,
             )
 
-        matieres_cycle = (
-            db.query(Matiere)
-            .filter(
-                Matiere.cycle == cycle_en_cours,
-                Matiere.school_id == resolved_school_id,
-            )
-            .all()
+        if not classe_obj:
+            st.warning("⚠️ Classe sélectionnée invalide.")
+            st.markdown("</div>", unsafe_allow_html=True)
+            return
+
+        # --- RÉCUPÉRATION STRICTE DES MATIÈRES DE LA CLASSE SÉLECTIONNÉE ---
+        matieres_query = db.query(Matiere).filter(
+            Matiere.classe_id == classe_obj.id,
+            Matiere.school_id == resolved_school_id,
         )
+        if hasattr(Matiere, "deleted_at"):
+            matieres_query = matieres_query.filter(Matiere.deleted_at.is_(None))
+        
+        matieres_classe = matieres_query.all()
 
         all_programmes = db.query(Programme).filter(
             Programme.school_id == resolved_school_id
         ).all()
 
-        if not matieres_cycle or not classe_obj:
+        if not matieres_classe:
             st.info(
-                f"Aucune matière configurée pour le cycle **{cycle_en_cours}**."
+                f"Aucune matière configurée pour la classe de **{classe_suivie}**."
             )
             st.markdown("</div>", unsafe_allow_html=True)
             return
-
-        matieres_uniques = {}
-        for mat in matieres_cycle:
-            nom_brut = mat.libelle if hasattr(mat, "libelle") and mat.libelle else getattr(mat, "nom", "Matière")
-            norm_key = normaliser_chaine(nom_brut)
-            if norm_key not in matieres_uniques:
-                matieres_uniques[norm_key] = mat
 
         libelle_classe_norm = normaliser_chaine(classe_suivie)
         niveau_cible = ""
@@ -223,39 +222,46 @@ def afficher_supervision_cahier():
                 break
 
         data_suivi = []
-        for norm_key, mat in matieres_uniques.items():
-            mat_lib = mat.libelle if hasattr(mat, "libelle") and mat.libelle else getattr(mat, "nom", "Matière")
+        is_college = cycle_en_cours.lower() in ["collège", "college"]
 
-            # 1. Volume horaire prévu selon le niveau de la classe
+        for mat in matieres_classe:
+            mat_lib = mat.libelle if hasattr(mat, "libelle") and mat.libelle else getattr(mat, "nom", "Matière")
+            norm_key = normaliser_chaine(mat_lib)
+
             heures_prevues = 0.0
             prog_classe = next(
                 (p for p in all_programmes 
                  if normaliser_chaine(getattr(p, 'nom_matiere', '')) == norm_key 
-                 and normaliser_chaine(niveau_cible) in normaliser_chaine(getattr(p, 'code_matiere', ''))),
+                 and (not niveau_cible or normaliser_chaine(niveau_cible) in normaliser_chaine(getattr(p, 'code_matiere', '')))),
                 None
             )
 
             if prog_classe and prog_classe.volume_horaire and prog_classe.volume_horaire > 0:
                 heures_prevues = prog_classe.volume_horaire
             else:
-                BAREME_COLLEGE = {
-                    "6ème": {"francais": 205, "anglais": 140, "histoire geographie": 70, "mathematiques": 240, "physique chimie": 35, "science de la vie et de la terre": 70, "economie familiale et sociale": 35, "education physique et sportive": 70, "education civique": 35},
-                    "5ème": {"francais": 140, "anglais": 140, "histoire geographie": 70, "mathematiques": 175, "physique chimie": 35, "science de la vie et de la terre": 70, "economie familiale et sociale": 35, "education physique et sportive": 70, "education civique": 35},
-                    "4ème": {"francais": 140, "anglais": 140, "histoire geographie": 70, "mathematiques": 175, "physique chimie": 105, "science de la vie et de la terre": 70, "economie familiale et sociale": 35, "education physique et sportive": 70, "education civique": 35},
-                    "3ème": {"francais": 140, "anglais": 140, "histoire geographie": 70, "mathematiques": 175, "physique chimie": 105, "science de la vie et de la terre": 105, "economie familiale et sociale": 35, "education physique et sportive": 70, "education civique": 35},
-                }
-                if niveau_cible in BAREME_COLLEGE and norm_key in BAREME_COLLEGE[niveau_cible]:
-                    heures_prevues = float(BAREME_COLLEGE[niveau_cible][norm_key])
-                elif mat.volume_horaire and mat.volume_horaire > 0:
-                    heures_prevues = mat.volume_horaire
+                if is_college:
+                    BAREME_COLLEGE = {
+                        "6ème": {"francais": 205, "anglais": 140, "histoire geographie": 70, "mathematiques": 240, "physique chimie": 35, "science de la vie et de la terre": 70, "economie familiale et sociale": 35, "education physique et sportive": 70, "education civique": 35},
+                        "5ème": {"francais": 140, "anglais": 140, "histoire geographie": 70, "mathematiques": 175, "physique chimie": 35, "science de la vie et de la terre": 70, "economie familiale et sociale": 35, "education physique et sportive": 70, "education civique": 35},
+                        "4ème": {"francais": 140, "anglais": 140, "histoire geographie": 70, "mathematiques": 175, "physique chimie": 105, "science de la vie et de la terre": 70, "economie familiale et sociale": 35, "education physique et sportive": 70, "education civique": 35},
+                        "3ème": {"francais": 140, "anglais": 140, "histoire geographie": 70, "mathematiques": 175, "physique chimie": 105, "science de la vie et de la terre": 105, "economie familiale et sociale": 35, "education physique et sportive": 70, "education civique": 35},
+                    }
+                    if niveau_cible in BAREME_COLLEGE and norm_key in BAREME_COLLEGE[niveau_cible]:
+                        heures_prevues = float(BAREME_COLLEGE[niveau_cible][norm_key])
+                    elif mat.volume_horaire and mat.volume_horaire > 0:
+                        heures_prevues = mat.volume_horaire
+                else:
+                    if mat.volume_horaire and mat.volume_horaire > 0:
+                        heures_prevues = mat.volume_horaire
+                    else:
+                        heures_prevues = 0.0
 
-            # Si on est au semestre 1 ou 2, le volume horaire annuel est généralement réparti de manière équitable (ou proratisé)
-            if periode_inspection == "Semestre 1" or periode_inspection == "Semestre 2":
+            if periode_inspection in ["Semestre 1", "Semestre 2"]:
                 heures_prevues_periode = round(heures_prevues / 2.0, 1)
             else:
                 heures_prevues_periode = heures_prevues
 
-            # 2. Récupération et filtrage temporel des entrées du cahier de texte selon le Semestre
+            # --- FILTRE DES SÉANCES STRICTEMENT POUR CETTE CLASSE ET CETTE MATIÈRE ---
             entrees_query = db.query(CahierTexte).filter(
                 CahierTexte.school_id == resolved_school_id,
                 CahierTexte.classe_id == classe_obj.id,
@@ -264,7 +270,6 @@ def afficher_supervision_cahier():
 
             entrees_cahier = entrees_query.all()
 
-            # Filtrage par date selon le semestre sélectionné (si la date de séance existe)
             entrees_filtrees = []
             for e in entrees_cahier:
                 date_seance = getattr(e, "date_seance", None) or getattr(e, "date", None)
@@ -278,7 +283,6 @@ def afficher_supervision_cahier():
                         date_obj = date_seance
 
                     if date_obj and periode_inspection != "Année complète":
-                        # Semestre 1 arbitraire : Septembre à Février | Semestre 2 : Mars à Juin
                         mois = date_obj.month
                         is_s1 = mois in [9, 10, 11, 12, 1, 2]
                         if periode_inspection == "Semestre 1" and is_s1:

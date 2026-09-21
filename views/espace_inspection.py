@@ -1,10 +1,32 @@
 from datetime import datetime
 from database.audit import log_action_erp
 from database.db_config import SessionLocal
-from database.models import CahierTexte, Classe, Enseignant, School, Note, Eleve
+from database.models import CahierTexte, Classe, Enseignant, School, Note, Eleve, Programme, Matiere
 from database.queries import get_classes_cached, get_matieres_cached
 import pandas as pd
 import streamlit as st
+import unicodedata
+
+SYNONYMES_MATIERES = {
+    "sciences physiques": "physique chimie",
+    "physique chimie": "physique chimie",
+    "svt": "science de la vie et de la terre",
+    "science de la vie et de la terre": "science de la vie et de la terre",
+    "eps": "education physique et sportive",
+    "education physique et sportive": "education physique et sportive",
+    "economie familiale": "economie familiale et sociale",
+    "economie familiale et sociale": "economie familiale et sociale",
+    "histoire geographie": "histoire geographie",
+    "histoire-geographie": "histoire geographie",
+}
+
+def normaliser_chaine(texte):
+    if not texte or pd.isna(texte):
+        return ""
+    nfkd = unicodedata.normalize("NFKD", str(texte))
+    sans_accent = "".join([c for c in nfkd if not unicodedata.combining(c)])
+    nettoye = " ".join(sans_accent.lower().replace("-", " ").replace("_", " ").split())
+    return SYNONYMES_MATIERES.get(nettoye, nettoye)
 
 
 def afficher_espace_inspection():
@@ -28,6 +50,7 @@ def afficher_espace_inspection():
     db = SessionLocal()
     try:
         target_school_id = school_id or 1
+        resolved_school_id = school_id if school_id else target_school_id
 
         # Journalisation sécurisée de l'accès à l'espace d'inspection (Norme SOC 2 / ISO 27001)
         log_action_erp(
@@ -57,6 +80,7 @@ def afficher_espace_inspection():
                 .filter(
                     Classe.school_id == target_school_id,
                     Classe.cycle == cycle_en_cours,
+                    Classe.deleted_at.is_(None)
                 )
                 .all()
             )
@@ -117,16 +141,41 @@ def afficher_espace_inspection():
 
         with tab_progression:
             st.markdown(f"### 📈 Suivi de l'Avancement des Programmes Officiels (MEN Niger)")
-            st.markdown("Évaluation théorique du volume horaire dispensé par rapport aux exigences du programme national.")
+            st.markdown("Évaluation dynamique du volume horaire dispensé par rapport au cumul des volumes horaires officiels.")
             
             if classes_cycle and 'classe_obj' in locals() and classe_obj:
                 total_heures_dispensees = sum(getattr(e, 'duree', 1.0) for e in entrees) if 'entrees' in locals() and entrees else 0.0
-                objectif_volume_horaire = 120.0
-                taux_progression = min(100.0, (total_heures_dispensees / objectif_volume_horaire) * 100)
+                
+                # --- SOMME EXACTE DES VOLUMES HORAIRES DEPUIS LA TABLE PROGRAMME / MATIÈRE ---
+                # 1. Recherche dans la table Programme
+                programmes_ecole = db.query(Programme).filter(Programme.school_id == resolved_school_id).all()
+                somme_prog = sum(
+                    float(p.volume_horaire or 0) for p in programmes_ecole 
+                    if getattr(p, 'classe', '') and normaliser_chaine(classe_sel) in normaliser_chaine(p.classe)
+                )
+
+                # 2. Recherche dans la table Matiere de la classe
+                matieres_classe = db.query(Matiere).filter(Matiere.classe_id == classe_obj.id).all()
+                somme_matieres = sum(float(m.volume_horaire or 0) for m in matieres_classe)
+
+                if somme_prog > 0:
+                    objectif_volume_horaire = somme_prog
+                elif somme_matieres > 0:
+                    objectif_volume_horaire = somme_matieres
+                else:
+                    # Barème officiel de secours par niveau (Collège)
+                    BAREME_SECOURS = {"6ème": 900.0, "5ème": 770.0, "4ème": 840.0, "3ème": 875.0}
+                    objectif_volume_horaire = 120.0
+                    for niv, val in BAREME_SECOURS.items():
+                        if niv[0] in classe_sel.lower() or niv in classe_sel.lower():
+                            objectif_volume_horaire = val
+                            break
+
+                taux_progression = min(100.0, (total_heures_dispensees / objectif_volume_horaire) * 100) if objectif_volume_horaire > 0 else 0.0
 
                 st.metric("Volume Horaire Total Dispensé", f"{total_heures_dispensees} h")
                 st.progress(taux_progression / 100.0)
-                st.caption(f"Taux estimé de couverture du programme officiel : **{taux_progression:.1f}%** (Objectif de référence : {objectif_volume_horaire}h)")
+                st.caption(f"Taux estimé de couverture du programme officiel : **{taux_progression:.1f}%** (Somme du volume horaire de référence pour **{classe_sel}** : {objectif_volume_horaire}h)")
             else:
                 st.info("Veuillez sélectionner une classe valide dans l'onglet précédent.")
 

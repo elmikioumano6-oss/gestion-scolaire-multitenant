@@ -57,32 +57,21 @@ def afficher_notes():
             ecole_defaut = db.query(School).first()
             target_school_id = ecole_defaut.id if ecole_defaut else 1
 
+        resolved_school_id = school_id if school_id else target_school_id
+
         classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours, Classe.deleted_at.is_(None))
-        matieres_query = db.query(Matiere).filter(Matiere.cycle == cycle_en_cours)
 
         if not is_super_admin and school_id:
             classes_query = classes_query.filter(Classe.school_id == school_id)
-            matieres_query = matieres_query.filter(Matiere.school_id == school_id)
         else:
             classes_query = classes_query.filter(Classe.school_id == target_school_id)
-            matieres_query = matieres_query.filter(Matiere.school_id == target_school_id)
 
         classes_cycle = classes_query.all()
-        matieres_brutes = matieres_query.all()
-
-        # DÉDUPLICATION DES MATIÈRES
-        matieres_uniques_dict = {}
-        for mat in matieres_brutes:
-            nom_brut = mat.libelle if hasattr(mat, 'libelle') and mat.libelle else getattr(mat, 'nom', 'Matière')
-            norm_key = normaliser_chaine(nom_brut)
-            if norm_key not in matieres_uniques_dict:
-                matieres_uniques_dict[norm_key] = mat
-        matieres_cycle = list(matieres_uniques_dict.values())
 
         st.markdown(f"### Saisie Matricielle des Notes — **{school_name} ({cycle_en_cours})**")
 
-        if not classes_cycle or not matieres_cycle:
-            st.warning(f"⚠️ Veuillez configurer des classes et des matières pour le cycle **{cycle_en_cours}**.")
+        if not classes_cycle:
+            st.warning(f"⚠️ Veuillez configurer des classes pour le cycle **{cycle_en_cours}**.")
             return
 
         noms_classes = [c.libelle for c in classes_cycle]
@@ -96,6 +85,15 @@ def afficher_notes():
 
         classe_obj = next((c for c in classes_cycle if c.libelle == classe_choisie), None)
         if classe_obj:
+            # --- RÉCUPÉRATION STRICTE DES MATIÈRES DE LA CLASSE SÉLECTIONNÉE ---
+            matieres_query = db.query(Matiere).filter(
+                Matiere.classe_id == classe_obj.id,
+                Matiere.school_id == resolved_school_id
+            )
+            if hasattr(Matiere, "deleted_at"):
+                matieres_query = matieres_query.filter(Matiere.deleted_at.is_(None))
+            matieres_classe = matieres_query.all()
+
             eleves_query = db.query(Eleve).filter(Eleve.classe_id == classe_obj.id, Eleve.deleted_at.is_(None))
             if not is_super_admin and school_id:
                 eleves_query = eleves_query.filter(Eleve.school_id == school_id)
@@ -103,8 +101,10 @@ def afficher_notes():
                 eleves_query = eleves_query.filter(Eleve.school_id == target_school_id)
             eleves = eleves_query.order_by(Eleve.nom).all()
 
-            if not eleves:
-                st.info(f"Aucun élève enregistré dans la classe **{classe_choisie}**.")
+            if not matieres_classe:
+                st.warning(f"Aucune matière configurée pour la classe de **{classe_choisie}**.")
+            elif not eleves:
+                st.info(f"Aucun élève enregistré dans la classe de **{classe_choisie}**.")
             else:
                 st.success(f"Grille active pour **{classe_choisie}** | **{semestre_choisi}** | **{type_eval}** ({len(eleves)} élèves).")
 
@@ -120,8 +120,8 @@ def afficher_notes():
                 data_matrice = []
                 for e in eleves:
                     ligne = {"eleve_id": e.id, "Matricule": e.matricule, "Nom & Prénom": f"{e.nom} {e.prenom}"}
-                    for mat in matieres_cycle:
-                        mat_lib = (mat.libelle if hasattr(mat, 'libelle') else getattr(mat, 'nom', '')).title()
+                    for mat in matieres_classe:
+                        mat_lib = (mat.libelle if hasattr(mat, 'libelle') and mat.libelle else getattr(mat, 'nom', '')).title()
                         val_note = float(dict_notes.get((e.id, mat.id), 0.0))
                         ligne[mat_lib] = val_note
                     data_matrice.append(ligne)
@@ -132,8 +132,8 @@ def afficher_notes():
                     "Matricule": st.column_config.TextColumn("Matricule", disabled=True),
                     "Nom & Prénom": st.column_config.TextColumn("Nom & Prénom", disabled=True),
                 }
-                for mat in matieres_cycle:
-                    mat_lib = (mat.libelle if hasattr(mat, 'libelle') else getattr(mat, 'nom', '')).title()
+                for mat in matieres_classe:
+                    mat_lib = (mat.libelle if hasattr(mat, 'libelle') and mat.libelle else getattr(mat, 'nom', '')).title()
                     max_val = 18.0 if "conduite" in mat_lib.lower() else 20.0
                     column_config[mat_lib] = st.column_config.NumberColumn(mat_lib, min_value=0.0, max_value=max_val, step=0.25, format="%.2f")
 
@@ -145,8 +145,8 @@ def afficher_notes():
                     for _, row in edited_df.iterrows():
                         eleve_id = row["eleve_id"]
                         nom_eleve = row["Nom & Prénom"]
-                        for mat in matieres_cycle:
-                            mat_lib = (mat.libelle if hasattr(mat, 'libelle') else getattr(mat, 'nom', '')).title()
+                        for mat in matieres_classe:
+                            mat_lib = (mat.libelle if hasattr(mat, 'libelle') and mat.libelle else getattr(mat, 'nom', '')).title()
                             valeur_saisie = float(row[mat_lib])
                             ancienne_valeur = dict_notes.get((eleve_id, mat.id), 0.0)
 
