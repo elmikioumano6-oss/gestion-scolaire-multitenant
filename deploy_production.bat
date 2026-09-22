@@ -40,7 +40,7 @@ echo [2/4] Mise a jour de main...
 git checkout main >nul 2>&1
 if errorlevel 1 goto :ERREUR
 
-call git pull --ff-only origin main
+call git pull --ff-only origin main >nul 2>&1
 if errorlevel 1 goto :ERREUR
 
 echo.
