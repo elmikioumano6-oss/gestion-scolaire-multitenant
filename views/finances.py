@@ -1,7 +1,7 @@
 from datetime import datetime
 from database.audit import log_action_erp
 from database.db_config import SessionLocal
-from database.models import ActivityLog, Eleve, Paiement, School
+from database.models import ActivityLog, Classe, Eleve, Paiement, School
 import pandas as pd
 import streamlit as st
 
@@ -158,9 +158,24 @@ def afficher_encaissement():
       total_recettes = (
           sum(p.montant for p in paiements) if paiements else 0.0
       )
-      total_attendu = (
-          len(eleves) * 65000
-      )  # Base forfaitaire annuelle par élève
+      
+      # --- CALCUL EXHAUSTIF ET STRICTEMENT BASÉ SUR LES FRAIS RÉELS (Scolarité, Inscription, COGES, Cantine, Transport, etc.) ---
+      total_attendu = 0.0
+      for e in eleves:
+          classe_eleve = db.query(Classe).filter(Classe.id == e.classe_id).first() if e.classe_id else None
+          
+          frais_scol = float(getattr(classe_eleve, "frais_scolarite", 0.0) or 0.0)
+          frais_inscr = float(getattr(classe_eleve, "frais_inscription", 0.0) or 0.0)
+          frais_coges = float(getattr(classe_eleve, "frais_coges", 0.0) or 0.0)
+          frais_cantine = float(getattr(e, "frais_cantine", getattr(classe_eleve, "frais_cantine", 0.0)) or 0.0)
+          frais_transport = float(getattr(e, "frais_transport", getattr(classe_eleve, "frais_transport", 0.0)) or 0.0)
+          frais_autres = float(getattr(e, "frais_autres", getattr(classe_eleve, "frais_autres", 0.0)) or 0.0)
+          
+          frais_brut_total = frais_scol + frais_inscr + frais_coges + frais_cantine + frais_transport + frais_autres
+          reduction = float(getattr(e, "montant_reduction", 0.0) or 0.0)
+          
+          total_attendu += max(0.0, frais_brut_total - reduction)
+
       solde_restant = max(0.0, total_attendu - total_recettes)
       taux_recouvrement = (
           (total_recettes / total_attendu * 100) if total_attendu > 0 else 0.0
