@@ -60,10 +60,9 @@ def afficher_tableau_de_bord():
 
         eleves_ids = [e.id for e in eleves]
 
-        # Calcul strict des enseignants rattachés aux classes de ce cycle (via l'emploi du temps ou la table des profs)
+        # Calcul strict des enseignants rattachés aux classes de ce cycle
         total_enseignants = 0
         if classes_ids:
-            # Récupérer les enseignants uniques enseignant dans les classes de ce cycle
             profs_edt = db.query(EmploiDuTemps.enseignant).filter(
                 EmploiDuTemps.classe_id.in_(classes_ids),
                 EmploiDuTemps.enseignant.isnot(None),
@@ -71,7 +70,6 @@ def afficher_tableau_de_bord():
             ).distinct().all()
             total_enseignants = len(profs_edt)
             
-            # Fallback si l'emploi du temps n'est pas rempli mais qu'il y a des profs dans l'école
             if total_enseignants == 0:
                 users_query = db.query(User)
                 if not is_super_admin and school_id:
@@ -96,13 +94,23 @@ def afficher_tableau_de_bord():
             if res_recettes:
                 total_recettes = float(res_recettes)
 
+        # Calcul dynamique du total attendu basé sur l'ensemble des frais et de la réduction individuelle
         total_attendu = 0.0
         for eleve in eleves:
             classe = next((c for c in classes_cycle if c.id == eleve.classe_id), None)
             if classe:
-                frais_scol = getattr(classe, 'frais_scolarite', 0.0) or 0.0
-                frais_inscr = getattr(classe, 'frais_inscription', 0.0) or 0.0
-                total_attendu += (float(frais_scol) + float(frais_inscr))
+                frais_scol = float(getattr(classe, 'frais_scolarite', 0.0) or 0.0)
+                frais_inscr = float(getattr(classe, 'frais_inscription', 0.0) or 0.0)
+                frais_coges = float(getattr(classe, 'frais_coges', 0.0) or 0.0)
+                frais_transport = float(getattr(classe, 'frais_transport', 0.0) or 0.0)
+                frais_cantine = float(getattr(classe, 'frais_cantine', 0.0) or 0.0)
+                
+                brut_eleve = frais_scol + frais_inscr + frais_coges + frais_transport + frais_cantine
+                
+                reduction_eleve = float(getattr(eleve, 'montant_reduction', 0.0) or 0.0)
+                net_eleve = max(0.0, brut_eleve - reduction_eleve)
+                
+                total_attendu += net_eleve
 
         reste_a_recouvrer = total_attendu - total_recettes
         taux = (total_recettes / total_attendu * 100) if total_attendu > 0 else 0.0
