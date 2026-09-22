@@ -80,5 +80,6 @@ echo Consultez les messages Git affiches ci-dessus.
 git merge --abort >nul 2>&1
 git checkout staging >nul 2>&1
 
-pause
+echo Appuyez sur une touche pour quitter...
+pause >nul
 exit /b 1
