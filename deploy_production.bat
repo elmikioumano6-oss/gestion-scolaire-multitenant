@@ -16,7 +16,7 @@ if errorlevel 1 (
 echo.
 echo [1/4] Sauvegarde et envoi de staging...
 
-git checkout staging >nul 2>&1
+git checkout staging
 if errorlevel 1 goto :ERREUR
 
 git add -A
@@ -30,16 +30,16 @@ if errorlevel 1 (
     echo Aucune nouvelle modification a enregistrer.
 )
 
-git push origin staging >nul 2>&1
+git push origin staging
 if errorlevel 1 goto :ERREUR
 
 echo.
 echo [2/4] Mise a jour de main...
 
-git checkout main >nul 2>&1
+git checkout main
 if errorlevel 1 goto :ERREUR
 
-call git pull --ff-only origin main >nul 2>&1
+git pull --ff-only origin main
 if errorlevel 1 goto :ERREUR
 
 echo.
@@ -52,13 +52,13 @@ if errorlevel 1 (
     goto :ERREUR
 )
 
-git push origin main >nul 2>&1
+git push origin main
 if errorlevel 1 goto :ERREUR
 
 echo.
 echo [4/4] Retour sur staging...
 
-git checkout staging >nul 2>&1
+git checkout staging
 if errorlevel 1 goto :ERREUR
 
 echo.
