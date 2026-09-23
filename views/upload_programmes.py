@@ -34,8 +34,8 @@ def normaliser_chaine(texte):
 def afficher_upload_programmes():
     st.subheader("📥 Import des Programmes & Coefficients par Classe")
     st.markdown(
-        "Importez vos programmes académiques par classe pour gérer finement"
-        " les volumes horaires selon les niveaux."
+        "Importez vos programmes académiques par classe pour gérer finement "
+        "les volumes horaires selon les niveaux."
     )
     st.markdown("---")
 
@@ -122,14 +122,7 @@ def afficher_upload_programmes():
                             db.add(classe_cible)
                             db.flush()
 
-                        # Enregistrement dans Programme en stockant le niveau/classe dans nom_matiere ou via attributs disponibles
-                        prog_obj = db.query(Programme).filter(
-                            Programme.school_id == resolved_school_id,
-                            Programme.nom_matiere == norm_mat,
-                        ).first()
-
                         # Recherche si un programme spécifique existe pour cette classe/niveau
-                        # Stockons l'association dans Programme en utilisant code_matiere pour stocker la classe (ex: "3eme")
                         prog_classe = db.query(Programme).filter(
                             Programme.school_id == resolved_school_id,
                             Programme.nom_matiere == norm_mat,
@@ -144,7 +137,7 @@ def afficher_upload_programmes():
                             nouveau_prog = Programme(
                                 school_id=resolved_school_id,
                                 nom_matiere=norm_mat,
-                                code_matiere=norm_classe, # On stocke la classe ici de façon propre
+                                code_matiere=norm_classe,
                                 volume_horaire=vol,
                                 coefficient=coef,
                             )
