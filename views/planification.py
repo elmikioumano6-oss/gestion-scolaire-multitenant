@@ -107,7 +107,7 @@ def afficher_planification_evaluations():
                 
                 df_evals = pd.DataFrame(data_tableau)
 
-                # --- BOUTONS D'EXPORTATION (EXCEL, PDF A4 PAYSAGE & IMPRESSION) ---
+                # --- BOUTONS D'EXPORTATION (TAB 1) ---
                 col_exp1, col_exp2, col_exp3, _ = st.columns([1.3, 1.3, 1.3, 3])
 
                 with col_exp1:
@@ -119,7 +119,8 @@ def afficher_planification_evaluations():
                         label="📥 Excel",
                         data=excel_data,
                         file_name=f"Calendrier_Evaluations_{annee_en_cours}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="btn_excel_tab1"
                     )
 
                 with col_exp2:
@@ -200,7 +201,8 @@ def afficher_planification_evaluations():
                         label="📥 PDF",
                         data=pdf_data,
                         file_name=f"Calendrier_Evaluations_{annee_en_cours}.pdf",
-                        mime="application/pdf"
+                        mime="application/pdf",
+                        key="btn_pdf_tab1"
                     )
 
                 with col_exp3:
@@ -274,6 +276,100 @@ def afficher_planification_evaluations():
 
                 df_saisie = pd.DataFrame(lignes_grille)
 
+                # --- BOUTONS D'EXPORTATION (TAB 2 - SAISIE RAPIDE) ---
+                col_g_exp1, col_g_exp2, col_g_exp3, _ = st.columns([1.3, 1.3, 1.3, 3])
+
+                with col_g_exp1:
+                    output_excel_g = io.BytesIO()
+                    with pd.ExcelWriter(output_excel_g, engine="openpyxl") as writer:
+                        df_saisie.to_excel(writer, index=False, sheet_name="Saisie_Evaluations")
+                    excel_data_g = output_excel_g.getvalue()
+                    st.download_button(
+                        label="📥 Excel",
+                        data=excel_data_g,
+                        file_name=f"Grille_Saisie_{classe_choisie}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="btn_excel_tab2"
+                    )
+
+                with col_g_exp2:
+                    pdf_buffer_g = io.BytesIO()
+                    doc_g = SimpleDocTemplate(
+                        pdf_buffer_g,
+                        pagesize=landscape(A4),
+                        rightMargin=30,
+                        leftMargin=30,
+                        topMargin=30,
+                        bottomMargin=50
+                    )
+                    elements_g = []
+                    styles_g = getSampleStyleSheet()
+
+                    title_style_g = ParagraphStyle(
+                        "TitleStyleGrille",
+                        parent=styles_g["Heading1"],
+                        fontSize=14,
+                        textColor=colors.HexColor("#1e3a8a"),
+                        alignment=1,
+                        spaceAfter=15
+                    )
+
+                    elements_g.append(Paragraph(f"GRILLE DE SAISIE DES ÉVALUATIONS — {classe_choisie} ({semestre_eval})", title_style_g))
+                    elements_g.append(Spacer(1, 10))
+
+                    table_data_g = [list(df_saisie.columns)]
+                    for _, row in df_saisie.iterrows():
+                        table_data_g.append([str(val) for val in row])
+
+                    col_widths_g = [780 / len(df_saisie.columns)] * len(df_saisie.columns)
+                    t_g = Table(table_data_g, colWidths=col_widths_g)
+                    t_g.setStyle(TableStyle([
+                        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#1e3a8a")),
+                        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+                        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                        ('FONTSIZE', (0,0), (-1,0), 8),
+                        ('BOTTOMPADDING', (0,0), (-1,0), 8),
+                        ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#f8fafc")),
+                        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cbd5e1")),
+                        ('FONTNAME', (0,1), (-1,-1), 'Helvetica'),
+                        ('FONTSIZE', (0,1), (-1,-1), 8),
+                        ('BOTTOMPADDING', (0,1), (-1,-1), 5),
+                        ('TOPPADDING', (0,1), (-1,-1), 5),
+                    ]))
+                    elements_g.append(t_g)
+                    doc_g.build(elements_g)
+                    pdf_data_g = pdf_buffer_g.getvalue()
+
+                    st.download_button(
+                        label="📥 PDF",
+                        data=pdf_data_g,
+                        file_name=f"Grille_Saisie_{classe_choisie}.pdf",
+                        mime="application/pdf",
+                        key="btn_pdf_tab2"
+                    )
+
+                with col_g_exp3:
+                    components.html(
+                        """
+                        <button onclick="parent.window.print()" style="
+                            background-color: #2563eb;
+                            color: white;
+                            border: none;
+                            padding: 0.45rem 1rem;
+                            font-size: 0.85rem;
+                            font-weight: 500;
+                            border-radius: 6px;
+                            cursor: pointer;
+                            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                            font-family: sans-serif;
+                        ">🖨️ Imprimer</button>
+                        """,
+                        height=40,
+                    )
+
+                st.markdown("<br>", unsafe_allow_html=True)
                 st.markdown("#### ✏️ Tableau d'édition rapide (Modifiable)")
                 df_modifie = st.data_editor(
                     df_saisie,

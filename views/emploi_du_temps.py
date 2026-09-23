@@ -15,9 +15,8 @@ import streamlit.components.v1 as components
 def afficher_emploi_temps():
     st.subheader("📅 Gestion des Emplois du Temps")
     st.markdown(
-        "Planification hebdomadaire des cours par classe et cycle selon la"
-        " grille horaire officielle (08h00 - 14h30 avec récréation 11h00 -"
-        " 11h30)."
+        "Planification hebdomadaire des cours par classe et cycle selon la "
+        "grille horaire officielle (08h00 - 14h30 avec récréation 11h00 - 11h30)."
     )
     st.markdown("---")
 
@@ -41,9 +40,11 @@ def afficher_emploi_temps():
             if ecole_courante:
                 school_name = ecole_courante.nom
 
-        tab1, tab2 = st.tabs(
-            ["📋 Consulter l'Emploi du Temps", "➕ Ajouter un Créneau"]
-        )
+        tab1, tab_global, tab2 = st.tabs([
+            "📋 Consulter par Classe", 
+            "📊 Vue Globale Établissement", 
+            "➕ Ajouter un Créneau"
+        ])
 
         classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours)
         if not is_super_admin and school_id:
@@ -55,6 +56,16 @@ def afficher_emploi_temps():
         if "emplois_du_temps_data" not in st.session_state:
             st.session_state["emplois_du_temps_data"] = {}
 
+        heures_libelles = [
+            ("1ère Heure", "08h00 - 09h00"),
+            ("2ème Heure", "09h00 - 10h00"),
+            ("3ème Heure", "10h00 - 11h00"),
+            ("Récréation", "11h00 - 11h30"),
+            ("4ème Heure", "11h30 - 12h30"),
+            ("5ème Heure", "12h30 - 13h30"),
+            ("6ème Heure", "13h30 - 14h30"),
+        ]
+        
         creneaux_horaires = [
             "08h00 - 09h00",
             "09h00 - 10h00",
@@ -64,7 +75,18 @@ def afficher_emploi_temps():
             "12h30 - 13h30",
             "13h30 - 14h30",
         ]
+        jours = [
+            "Lundi",
+            "Mardi",
+            "Mercredi",
+            "Jeudi",
+            "Vendredi",
+            "Samedi",
+        ]
 
+        # ==========================================
+        # ONGLET 1 : CONSULTATION PAR CLASSE
+        # ==========================================
         with tab1:
             st.markdown(
                 f"### Emplois du Temps — **{school_name} ({cycle_en_cours})** | Année Scolaire : **{annee_en_cours}**"
@@ -72,8 +94,8 @@ def afficher_emploi_temps():
 
             if not classes_cycle:
                 st.info(
-                    f"Aucune classe enregistrée pour le cycle **{cycle_en_cours}**"
-                    " dans cet établissement."
+                    f"Aucune classe enregistrée pour le cycle **{cycle_en_cours}** "
+                    "dans cet établissement."
                 )
             else:
                 noms_classes = [c.libelle for c in classes_cycle]
@@ -88,14 +110,6 @@ def afficher_emploi_temps():
                     None,
                 )
                 if classe_obj:
-                    jours = [
-                        "Lundi",
-                        "Mardi",
-                        "Mercredi",
-                        "Jeudi",
-                        "Vendredi",
-                        "Samedi",
-                    ]
                     key_edt = f"{school_id}_{cycle_en_cours}_{classe_choisie}"
                     edt_dict = st.session_state["emplois_du_temps_data"].get(
                         key_edt, {}
@@ -121,7 +135,6 @@ def afficher_emploi_temps():
 
                     df_edt = pd.DataFrame(data_grille)
 
-                    # --- BOUTONS D'EXPORTATION ET IMPRESSION ---
                     col_exp1, col_exp2, col_exp3, col_col_vide = st.columns(
                         [1.3, 1.3, 1.3, 3.5]
                     )
@@ -291,82 +304,81 @@ def afficher_emploi_temps():
 
                     st.markdown("<br>", unsafe_allow_html=True)
 
-                    # Affichage visuel web stylisé
                     st.markdown(
                         """
-                    <style>
-                        .edt-container {
-                            background-color: #0e1117;
-                            padding: 1.5rem;
-                            border-radius: 12px;
-                            border: 1px solid rgba(255, 255, 255, 0.1);
-                            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-                            font-family: 'Inter', sans-serif;
-                        }
-                        .edt-header {
-                            display: flex;
-                            justify-content: space-between;
-                            align-items: center;
-                            margin-bottom: 1.2rem;
-                            border-bottom: 2px solid #1f2937;
-                            padding-bottom: 0.8rem;
-                        }
-                        .edt-title {
-                            font-size: 1.15rem;
-                            font-weight: 600;
-                            color: #f3f4f6;
-                        }
-                        .edt-badge-repot {
-                            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-                            color: white;
-                            padding: 0.4rem 0.8rem;
-                            border-radius: 20px;
-                            font-size: 0.85rem;
-                            font-weight: 500;
-                            box-shadow: 0 2px 6px rgba(59, 130, 246, 0.3);
-                        }
-                        .styled-table {
-                            width: 100%;
-                            border-collapse: separate;
-                            border-spacing: 0;
-                            border-radius: 8px;
-                            overflow: hidden;
-                            border: 1px solid #2d3748;
-                        }
-                        .styled-table th {
-                            background-color: #1a202c;
-                            color: #e2e8f0;
-                            text-align: center;
-                            padding: 12px 8px;
-                            font-size: 0.85rem;
-                            font-weight: 600;
-                            letter-spacing: 0.05em;
-                            border-bottom: 2px solid #4a5568;
-                        }
-                        .styled-table td {
-                            background-color: #111827;
-                            color: #cbd5e0;
-                            text-align: center;
-                            padding: 12px 8px;
-                            font-size: 0.8rem;
-                            border-bottom: 1px solid #1f2937;
-                            border-right: 1px solid #1f2937;
-                            vertical-align: middle;
-                            height: 45px;
-                        }
-                        .styled-table td:first-child {
-                            font-weight: 600;
-                            color: #60a5fa;
-                            background-color: #161e2e;
-                        }
-                        .pause-col {
-                            background-color: #18212f !important;
-                            color: #9ca3af !important;
-                            font-style: italic;
-                            font-size: 0.8rem;
-                        }
-                    </style>
-                    """,
+                        <style>
+                            .edt-container {
+                                background-color: #0e1117;
+                                padding: 1.5rem;
+                                border-radius: 12px;
+                                border: 1px solid rgba(255, 255, 255, 0.1);
+                                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+                                font-family: 'Inter', sans-serif;
+                            }
+                            .edt-header {
+                                display: flex;
+                                justify-content: space-between;
+                                align-items: center;
+                                margin-bottom: 1.2rem;
+                                border-bottom: 2px solid #1f2937;
+                                padding-bottom: 0.8rem;
+                            }
+                            .edt-title {
+                                font-size: 1.15rem;
+                                font-weight: 600;
+                                color: #f3f4f6;
+                            }
+                            .edt-badge-repot {
+                                background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+                                color: white;
+                                padding: 0.4rem 0.8rem;
+                                border-radius: 20px;
+                                font-size: 0.85rem;
+                                font-weight: 500;
+                                box-shadow: 0 2px 6px rgba(59, 130, 246, 0.3);
+                            }
+                            .styled-table {
+                                width: 100%;
+                                border-collapse: separate;
+                                border-spacing: 0;
+                                border-radius: 8px;
+                                overflow: hidden;
+                                border: 1px solid #2d3748;
+                            }
+                            .styled-table th {
+                                background-color: #1a202c;
+                                color: #e2e8f0;
+                                text-align: center;
+                                padding: 12px 8px;
+                                font-size: 0.85rem;
+                                font-weight: 600;
+                                letter-spacing: 0.05em;
+                                border-bottom: 2px solid #4a5568;
+                            }
+                            .styled-table td {
+                                background-color: #111827;
+                                color: #cbd5e0;
+                                text-align: center;
+                                padding: 12px 8px;
+                                font-size: 0.8rem;
+                                border-bottom: 1px solid #1f2937;
+                                border-right: 1px solid #1f2937;
+                                vertical-align: middle;
+                                height: 45px;
+                            }
+                            .styled-table td:first-child {
+                                font-weight: 600;
+                                color: #60a5fa;
+                                background-color: #161e2e;
+                            }
+                            .pause-col {
+                                background-color: #18212f !important;
+                                color: #9ca3af !important;
+                                font-style: italic;
+                                font-size: 0.8rem;
+                            }
+                        </style>
+                        """,
                         unsafe_allow_html=True,
                     )
 
@@ -422,6 +434,151 @@ def afficher_emploi_temps():
                     """
                     st.markdown(html_table, unsafe_allow_html=True)
 
+        # ==========================================
+        # ONGLET 2 : VUE GLOBALE DE L'ÉTABLISSEMENT (Avec boutons d'exportation)
+        # ==========================================
+        with tab_global:
+            st.markdown(f"### 📊 Tableau de Service Global — **{school_name} ({cycle_en_cours})**")
+            st.info("Disposition officielle : Classes et Heures en lignes, Jours de la semaine en colonnes.")
+
+            if not classes_cycle:
+                st.warning("Aucune classe disponible pour ce cycle.")
+            else:
+                lignes_globales = []
+                for classe_obj in classes_cycle:
+                    c_nom = classe_obj.libelle
+                    key_edt = f"{school_id}_{cycle_en_cours}_{c_nom}"
+                    edt_dict = st.session_state["emplois_du_temps_data"].get(key_edt, {})
+
+                    for nom_h, plage_h in heures_libelles:
+                        ligne_dict = {
+                            "Classe": c_nom,
+                            "Heure": nom_h,
+                            "Plage": plage_h
+                        }
+                        for jour in jours:
+                            if nom_h == "Récréation" or plage_h == "11h00 - 11h30":
+                                ligne_dict[jour] = "☕ Pause"
+                            else:
+                                val = edt_dict.get((jour, plage_h), None)
+                                if val:
+                                    ligne_dict[jour] = f"{val['matiere']} ({val['prof']})"
+                                else:
+                                    ligne_dict[jour] = "-"
+                        lignes_globales.append(ligne_dict)
+
+                if lignes_globales:
+                    df_global_service = pd.DataFrame(lignes_globales)
+
+                    # --- BOUTONS D'EXPORTATION POUR LA VUE GLOBALE ---
+                    col_g_exp1, col_g_exp2, col_g_exp3, col_g_vide = st.columns([1.3, 1.3, 1.3, 3.5])
+
+                    with col_g_exp1:
+                        output_excel_g = io.BytesIO()
+                        with pd.ExcelWriter(output_excel_g, engine="openpyxl") as writer:
+                            df_global_service.to_excel(
+                                writer,
+                                index=False,
+                                sheet_name="Tableau_Service_Global",
+                            )
+                        excel_data_g = output_excel_g.getvalue()
+                        st.download_button(
+                            label="📥 Excel",
+                            data=excel_data_g,
+                            file_name=f"Tableau_Service_Global_{cycle_en_cours}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="download_excel_global"
+                        )
+
+                    with col_g_exp2:
+                        pdf_buffer_g = io.BytesIO()
+                        doc_g = SimpleDocTemplate(
+                            pdf_buffer_g,
+                            pagesize=landscape(A4),
+                            rightMargin=20,
+                            leftMargin=20,
+                            topMargin=30,
+                            bottomMargin=40,
+                        )
+                        elements_g = []
+                        styles_g = getSampleStyleSheet()
+
+                        title_style_g = ParagraphStyle(
+                            "TitleStyleGlobal",
+                            parent=styles_g["Heading1"],
+                            fontSize=13,
+                            textColor=colors.HexColor("#1e3a8a"),
+                            alignment=1,
+                            spaceAfter=12,
+                        )
+
+                        elements_g.append(
+                            Paragraph(
+                                f"TABLEAU DE SERVICE GLOBAL — {school_name} ({cycle_en_cours}) | ANNEESCOLAIRE : {annee_en_cours}",
+                                title_style_g,
+                            )
+                        )
+                        elements_g.append(Spacer(1, 8))
+
+                        table_data_g = [list(df_global_service.columns)]
+                        for _, row in df_global_service.iterrows():
+                            table_data_g.append([str(val) for val in row])
+
+                        t_g = Table(table_data_g)
+                        t_g.setStyle(
+                            TableStyle([
+                                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a8a")),
+                                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                                ("FONTSIZE", (0, 0), (-1, 0), 8),
+                                ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+                                ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#f8fafc")),
+                                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+                                ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+                                ("FONTSIZE", (0, 1), (-1, -1), 7),
+                                ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
+                                ("TOPPADDING", (0, 1), (-1, -1), 4),
+                            ])
+                        )
+                        elements_g.append(t_g)
+                        doc_g.build(elements_g)
+                        pdf_data_g = pdf_buffer_g.getvalue()
+
+                        st.download_button(
+                            label="📥 PDF",
+                            data=pdf_data_g,
+                            file_name=f"Tableau_Service_Global_{cycle_en_cours}.pdf",
+                            mime="application/pdf",
+                            key="download_pdf_global"
+                        )
+
+                    with col_g_exp3:
+                        components.html(
+                            """
+                            <button onclick="parent.window.print()" style="
+                                background-color: #2563eb;
+                                color: white;
+                                border: none;
+                                padding: 0.45rem 1rem;
+                                font-size: 0.85rem;
+                                font-weight: 500;
+                                border-radius: 6px;
+                                cursor: pointer;
+                                box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+                                font-family: sans-serif;
+                            ">🖨️ Imprimer</button>
+                            """,
+                            height=40,
+                        )
+
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    st.dataframe(df_global_service, use_container_width=True)
+
+        # ==========================================
+        # ONGLET 3 : AJOUTER UN CRÉNEAU
+        # ==========================================
         with tab2:
             st.markdown(
                 f"### Planification d'un Créneau — **{school_name} ({cycle_en_cours})**"
@@ -429,7 +586,7 @@ def afficher_emploi_temps():
 
             if not classes_cycle:
                 st.warning(
-                    f"⚠️ Veuillez d'abord créer des classes pour le cycle"
+                    f"⚠️ Veuillez d'abord créer des classes pour le cycle "
                     f" **{cycle_en_cours}** dans le menu 'Classes & Tarifs'."
                 )
             else:
@@ -442,14 +599,7 @@ def afficher_emploi_temps():
                         )
                         jour = st.selectbox(
                             "Jour de la semaine",
-                            [
-                                "Lundi",
-                                "Mardi",
-                                "Mercredi",
-                                "Jeudi",
-                                "Vendredi",
-                                "Samedi",
-                            ],
+                            jours,
                         )
                         creneaux_cours = [
                             c for c in creneaux_horaires if c != "11h00 - 11h30"

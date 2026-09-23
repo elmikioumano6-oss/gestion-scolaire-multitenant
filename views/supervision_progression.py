@@ -3,8 +3,7 @@ from io import BytesIO
 import pandas as pd
 import streamlit as st
 from database.db_config import SessionLocal
-from database.models import ActivityLog, CahierTexte, Classe, Matiere, School
-from database.queries import get_classes_cached, get_matieres_cached
+from database.models import ActivityLog, CahierTexte, Classe, Matiere, Programme, School
 import unicodedata
 
 SYNONYMES_MATIERES = {
@@ -33,7 +32,7 @@ def afficher_supervision_progression():
     st.subheader("📚 Pilotage, Suivi & Avancement Global des Programmes")
     st.markdown(
         "Tableau de bord exécutif de la Direction des Études : analyse croisée "
-        "des volumes prévisionnels par niveau, des heures réalisées issues du "
+        "des volumes prévisionnels issus des programmes uploadés, des heures réalisées issues du "
         "registre officiel et des alertes de retard par discipline."
     )
     st.markdown("---")
@@ -90,7 +89,7 @@ def afficher_supervision_progression():
             c.libelle or getattr(c, "nom", f"Classe {c.id}") for c in classes_cycle
         ]
         classe_selectionnee = st.selectbox(
-            "🔍 Filtrer le suivi par classe (pour un volume par niveau exact) :",
+            "🔍 Filtrer le suivi par classe :",
             noms_classes,
             key="suivi_prog_classe_select",
         )
@@ -105,9 +104,10 @@ def afficher_supervision_progression():
             None,
         )
 
-        # Détermination du niveau
+        # Détection dynamique et générale du niveau
         nom_cl_lower = str(classe_selectionnee).lower()
-        niveau_detecte = "3ème"
+        niveau_detecte = ""
+        
         if "6" in nom_cl_lower:
             niveau_detecte = "6ème"
         elif "5" in nom_cl_lower:
@@ -116,54 +116,26 @@ def afficher_supervision_progression():
             niveau_detecte = "4ème"
         elif "3" in nom_cl_lower:
             niveau_detecte = "3ème"
+        elif "seconde" in nom_cl_lower or "2de" in nom_cl_lower:
+            niveau_detecte = "Seconde"
+        elif "premiere" in nom_cl_lower or "1ere" in nom_cl_lower:
+            niveau_detecte = "Première"
+        elif "terminale" in nom_cl_lower or "tle" in nom_cl_lower:
+            niveau_detecte = "Terminale"
+        elif "cp" in nom_cl_lower:
+            niveau_detecte = "CP"
+        elif "ce1" in nom_cl_lower:
+            niveau_detecte = "CE1"
+        elif "ce2" in nom_cl_lower:
+            niveau_detecte = "CE2"
+        elif "cm1" in nom_cl_lower:
+            niveau_detecte = "CM1"
+        elif "cm2" in nom_cl_lower:
+            niveau_detecte = "CM2"
+        elif "ci" in nom_cl_lower or "ps" in nom_cl_lower or "ms" in nom_cl_lower or "gs" in nom_cl_lower or "maternelle" in nom_cl_lower:
+            niveau_detecte = "Maternelle"
 
-        # Barème officiel strict par niveau pour le collège
-        BAREME_COLLEGE = {
-            "6ème": {
-                "francais": 205,
-                "anglais": 140,
-                "histoire geographie": 70,
-                "mathematiques": 240,
-                "physique chimie": 35,
-                "science de la vie et de la terre": 70,
-                "economie familiale et sociale": 35,
-                "education physique et sportive": 70,
-                "education civique": 35,
-            },
-            "5ème": {
-                "francais": 140,
-                "anglais": 140,
-                "histoire geographie": 70,
-                "mathematiques": 175,
-                "physique chimie": 35,
-                "science de la vie et de la terre": 70,
-                "economie familiale et sociale": 35,
-                "education physique et sportive": 70,
-                "education civique": 35,
-            },
-            "4ème": {
-                "francais": 140,
-                "anglais": 140,
-                "histoire geographie": 70,
-                "mathematiques": 175,
-                "physique chimie": 105,
-                "science de la vie et de la terre": 70,
-                "economie familiale et sociale": 35,
-                "education physique et sportive": 70,
-                "education civique": 35,
-            },
-            "3ème": {
-                "francais": 140,
-                "anglais": 140,
-                "histoire geographie": 70,
-                "mathematiques": 175,
-                "physique chimie": 105,
-                "science de la vie et de la terre": 105,
-                "economie familiale et sociale": 35,
-                "education physique et sportive": 70,
-                "education civique": 35,
-            },
-        }
+        affichage_niveau = f" ({niveau_detecte})" if niveau_detecte else ""
 
         # --- RÉCUPÉRATION STRICTE DES MATIÈRES DE LA CLASSE SÉLECTIONNÉE ---
         matieres_query = db.query(Matiere).filter(
@@ -174,7 +146,6 @@ def afficher_supervision_progression():
             matieres_query = matieres_query.filter(Matiere.deleted_at.is_(None))
         matieres_brutes = matieres_query.all()
 
-        # Si aucune matière n'est trouvée par classe_id direct, on élargit au cycle avec déduplication
         if not matieres_brutes:
             matieres_query_cycle = db.query(Matiere).filter(
                 Matiere.cycle == cycle_en_cours, Matiere.school_id == ecole_active_id
@@ -183,7 +154,6 @@ def afficher_supervision_progression():
                 matieres_query_cycle = matieres_query_cycle.filter(Matiere.deleted_at.is_(None))
             matieres_brutes = matieres_query_cycle.all()
 
-        # Déduplication stricte par nom normalisé pour éliminer les doublons
         matieres_uniques_dict = {}
         for mat in matieres_brutes:
             nom_brut = mat.libelle if hasattr(mat, "libelle") and mat.libelle else getattr(mat, "nom", "Matière")
@@ -193,7 +163,7 @@ def afficher_supervision_progression():
         matieres_cycle = list(matieres_uniques_dict.values())
 
         st.markdown(
-            f"### Synthèse des Programmes pour **{classe_selectionnee} ({niveau_detecte})** — **{school_name}**"
+            f"### Synthèse des Programmes pour **{classe_selectionnee}{affichage_niveau}** — **{school_name}**"
         )
 
         if not matieres_cycle:
@@ -202,7 +172,6 @@ def afficher_supervision_progression():
             )
             return
 
-        # Récupération des entrées du cahier de texte pour la classe sélectionnée
         toutes_entrees = (
             db.query(CahierTexte)
             .filter(
@@ -219,11 +188,28 @@ def afficher_supervision_progression():
                 if hasattr(mat, "libelle") and mat.libelle
                 else getattr(mat, "nom", "Matière")
             )
+            mat_norm = normaliser_chaine(mat_lib)
+
+            # --- RECHERCHE DU VOLUME PRÉVU ET COEFF DEPUIS LA TABLE PROGRAMME UPLOADÉE ---
+            prog_obj = db.query(Programme).filter(
+                Programme.school_id == ecole_active_id,
+                Programme.nom_matiere == mat_norm,
+                Programme.code_matiere == normaliser_chaine(classe_selectionnee)
+            ).first()
+
+            if not prog_obj:
+                # Recherche élargie par nom de matière si non trouvé par classe exacte
+                prog_obj = db.query(Programme).filter(
+                    Programme.school_id == ecole_active_id,
+                    Programme.nom_matiere == mat_norm
+                ).first()
+
+            volume_prevu = float(prog_obj.volume_horaire) if prog_obj and prog_obj.volume_horaire else float(getattr(mat, "volume_horaire", 0) or 0)
+            coefficient_val = int(prog_obj.coefficient) if prog_obj and prog_obj.coefficient else int(getattr(mat, "coefficient", 1) or 1)
 
             # Filtrage des séances pour cette matière spécifique
-            seances_mat = [e for e in toutes_entrees if getattr(e, 'matiere_id', None) == mat.id or normaliser_chaine(getattr(e, 'matiere', getattr(e, 'discipline', ''))) == normaliser_chaine(mat_lib)]
+            seances_mat = [e for e in toutes_entrees if getattr(e, 'matiere_id', None) == mat.id or normaliser_chaine(getattr(e, 'matiere', getattr(e, 'discipline', ''))) == mat_norm]
 
-            # Calcul cumulé du volume horaire réalisé
             volume_realise = 0.0
             for seance in seances_mat:
                 duree_val = float(getattr(seance, 'duree', 0.0) or 0.0)
@@ -237,37 +223,12 @@ def afficher_supervision_progression():
                     except Exception:
                         volume_realise += 1.0
 
-            # Normalisation du nom de la matière pour le barème
-            mat_norm = normaliser_chaine(mat_lib)
-
-            # Volume horaire prévu : strict selon le cycle (Collège vs Lycée)
-            volume_prevu = 0.0
-            is_college = cycle_en_cours.lower() in ["collège", "college"]
-
-            if is_college:
-                if (
-                    niveau_detecte in BAREME_COLLEGE
-                    and mat_norm in BAREME_COLLEGE[niveau_detecte]
-                ):
-                    volume_prevu = float(BAREME_COLLEGE[niveau_detecte][mat_norm])
-                elif hasattr(mat, "volume_horaire") and mat.volume_horaire:
-                    volume_prevu = float(mat.volume_horaire)
-                else:
-                    volume_prevu = 45.0
-            else:
-                if hasattr(mat, "volume_horaire") and mat.volume_horaire:
-                    volume_prevu = float(mat.volume_horaire)
-                else:
-                    volume_prevu = 0.0
-
-            # Calcul du taux de couverture
             taux = (
                 min(100, int((volume_realise / volume_prevu) * 100))
                 if volume_prevu > 0
                 else 0
             )
 
-            # Analyse de la progression
             if volume_prevu == 0:
                 remarques = "⚪ Non configuré"
             elif taux < 20:
@@ -281,7 +242,7 @@ def afficher_supervision_progression():
 
             data_suivi.append({
                 "Discipline / Matière": mat_lib.title(),
-                "Coefficient": int(getattr(mat, "coefficient", 1) or 1),
+                "Coefficient": coefficient_val,
                 "Volume Prévu": f"{volume_prevu:g}h",
                 "Volume Réalisé": f"{volume_realise:g}h",
                 "Taux d'Avancement": f"{taux}%",
