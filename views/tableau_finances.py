@@ -3,7 +3,6 @@ import io
 from database.audit import log_action_erp
 from database.db_config import SessionLocal
 from database.models import ActivityLog, Classe, Depense, Eleve, Paiement, School
-from database.queries import get_classes_cached, get_matieres_cached
 import pandas as pd
 import streamlit as st
 
@@ -13,7 +12,7 @@ def afficher_tableau_finances():
   st.markdown(
       "Vue macroscopique incluant la ventilation des cotisations par classe,"
       " cycle et établissement avec prise en compte stricte des frais de"
-      " scolarité, des frais COGES, des réductions nominatives, des salaires et des charges opérationnelles."
+      " scolarité, d'inscription, COGES, transport, cantine et des réductions."
   )
   st.markdown("---")
 
@@ -61,7 +60,6 @@ def afficher_tableau_finances():
     if classes_ids:
       eleves_query = eleves_query.filter(Eleve.classe_id.in_(classes_ids))
     else:
-      # Isolation stricte : si aucune classe n'existe pour ce cycle, on renvoie une liste vide
       eleves_query = eleves_query.filter(Eleve.classe_id == -1)
       
     eleves = eleves_query.all()
@@ -72,17 +70,17 @@ def afficher_tableau_finances():
     budget_attendu = 0.0
     total_encaisse = 0.0
 
-    # Calcul précis : Scolarité (65000) + COGES (2000) - Réduction (5000) = 62000 net par défaut
+    # Calcul global : Scolarité + Inscription + COGES + Transport + Cantine - Réduction
     for eleve in eleves:
       classe = classes_dict.get(eleve.classe_id) if eleve.classe_id else None
-      frais_scol = float(
-          getattr(classe, "frais_scolarite", 65000.0) or 65000.0
-      )
+      frais_scol = float(getattr(classe, "frais_scolarite", 0.0) or 0.0)
       frais_inscr = float(getattr(classe, "frais_inscription", 0.0) or 0.0)
-      frais_coges = float(getattr(classe, "frais_coges", 2000.0) or 2000.0)
+      frais_coges = float(getattr(classe, "frais_coges", 0.0) or 0.0)
+      frais_trans = float(getattr(classe, "frais_transport", 0.0) or 0.0)
+      frais_cant = float(getattr(classe, "frais_cantine", 0.0) or 0.0)
 
-      frais_brut_total = frais_scol + frais_inscr + frais_coges
-      reduction = float(getattr(eleve, "montant_reduction", 5000.0) or 5000.0)
+      frais_brut_total = frais_scol + frais_inscr + frais_coges + frais_trans + frais_cant
+      reduction = float(getattr(eleve, "montant_reduction", 0.0) or 0.0)
       net_eleve = max(0.0, frais_brut_total - reduction)
 
       budget_attendu += net_eleve
@@ -164,13 +162,14 @@ def afficher_tableau_finances():
         encaisse_classe = 0.0
 
         for e in eleves_classe:
-          f_scol = float(
-              getattr(classe, "frais_scolarite", 65000.0) or 65000.0
-          )
+          f_scol = float(getattr(classe, "frais_scolarite", 0.0) or 0.0)
           f_inscr = float(getattr(classe, "frais_inscription", 0.0) or 0.0)
-          f_coges = float(getattr(classe, "frais_coges", 2000.0) or 2000.0)
-          brut_e = f_scol + f_inscr + f_coges
-          red_e = float(getattr(e, "montant_reduction", 5000.0) or 5000.0)
+          f_coges = float(getattr(classe, "frais_coges", 0.0) or 0.0)
+          f_trans = float(getattr(classe, "frais_transport", 0.0) or 0.0)
+          f_cant = float(getattr(classe, "frais_cantine", 0.0) or 0.0)
+          
+          brut_e = f_scol + f_inscr + f_coges + f_trans + f_cant
+          red_e = float(getattr(e, "montant_reduction", 0.0) or 0.0)
           attendu_classe += max(0.0, brut_e - red_e)
 
           p_eleve = (
@@ -206,7 +205,6 @@ def afficher_tableau_finances():
       df_rep = pd.DataFrame(repartition_data)
       st.dataframe(df_rep, use_container_width=True, hide_index=True)
 
-      # Section d'exportation professionnelle
       st.markdown("##### 📥 Exportation des Bilans Macroscopiques")
       col_e1, col_e2 = st.columns(2)
 
@@ -237,7 +235,6 @@ def afficher_tableau_finances():
             ),
         )
 
-    # Journalisation d'audit de l'action
     db.add(
         ActivityLog(
             school_id=ecole_active_id,
@@ -253,7 +250,5 @@ def afficher_tableau_finances():
   finally:
     db.close()
 
-
-# Alias de compatibilité exhaustive pour le routeur app.py
-afficher_tableau_finances = afficher_tableau_finances
+afficher_classes = afficher_tableau_finances
 afficher_finances = afficher_tableau_finances

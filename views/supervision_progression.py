@@ -11,12 +11,32 @@ SYNONYMES_MATIERES = {
     "physique chimie": "physique chimie",
     "svt": "science de la vie et de la terre",
     "science de la vie et de la terre": "science de la vie et de la terre",
-    "eps": "education physique et sportive",
-    "education physique et sportive": "education physique et sportive",
+    "eps": "eps",
+    "education physique": "eps",
+    "education physique et sportive": "eps",
     "economie familiale": "economie familiale et sociale",
     "economie familiale et sociale": "economie familiale et sociale",
+    "economie familiale sociale": "economie familiale et sociale",
     "histoire geographie": "histoire geographie",
     "histoire-geographie": "histoire geographie",
+    "education civique": "education civique et morale",
+    "education civique et morale": "education civique et morale",
+    "education civique morale": "education civique et morale",
+    "conduite": "conduite",
+}
+
+# Grille de secours officielle MEN pour les volumes horaires du collège par matière normalisée
+BAREME_OFFICIEL_COLLEGE = {
+    "francis": 140.0,
+    "anglais": 140.0,
+    "histoire geographie": 70.0,
+    "mathematiques": 175.0,
+    "physique chimie": 105.0,
+    "science de la vie et de la terre": 105.0,
+    "economie familiale et sociale": 35.0,
+    "eps": 70.0,
+    "education civique et morale": 35.0,
+    "conduite": 0.0,
 }
 
 def normaliser_chaine(texte):
@@ -24,7 +44,7 @@ def normaliser_chaine(texte):
         return ""
     nfkd = unicodedata.normalize("NFKD", str(texte))
     sans_accent = "".join([c for c in nfkd if not unicodedata.combining(c)])
-    nettoye = " ".join(sans_accent.lower().replace("-", " ").replace("_", " ").split())
+    nettoye = " ".join(sans_accent.lower().replace("-", " ").replace("_", " ").replace("è", "e").replace("é", " e").split())
     return SYNONYMES_MATIERES.get(nettoye, nettoye)
 
 
@@ -104,39 +124,6 @@ def afficher_supervision_progression():
             None,
         )
 
-        # Détection dynamique et générale du niveau
-        nom_cl_lower = str(classe_selectionnee).lower()
-        niveau_detecte = ""
-        
-        if "6" in nom_cl_lower:
-            niveau_detecte = "6ème"
-        elif "5" in nom_cl_lower:
-            niveau_detecte = "5ème"
-        elif "4" in nom_cl_lower:
-            niveau_detecte = "4ème"
-        elif "3" in nom_cl_lower:
-            niveau_detecte = "3ème"
-        elif "seconde" in nom_cl_lower or "2de" in nom_cl_lower:
-            niveau_detecte = "Seconde"
-        elif "premiere" in nom_cl_lower or "1ere" in nom_cl_lower:
-            niveau_detecte = "Première"
-        elif "terminale" in nom_cl_lower or "tle" in nom_cl_lower:
-            niveau_detecte = "Terminale"
-        elif "cp" in nom_cl_lower:
-            niveau_detecte = "CP"
-        elif "ce1" in nom_cl_lower:
-            niveau_detecte = "CE1"
-        elif "ce2" in nom_cl_lower:
-            niveau_detecte = "CE2"
-        elif "cm1" in nom_cl_lower:
-            niveau_detecte = "CM1"
-        elif "cm2" in nom_cl_lower:
-            niveau_detecte = "CM2"
-        elif "ci" in nom_cl_lower or "ps" in nom_cl_lower or "ms" in nom_cl_lower or "gs" in nom_cl_lower or "maternelle" in nom_cl_lower:
-            niveau_detecte = "Maternelle"
-
-        affichage_niveau = f" ({niveau_detecte})" if niveau_detecte else ""
-
         # --- RÉCUPÉRATION STRICTE DES MATIÈRES DE LA CLASSE SÉLECTIONNÉE ---
         matieres_query = db.query(Matiere).filter(
             Matiere.classe_id == classe_obj.id if classe_obj else True,
@@ -163,7 +150,7 @@ def afficher_supervision_progression():
         matieres_cycle = list(matieres_uniques_dict.values())
 
         st.markdown(
-            f"### Synthèse des Programmes pour **{classe_selectionnee}{affichage_niveau}** — **{school_name}**"
+            f"### Synthèse des Programmes pour **{classe_selectionnee}** — **{school_name} ({cycle_en_cours})**"
         )
 
         if not matieres_cycle:
@@ -181,6 +168,8 @@ def afficher_supervision_progression():
             .all()
         )
 
+        programmes_ecole = db.query(Programme).filter(Programme.school_id == ecole_active_id).all()
+
         data_suivi = []
         for mat in matieres_cycle:
             mat_lib = (
@@ -190,22 +179,51 @@ def afficher_supervision_progression():
             )
             mat_norm = normaliser_chaine(mat_lib)
 
-            # --- RECHERCHE DU VOLUME PRÉVU ET COEFF DEPUIS LA TABLE PROGRAMME UPLOADÉE ---
-            prog_obj = db.query(Programme).filter(
-                Programme.school_id == ecole_active_id,
-                Programme.nom_matiere == mat_norm,
-                Programme.code_matiere == normaliser_chaine(classe_selectionnee)
-            ).first()
+            volume_prevu = 0.0
+            coefficient_val = int(getattr(mat, "coefficient", 1) or 1)
 
-            if not prog_obj:
-                # Recherche élargie par nom de matière si non trouvé par classe exacte
-                prog_obj = db.query(Programme).filter(
-                    Programme.school_id == ecole_active_id,
-                    Programme.nom_matiere == mat_norm
-                ).first()
+            if cycle_en_cours.lower() in ["collège", "college"]:
+                for attr_v in ["volume_horaire", "volume", "heures", "masse_horaire", "duree", "volume_hebdo"]:
+                    val = getattr(mat, attr_v, None)
+                    if val is not None:
+                        try:
+                            v_f = float(val)
+                            if v_f > 0:
+                                volume_prevu = v_f
+                                break
+                        except Exception:
+                            pass
+                
+                if volume_prevu == 0.0:
+                    for p in programmes_ecole:
+                        p_nom = normaliser_chaine(getattr(p, 'nom_matiere', getattr(p, 'matiere', '')))
+                        if p_nom == mat_norm and p.volume_horaire:
+                            volume_prevu = float(p.volume_horaire)
+                            break
+                
+                # Secours ultime par barème officiel si toujours à 0
+                if volume_prevu == 0.0 and mat_norm in BAREME_OFFICIEL_COLLEGE:
+                    volume_prevu = BAREME_OFFICIEL_COLLEGE[mat_norm]
+            else:
+                prog_obj = None
+                classe_norm = normaliser_chaine(classe_selectionnee)
+                for p in programmes_ecole:
+                    p_nom = normaliser_chaine(getattr(p, 'nom_matiere', getattr(p, 'matiere', '')))
+                    texte_ligne = normaliser_chaine(f"{getattr(p, 'classe', '')} {getattr(p, 'code_matiere', '')} {getattr(p, 'matiere', '')} {getattr(p, 'nom_matiere', '')}")
+                    if p_nom == mat_norm and (classe_norm in texte_ligne):
+                        prog_obj = p
+                        break
+                
+                if not prog_obj:
+                    for p in programmes_ecole:
+                        p_nom = normaliser_chaine(getattr(p, 'nom_matiere', getattr(p, 'matiere', '')))
+                        if p_nom == mat_norm:
+                            prog_obj = p
+                            break
 
-            volume_prevu = float(prog_obj.volume_horaire) if prog_obj and prog_obj.volume_horaire else float(getattr(mat, "volume_horaire", 0) or 0)
-            coefficient_val = int(prog_obj.coefficient) if prog_obj and prog_obj.coefficient else int(getattr(mat, "coefficient", 1) or 1)
+                volume_prevu = float(prog_obj.volume_horaire) if prog_obj and prog_obj.volume_horaire else float(getattr(mat, "volume_horaire", 0) or 0)
+                if prog_obj and prog_obj.coefficient:
+                    coefficient_val = int(prog_obj.coefficient)
 
             # Filtrage des séances pour cette matière spécifique
             seances_mat = [e for e in toutes_entrees if getattr(e, 'matiere_id', None) == mat.id or normaliser_chaine(getattr(e, 'matiere', getattr(e, 'discipline', ''))) == mat_norm]
