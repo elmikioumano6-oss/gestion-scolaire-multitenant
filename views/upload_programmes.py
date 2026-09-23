@@ -1,5 +1,5 @@
 from datetime import datetime
-import io
+from io import BytesIO
 import unicodedata
 from database.db_config import SessionLocal
 from database.models import ActivityLog, Classe, Matiere, Programme, School
@@ -29,6 +29,20 @@ def normaliser_chaine(texte):
         sans_accent.lower().replace("-", " ").replace("_", " ").split()
     )
     return SYNONYMES_MATIERES.get(nettoye, nettoye)
+
+
+def normaliser_nom_classe(nom_classe):
+    """Uniformise les appellations de classes pour éviter les doublons (ex: 2nde -> Seconde)."""
+    if not nom_classe:
+        return ""
+    txt = str(nom_classe).strip().lower()
+    txt = txt.replace("2nde", "seconde").replace("2e", "seconde")
+    txt = txt.replace("1ere", "premiere").replace("1ère", "premiere").replace("1e", "premiere")
+    txt = txt.replace("tle", "terminale").replace("term", "terminale")
+    # Normalisation des accents et espaces
+    nfkd = unicodedata.normalize("NFKD", txt)
+    sans_accent = "".join([c for c in nfkd if not unicodedata.combining(c)])
+    return " ".join(sans_accent.split()).title()
 
 
 def afficher_upload_programmes():
@@ -93,23 +107,27 @@ def afficher_upload_programmes():
 
                     for _, row in df_import.iterrows():
                         nom_mat = str(row.get("Matière", "")).strip()
-                        nom_classe = str(row.get("Classe", "")).strip()
+                        nom_classe_brut = str(row.get("Classe", "")).strip()
                         coef = float(row.get("Coefficient", 1) or 1)
                         vol = float(row.get("Volume Horaire Prévu", 45) or 45)
 
-                        if not nom_mat or nom_mat == "nan" or not nom_classe or nom_classe == "nan":
+                        if not nom_mat or nom_mat == "nan" or not nom_classe_brut or nom_classe_brut == "nan":
                             continue
+
+                        # Uniformisation propre du nom de la classe
+                        nom_classe = normaliser_nom_classe(nom_classe_brut)
 
                         norm_mat = normaliser_chaine(nom_mat)
                         norm_classe = normaliser_chaine(nom_classe)
 
-                        # Recherche ou création de la classe spécifique
-                        classe_obj = db.query(Classe).filter(
+                        # Recherche ou création de la classe spécifique sans doublon
+                        classes_existantes = db.query(Classe).filter(
                             Classe.school_id == resolved_school_id,
                             Classe.cycle == cycle_en_cours,
                         ).all()
+                        
                         classe_cible = next(
-                            (c for c in classe_obj if normaliser_chaine(c.libelle or getattr(c, 'nom', '')) == norm_classe),
+                            (c for c in classes_existantes if normaliser_chaine(c.libelle or getattr(c, 'nom', '')) == norm_classe),
                             None
                         )
 
@@ -126,21 +144,27 @@ def afficher_upload_programmes():
                         prog_classe = db.query(Programme).filter(
                             Programme.school_id == resolved_school_id,
                             Programme.nom_matiere == norm_mat,
-                            Programme.code_matiere == norm_classe
+                            (Programme.code_matiere == norm_classe) | (Programme.classe == nom_classe)
                         ).first()
 
                         if prog_classe:
                             prog_classe.volume_horaire = vol
                             prog_classe.coefficient = coef
+                            prog_classe.classe = nom_classe
+                            if hasattr(prog_classe, 'cycle'):
+                                prog_classe.cycle = cycle_en_cours
                             count_updated += 1
                         else:
                             nouveau_prog = Programme(
                                 school_id=resolved_school_id,
-                                nom_matiere=norm_mat,
+                                classe=nom_classe,
                                 code_matiere=norm_classe,
+                                nom_matiere=norm_mat,
                                 volume_horaire=vol,
                                 coefficient=coef,
                             )
+                            if hasattr(nouveau_prog, 'cycle'):
+                                nouveau_prog.cycle = cycle_en_cours
                             db.add(nouveau_prog)
                             count_added += 1
 

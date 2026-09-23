@@ -25,9 +25,9 @@ def afficher_classes(niveau_actif="Collège"):
     try:
         tab_liste, tab_ajout = st.tabs(["📋 Liste des Classes", "➕ Ajouter une Classe"])
 
-        # --- REQUÊTE COMMUNE AVEC ISOLATION MULTI-TENANT ---
+        # --- REQUÊTE COMMUNE AVEC ISOLATION MULTI-TENANT ET FILTRE ROBUSTE ---
         query = db.query(Classe).filter(
-            Classe.cycle == niveau_actif,
+            Classe.cycle.ilike(niveau_actif.strip()),
             Classe.deleted_at.is_(None)
         )
 
@@ -183,7 +183,7 @@ def afficher_classes(niveau_actif="Collège"):
                         doublon = db.query(Classe).filter(
                             Classe.school_id == school_id,
                             Classe.libelle == libelle_c,
-                            Classe.cycle == niveau_actif,
+                            Classe.cycle.ilike(niveau_actif.strip()),
                             Classe.deleted_at.is_(None)
                         ).first()
 

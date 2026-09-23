@@ -2,7 +2,6 @@ from datetime import datetime
 from database.audit import log_action_erp
 from database.db_config import SessionLocal
 from database.models import CahierTexte, Classe, Enseignant, School, Note, Eleve, Programme, Matiere
-from database.queries import get_classes_cached, get_matieres_cached
 import pandas as pd
 import streamlit as st
 import unicodedata
@@ -12,12 +11,34 @@ SYNONYMES_MATIERES = {
     "physique chimie": "physique chimie",
     "svt": "science de la vie et de la terre",
     "science de la vie et de la terre": "science de la vie et de la terre",
-    "eps": "education physique et sportive",
-    "education physique et sportive": "education physique et sportive",
+    "eps": "eps",
+    "education physique": "eps",
+    "education physique et sportive": "eps",
     "economie familiale": "economie familiale et sociale",
     "economie familiale et sociale": "economie familiale et sociale",
+    "economie familiale sociale": "economie familiale et sociale",
     "histoire geographie": "histoire geographie",
     "histoire-geographie": "histoire geographie",
+    "education civique": "education civique et morale",
+    "education civique et morale": "education civique et morale",
+    "education civique morale": "education civique et morale",
+    "conduite": "conduite",
+}
+
+# Référentiel global de secours par cycle (MEN Niger)
+BAREME_OFFICIEL_GLOBAL = {
+    "collège": {
+        "6": 900.0, "5": 770.0, "4": 840.0, "3": 875.0, "defaut": 850.0
+    },
+    "lycée": {
+        "seconde": 950.0, "2de": 950.0, "premiere": 1000.0, "1ere": 1000.0, "terminale": 1050.0, "tle": 1050.0, "defaut": 1000.0
+    },
+    "primaire": {
+        "defaut": 600.0
+    },
+    "maternelle": {
+        "defaut": 400.0
+    }
 }
 
 def normaliser_chaine(texte):
@@ -25,14 +46,14 @@ def normaliser_chaine(texte):
         return ""
     nfkd = unicodedata.normalize("NFKD", str(texte))
     sans_accent = "".join([c for c in nfkd if not unicodedata.combining(c)])
-    nettoye = " ".join(sans_accent.lower().replace("-", " ").replace("_", " ").split())
+    nettoye = " ".join(sans_accent.lower().replace("-", " ").replace("_", " ").replace("è", "e").replace("é", " e").split())
     return SYNONYMES_MATIERES.get(nettoye, nettoye)
 
 
 def afficher_espace_inspection():
     st.subheader("🔍 Espace Inspection & Supervision Pédagogique")
     st.markdown(
-        "Portail de contrôle conforme aux normes de supervision (MEN Niger / "
+        "Portail de contrôle universel conforme aux normes de supervision (MEN Niger / "
         "Standards internationaux) : Visas pédagogiques, suivi des programmes et traçabilité d'audit."
     )
     st.markdown("---")
@@ -52,16 +73,14 @@ def afficher_espace_inspection():
         target_school_id = school_id or 1
         resolved_school_id = school_id if school_id else target_school_id
 
-        # Journalisation sécurisée de l'accès à l'espace d'inspection (Norme SOC 2 / ISO 27001)
         log_action_erp(
             module="Espace Inspection",
-            action=f"Consultation sécurisée de l'espace d'inspection - Cycle: {cycle_en_cours}",
+            action=f"Consultation sécurisée de l'espace d'inspection - Cycle global: {cycle_en_cours}",
             statut="Succès",
             valeur_avant="Accès non audité",
             valeur_apres=f"Utilisateur: {username_connecte}",
         )
 
-        # 🔒 Suppression définitive de l'onglet "Analyse des Notes" de cette vue
         tab_cours, tab_progression, tab_visite, tab_stats = st.tabs([
             "📖 Suivi & Visa des Cours",
             "📈 Taux de Couverture (MEN)",
@@ -87,7 +106,7 @@ def afficher_espace_inspection():
             noms_classes = [c.libelle for c in classes_cycle]
 
             if not noms_classes:
-                st.info("Aucune classe configurée pour ce cycle.")
+                st.info(f"Aucune classe configurée pour le cycle **{cycle_en_cours}**.")
             else:
                 classe_sel = st.selectbox(
                     "Sélectionner la classe à superviser", noms_classes, key="insp_classe_sel"
@@ -116,7 +135,6 @@ def afficher_espace_inspection():
                                 st.write(f"**Contenu :** {ent.contenu_realise}")
                                 st.write(f"**Difficultés :** {ent.difficultees or 'Aucune'}")
                                 
-                                # Système de Visa Pédagogique Numérique
                                 col_v1, col_v2 = st.columns([3, 1])
                                 with col_v1:
                                     visa_status = getattr(ent, 'visa_inspecteur', None)
@@ -140,44 +158,121 @@ def afficher_espace_inspection():
                                             st.rerun()
 
         with tab_progression:
-            st.markdown(f"### 📈 Suivi de l'Avancement des Programmes Officiels (MEN Niger)")
-            st.markdown("Évaluation dynamique du volume horaire dispensé par rapport au cumul des volumes horaires officiels.")
-            
-            if classes_cycle and 'classe_obj' in locals() and classe_obj:
-                total_heures_dispensees = sum(getattr(e, 'duree', 1.0) for e in entrees) if 'entrees' in locals() and entrees else 0.0
-                
-                # --- SOMME EXACTE DES VOLUMES HORAIRES DEPUIS LA TABLE PROGRAMME / MATIÈRE ---
-                # 1. Recherche dans la table Programme
-                programmes_ecole = db.query(Programme).filter(Programme.school_id == resolved_school_id).all()
-                somme_prog = sum(
-                    float(p.volume_horaire or 0) for p in programmes_ecole 
-                    if getattr(p, 'classe', '') and normaliser_chaine(classe_sel) in normaliser_chaine(p.classe)
+            st.markdown(f"### 📈 Taux de Couverture des Programmes (MEN Niger) — **{cycle_en_cours}**")
+            st.markdown("Évaluation dynamique et globale du volume horaire total dispensé par rapport au cumul des volumes horaires officiels.")
+
+            classes_cycle_prog = (
+                db.query(Classe)
+                .filter(
+                    Classe.school_id == target_school_id,
+                    Classe.cycle == cycle_en_cours,
+                    Classe.deleted_at.is_(None)
+                )
+                .all()
+            )
+            noms_classes_prog = [c.libelle for c in classes_cycle_prog]
+
+            if not noms_classes_prog:
+                st.info(f"Aucune classe configurée pour le cycle **{cycle_en_cours}**.")
+            else:
+                classe_prog_sel = st.selectbox(
+                    "🔍 Sélectionner la classe pour le suivi global :", noms_classes_prog, key="insp_prog_classe_sel"
+                )
+                classe_prog_obj = next(
+                    (c for c in classes_cycle_prog if c.libelle == classe_prog_sel), None
                 )
 
-                # 2. Recherche dans la table Matiere de la classe
-                matieres_classe = db.query(Matiere).filter(Matiere.classe_id == classe_obj.id).all()
-                somme_matieres = sum(float(m.volume_horaire or 0) for m in matieres_classe)
+                if classe_prog_obj:
+                    # 1. Calcul des heures réelles dispensées (Cahier de texte)
+                    entrees_classe = (
+                        db.query(CahierTexte)
+                        .filter(
+                            CahierTexte.school_id == target_school_id,
+                            CahierTexte.classe_id == classe_prog_obj.id,
+                        )
+                        .all()
+                    )
 
-                if somme_prog > 0:
-                    objectif_volume_horaire = somme_prog
-                elif somme_matieres > 0:
-                    objectif_volume_horaire = somme_matieres
+                    total_heures_realisees = 0.0
+                    for ent in entrees_classe:
+                        duree_val = float(getattr(ent, 'duree', 0.0) or 0.0)
+                        if duree_val > 0:
+                            total_heures_realisees += duree_val
+                        else:
+                            d_str = str(getattr(ent, "duree_seance", "1 heure"))
+                            try:
+                                chiffre = float("".join(filter(str.isdigit, d_str)) or 1)
+                                total_heures_realisees += chiffre
+                            except Exception:
+                                total_heures_realisees += 1.0
+
+                    # 2. Calcul universel du volume attendu (Matières de la classe -> Programmes -> Référentiel du cycle)
+                    objectif_total = 0.0
+                    origine_calcul = "Base dynamique"
+                    cycle_key = cycle_en_cours.strip().lower()
+
+                    # A. Vérification de la table Matière liée à la classe
+                    matieres_classe = db.query(Matiere).filter(Matiere.classe_id == classe_prog_obj.id, Matiere.school_id == resolved_school_id).all()
+                    if matieres_classe:
+                        for m in matieres_classe:
+                            for attr_v in ["volume_horaire", "volume", "heures", "masse_horaire", "duree", "volume_hebdo"]:
+                                val = getattr(m, attr_v, None)
+                                if val is not None:
+                                    try:
+                                        v_f = float(val)
+                                        if v_f > 0:
+                                            objectif_total += v_f
+                                            break
+                                    except Exception:
+                                        pass
+
+                    # B. Vérification de la table Programme si la table matière est vide
+                    if objectif_total == 0.0:
+                        programmes_ecole = db.query(Programme).filter(Programme.school_id == resolved_school_id).all()
+                        classe_norm = normaliser_chaine(classe_prog_sel)
+                        for p in programmes_ecole:
+                            p_classe = normaliser_chaine(str(getattr(p, 'classe', getattr(p, 'code_matiere', ''))))
+                            if classe_norm in p_classe or any(m in p_classe for m in classe_norm.split() if len(m) > 1):
+                                objectif_total += float(p.volume_horaire or 0)
+
+                    # C. Référentiel de secours universel selon le cycle et le niveau de la classe
+                    if objectif_total == 0.0:
+                        cl_lower = classe_prog_sel.lower()
+                        ref_cycle = BAREME_OFFICIEL_GLOBAL.get(cycle_key, {"defaut": 700.0})
+                        
+                        matched = False
+                        for key_niv, val_vol in ref_cycle.items():
+                            if key_niv != "defaut" and key_niv in cl_lower:
+                                objectif_total = val_vol
+                                origine_calcul = f"Référentiel officiel ({cycle_en_cours} - {key_niv})"
+                                matched = True
+                                break
+                        if not matched:
+                            objectif_total = ref_cycle.get("defaut", 700.0)
+                            origine_calcul = f"Référentiel standard ({cycle_en_cours})"
+
+                    taux_global = min(100.0, (total_heures_realisees / objectif_total) * 100) if objectif_total > 0 else 0.0
+
+                    st.caption(f"🌍 Cycle actif : **{cycle_en_cours}** | Classe : **{classe_prog_sel}** | Mode : _{origine_calcul}_")
+
+                    col_m1, col_m2, col_m3 = st.columns(3)
+                    with col_m1:
+                        st.metric("Volume Horaire Total Dispensé", f"{total_heures_realisees:g} h")
+                    with col_m2:
+                        st.metric("Volume Horaire Officiel Attendu", f"{objectif_total:g} h")
+                    with col_m3:
+                        st.metric("Taux de Couverture Global", f"{taux_global:.1f}%")
+
+                    st.progress(taux_global / 100.0)
+                    
+                    if taux_global < 20:
+                        st.error(f"🔴 État d'avancement critique pour **{classe_prog_sel}** (Taux : {taux_global:.1f}%)")
+                    elif taux_global < 50:
+                        st.warning(f"🟠 Avancement modéré pour **{classe_prog_sel}** (Taux : {taux_global:.1f}%)")
+                    else:
+                        st.success(f"🟢 Rythme de couverture satisfaisant pour **{classe_prog_sel}** (Taux : {taux_global:.1f}%)")
                 else:
-                    # Barème officiel de secours par niveau (Collège)
-                    BAREME_SECOURS = {"6ème": 900.0, "5ème": 770.0, "4ème": 840.0, "3ème": 875.0}
-                    objectif_volume_horaire = 120.0
-                    for niv, val in BAREME_SECOURS.items():
-                        if niv[0] in classe_sel.lower() or niv in classe_sel.lower():
-                            objectif_volume_horaire = val
-                            break
-
-                taux_progression = min(100.0, (total_heures_dispensees / objectif_volume_horaire) * 100) if objectif_volume_horaire > 0 else 0.0
-
-                st.metric("Volume Horaire Total Dispensé", f"{total_heures_dispensees} h")
-                st.progress(taux_progression / 100.0)
-                st.caption(f"Taux estimé de couverture du programme officiel : **{taux_progression:.1f}%** (Somme du volume horaire de référence pour **{classe_sel}** : {objectif_volume_horaire}h)")
-            else:
-                st.info("Veuillez sélectionner une classe valide dans l'onglet précédent.")
+                    st.info("Veuillez sélectionner une classe valide.")
 
         with tab_visite:
             st.markdown(f"### 📋 Grille Numérisée de Visite de Classe")
