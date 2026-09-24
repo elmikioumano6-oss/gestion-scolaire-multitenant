@@ -43,21 +43,18 @@ def afficher_etat_paie_administration(mois, date_paie):
 
         tous_utilisateurs = utilisateurs_query.all()
         
-        # Filtrage strict basé sur la liste exacte du personnel administratif et de direction
         postes_administratifs = [
             "proviseur", "directeur", "censeur", "surveillant", 
             "comptable", "econome", "gardien", "secretaire", 
-            "informaticien", "planton", "admin", "econome"
+            "informaticien", "planton", "admin"
         ]
         
         personnels = []
         for u in tous_utilisateurs:
             role_lower = str(getattr(u, "role", "")).lower()
-            # On inclut l'agent si son rôle contient l'un des mots-clés administratifs et n'est pas un enseignant pur
             if any(p in role_lower for p in postes_administratifs) and "enseignant" not in role_lower and "professeur" not in role_lower:
                 personnels.append(u)
 
-        # Si aucun filtrage strict n'a retourné de résultats mais qu'il y a des utilisateurs, on prend tous les non-enseignants par sécurité
         if not personnels and tous_utilisateurs:
             for u in tous_utilisateurs:
                 role_lower = str(getattr(u, "role", "")).lower()
@@ -72,7 +69,7 @@ def afficher_etat_paie_administration(mois, date_paie):
         else:
             for i, p in enumerate(personnels, 1):
                 salaire_base = float(getattr(p, "salaire_base", 0.0) or 0.0)
-                primes = float(getattr(p, "primes", 0.0) or 0.0)
+                primes = float(getattr(p, "primes_fixes", 0.0) or 0.0)
                 acompte = float(getattr(p, "acompte", 0.0) or 0.0)
                 poste = getattr(p, "role", "Administratif")
                 nom_complet = getattr(p, "username", f"Agent {i}")
@@ -235,7 +232,6 @@ def afficher_etat_paie_vacataires(mois, date_paie):
                 heures_realisees = 0.0
                 matieres_set = set()
 
-                # Récupération des matières depuis l'enregistrement de l'enseignant
                 mat_attr_str = (
                     getattr(ens, "matieres_attribuees", None)
                     or getattr(ens, "matieres", None)
@@ -246,32 +242,20 @@ def afficher_etat_paie_vacataires(mois, date_paie):
                         if m.strip():
                             matieres_set.add(m.strip().title())
 
-                # Récupération complémentaire depuis le Cahier de Texte
                 try:
                     cahier_query = db.query(CahierTexte).filter(
-                        (CahierTexte.enseignant_id == ens.id)
-                        | (CahierTexte.enseignant == nom_ens)
+                        (CahierTexte.user_id == ens.id)
+                        | (CahierTexte.auteur_saisie == nom_ens)
                     )
-                    entrées_cours = cahier_query.all()
-                    for cours in entrées_cours:
-                        duree_cours = float(
-                            getattr(cours, "duree", 1.0) or 1.0
-                        )
-                        heures_realisees += duree_cours
-
-                        for col_c in ["matiere", "discipline", "nom_matiere", "libelle"]:
-                            m_val = getattr(cours, col_c, None)
-                            if m_val:
-                                if hasattr(m_val, "libelle"):
-                                    matieres_set.add(str(m_val.libelle).strip().title())
-                                elif str(m_val).strip():
-                                    matieres_set.add(str(m_val).strip().title())
+                    entrees_cours = cahier_query.all()
+                    for cours in entrees_cours:
+                        duree_str = str(getattr(cours, "duree_seance", "1 heure"))
+                        try:
+                            chiffre = float("".join(filter(str.isdigit, duree_str)) or 1)
+                        except Exception:
+                            chiffre = 1.0
+                        heures_realisees += chiffre
                 except Exception:
-                    heures_realisees = float(
-                        getattr(ens, "volume_horaire_mois", 0.0) or 0.0
-                    )
-
-                if heures_realisees == 0:
                     heures_realisees = float(
                         getattr(ens, "volume_horaire_mois", 0.0) or 0.0
                     )
@@ -444,5 +428,4 @@ def afficher_paie():
         )
 
 
-# Alias de compatibilité indispensable pour le routeur principal
 afficher_gestion_paie = afficher_paie
