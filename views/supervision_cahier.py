@@ -229,17 +229,36 @@ def afficher_supervision_cahier():
             norm_key = normaliser_chaine(mat_lib)
 
             heures_prevues = 0.0
-            prog_classe = next(
-                (p for p in all_programmes 
-                 if normaliser_chaine(getattr(p, 'nom_matiere', '')) == norm_key 
-                 and (not niveau_cible or normaliser_chaine(niveau_cible) in normaliser_chaine(getattr(p, 'code_matiere', '')))),
-                None
-            )
+            
+            # Application de la même logique croisée stricte par classe pour récupérer le vrai volume du programme
+            if not is_college:
+                prog_obj = None
+                for p in all_programmes:
+                    p_nom = normaliser_chaine(getattr(p, 'nom_matiere', getattr(p, 'matiere', '')))
+                    texte_ligne = normaliser_chaine(f"{getattr(p, 'classe', '')} {getattr(p, 'code_matiere', '')} {getattr(p, 'matiere', '')} {getattr(p, 'nom_matiere', '')}")
+                    if p_nom == norm_key and (libelle_classe_norm in texte_ligne):
+                        prog_obj = p
+                        break
+                
+                if not prog_obj:
+                    for p in all_programmes:
+                        p_nom = normaliser_chaine(getattr(p, 'nom_matiere', getattr(p, 'matiere', '')))
+                        if p_nom == norm_key:
+                            prog_obj = p
+                            break
 
-            if prog_classe and prog_classe.volume_horaire and prog_classe.volume_horaire > 0:
-                heures_prevues = prog_classe.volume_horaire
+                heures_prevues = float(prog_obj.volume_horaire) if prog_obj and prog_obj.volume_horaire else float(getattr(mat, "volume_horaire", 0) or 0)
             else:
-                if is_college:
+                prog_classe = next(
+                    (p for p in all_programmes 
+                     if normaliser_chaine(getattr(p, 'nom_matiere', '')) == norm_key 
+                     and (not niveau_cible or normaliser_chaine(niveau_cible) in normaliser_chaine(getattr(p, 'code_matiere', '')))),
+                    None
+                )
+
+                if prog_classe and prog_classe.volume_horaire and prog_classe.volume_horaire > 0:
+                    heures_prevues = prog_classe.volume_horaire
+                else:
                     BAREME_COLLEGE = {
                         "6ème": {"francais": 205, "anglais": 140, "histoire geographie": 70, "mathematiques": 240, "physique chimie": 35, "science de la vie et de la terre": 70, "economie familiale et sociale": 35, "education physique et sportive": 70, "education civique": 35},
                         "5ème": {"francais": 140, "anglais": 140, "histoire geographie": 70, "mathematiques": 175, "physique chimie": 35, "science de la vie et de la terre": 70, "economie familiale et sociale": 35, "education physique et sportive": 70, "education civique": 35},
@@ -249,9 +268,6 @@ def afficher_supervision_cahier():
                     if niveau_cible in BAREME_COLLEGE and norm_key in BAREME_COLLEGE[niveau_cible]:
                         heures_prevues = float(BAREME_COLLEGE[niveau_cible][norm_key])
                     elif mat.volume_horaire and mat.volume_horaire > 0:
-                        heures_prevues = mat.volume_horaire
-                else:
-                    if mat.volume_horaire and mat.volume_horaire > 0:
                         heures_prevues = mat.volume_horaire
                     else:
                         heures_prevues = 0.0
