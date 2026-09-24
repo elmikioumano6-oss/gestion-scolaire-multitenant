@@ -21,12 +21,31 @@ SYNONYMES_MATIERES = {
     "physique chimie": "physique chimie",
     "svt": "science de la vie et de la terre",
     "science de la vie et de la terre": "science de la vie et de la terre",
-    "eps": "education physique et sportive",
-    "education physique et sportive": "education physique et sportive",
+    "eps": "eps",
+    "education physique": "eps",
+    "education physique et sportive": "eps",
     "economie familiale": "economie familiale et sociale",
     "economie familiale et sociale": "economie familiale et sociale",
+    "economie familiale sociale": "economie familiale et sociale",
     "histoire geographie": "histoire geographie",
     "histoire-geographie": "histoire geographie",
+    "education civique": "education civique et morale",
+    "education civique et morale": "education civique et morale",
+    "education civique morale": "education civique et morale",
+    "conduite": "conduite",
+}
+
+BAREME_OFFICIEL_COLLEGE = {
+    "francis": 140.0,
+    "anglais": 140.0,
+    "histoire geographie": 70.0,
+    "mathematiques": 175.0,
+    "physique chimie": 105.0,
+    "science de la vie et de la terre": 105.0,
+    "economie familiale et sociale": 35.0,
+    "eps": 70.0,
+    "education civique et morale": 35.0,
+    "conduite": 0.0,
 }
 
 
@@ -35,9 +54,7 @@ def normaliser_chaine(texte):
         return ""
     nfkd = unicodedata.normalize("NFKD", str(texte))
     sans_accent = "".join([c for c in nfkd if not unicodedata.combining(c)])
-    nettoye = " ".join(
-        sans_accent.lower().replace("-", " ").replace("_", " ").split()
-    )
+    nettoye = " ".join(sans_accent.lower().replace("-", " ").replace("_", " ").replace("è", "e").replace("é", " e").split())
     return SYNONYMES_MATIERES.get(nettoye, nettoye)
 
 
@@ -81,23 +98,13 @@ def afficher_espace_enseignants():
         classes_query = db.query(Classe).filter(
             Classe.cycle == cycle_en_cours, Classe.school_id == ecole_active_id
         )
-        matieres_query = db.query(Matiere).filter(
-            Matiere.cycle == cycle_en_cours, Matiere.school_id == ecole_active_id
-        )
-
         if hasattr(Classe, "deleted_at"):
             classes_query = classes_query.filter(Classe.deleted_at.is_(None))
-        if hasattr(Matiere, "deleted_at"):
-            matieres_query = matieres_query.filter(Matiere.deleted_at.is_(None))
-
         toutes_classes_cycle = classes_query.all()
-        toutes_matieres_cycle = matieres_query.all()
 
-        if not toutes_classes_cycle or not toutes_matieres_cycle:
+        if not toutes_classes_cycle:
             st.warning(
-                f"⚠️ Veuillez vous assurer que des classes et des matières sont"
-                f" configurées pour le cycle **{cycle_en_cours}** dans"
-                f" l'établissement **{school_name}**."
+                f"⚠️ Veuillez vous assurer que des classes sont configurées pour le cycle **{cycle_en_cours}** dans l'établissement **{school_name}**."
             )
             return
 
@@ -107,35 +114,17 @@ def afficher_espace_enseignants():
             or not affectations_prof.get(username)
         ):
             classes_disponibles = toutes_classes_cycle
-            matieres_disponibles = toutes_matieres_cycle
         else:
             classes_assignées_noms = (
                 affectations_prof.get(username, {}).get("classes", [])
             )
-            matieres_assignées_noms = (
-                affectations_prof.get(username, {}).get("matieres", [])
-            )
-
             classes_disponibles = [
                 c for c in toutes_classes_cycle if c.libelle in classes_assignées_noms
             ]
-            matieres_disponibles = [
-                m
-                for m in toutes_matieres_cycle
-                if (m.libelle if hasattr(m, 'libelle') else getattr(m, 'nom', ''))
-                in matieres_assignées_noms
-            ]
-
             if not classes_disponibles:
                 classes_disponibles = toutes_classes_cycle
-            if not matieres_disponibles:
-                matieres_disponibles = toutes_matieres_cycle
 
-        noms_classes = [c.libelle for c in classes_disponibles]
-        noms_matieres = [
-            m.libelle if hasattr(m, 'libelle') else getattr(m, 'nom', '')
-            for m in matieres_disponibles
-        ]
+        noms_classes = sorted(list(set(c.libelle for c in classes_disponibles if c.libelle)))
 
         st.markdown(
             f"### Espace Enseignant (`{username}`) — **{school_name}"
@@ -147,19 +136,50 @@ def afficher_espace_enseignants():
             classe_enseignant = st.selectbox(
                 "Vos classes assignées", noms_classes, key="ens_classe_select"
             )
+
+        classe_obj = next(
+            (c for c in classes_disponibles if c.libelle == classe_enseignant), None
+        )
+
+        # --- RÉCUPÉRATION STRICTE DES MATIÈRES UTILISANT LA LOGIQUE DU SUIVI DES PROGRAMMES ---
+        matieres_query = db.query(Matiere).filter(
+            Matiere.classe_id == classe_obj.id if classe_obj else True,
+            Matiere.school_id == ecole_active_id
+        )
+        if hasattr(Matiere, "deleted_at"):
+            matieres_query = matieres_query.filter(Matiere.deleted_at.is_(None))
+        matieres_brutes = matieres_query.all()
+
+        if not matieres_brutes:
+            matieres_query_cycle = db.query(Matiere).filter(
+                Matiere.cycle == cycle_en_cours, Matiere.school_id == ecole_active_id
+            )
+            if hasattr(Matiere, "deleted_at"):
+                matieres_query_cycle = matieres_query_cycle.filter(Matiere.deleted_at.is_(None))
+            matieres_brutes = matieres_query_cycle.all()
+
+        matieres_uniques_dict = {}
+        for mat in matieres_brutes:
+            nom_brut = mat.libelle if hasattr(mat, "libelle") and mat.libelle else getattr(mat, "nom", "Matière")
+            norm_key = normaliser_chaine(nom_brut)
+            if norm_key not in matieres_uniques_dict:
+                matieres_uniques_dict[norm_key] = mat
+        matieres_cycle = list(matieres_uniques_dict.values())
+
+        noms_matieres = sorted([
+            (m.libelle if hasattr(m, 'libelle') and m.libelle else getattr(m, 'nom', 'Matière')).title()
+            for m in matieres_cycle
+        ])
+
         with col2:
             matiere_enseignant = st.selectbox(
                 "Vos matières dispensées", noms_matieres, key="ens_matiere_select"
             )
 
-        classe_obj = next(
-            (c for c in classes_disponibles if c.libelle == classe_enseignant), None
-        )
         matiere_obj = next(
             (
-                m
-                for m in matieres_disponibles
-                if (m.libelle if hasattr(m, 'libelle') else getattr(m, 'nom', ''))
+                m for m in matieres_cycle
+                if (m.libelle if hasattr(m, 'libelle') and m.libelle else getattr(m, 'nom', '')).title()
                 == matiere_enseignant
             ),
             None,
@@ -332,7 +352,7 @@ def afficher_espace_enseignants():
                 st.info("Aucun élève enregistré dans cette classe.")
             else:
                 date_appel = st.date_input(
-                    "Date de l'appel", value=datetime.today(), key="ens_date_appel"
+                    "Date de l'appel", value=datetime.now().date(), key="ens_date_appel"
                 )
                 data_appel = []
                 for e in eleves:
@@ -373,7 +393,7 @@ def afficher_espace_enseignants():
                     db.commit()
                     st.success("✅ Feuille d'appel validée avec succès !")
 
-        # --- 4. HORAIRES & RESTE À FAIRE ---
+        # --- 4. HORAIRES & RESTE À FAIRE (Même logique exacte que le Suivi des Programmes) ---
         with tab_charge:
             st.markdown(
                 f"#### 📊 Suivi de la Charge Horaire & Reste à Faire —"
@@ -381,76 +401,80 @@ def afficher_espace_enseignants():
             )
 
             if classe_obj and matiere_obj:
-                all_programmes = db.query(Programme).filter(
-                    Programme.school_id == ecole_active_id
-                ).all()
+                programmes_ecole = db.query(Programme).filter(Programme.school_id == ecole_active_id).all()
+                mat_lib = matiere_obj.libelle if hasattr(matiere_obj, "libelle") and matiere_obj.libelle else getattr(matiere_obj, "nom", "Matière")
+                mat_norm = normaliser_chaine(mat_lib)
 
-                norm_key = normaliser_chaine(matiere_enseignant)
-                libelle_classe_norm = normaliser_chaine(classe_enseignant)
-                
-                niveau_cible = "3ème"
-                for mot, lib_long in [("6", "6ème"), ("5", "5ème"), ("4", "4ème"), ("3", "3ème")]:
-                    if mot in libelle_classe_norm or mot + "e" in libelle_classe_norm or mot + "è" in libelle_classe_norm:
-                        niveau_cible = lib_long
-                        break
+                volume_prevu = 0.0
 
-                heures_prevues = 0.0
-                
-                # 1. Recherche par base de données (modèle Programme)
-                prog_classe = next(
-                    (p for p in all_programmes 
-                     if normaliser_chaine(getattr(p, 'nom_matiere', '')) == norm_key 
-                     and normaliser_chaine(niveau_cible) in normaliser_chaine(getattr(p, 'code_matiere', ''))),
-                    None
-                )
-
-                if prog_classe and prog_classe.volume_horaire and prog_classe.volume_horaire > 0:
-                    heures_prevues = float(prog_classe.volume_horaire)
+                if cycle_en_cours.lower() in ["collège", "college"]:
+                    for attr_v in ["volume_horaire", "volume", "heures", "masse_horaire", "duree", "volume_hebdo"]:
+                        val = getattr(matiere_obj, attr_v, None)
+                        if val is not None:
+                            try:
+                                v_f = float(val)
+                                if v_f > 0:
+                                    volume_prevu = v_f
+                                    break
+                            except Exception:
+                                pass
+                    
+                    if volume_prevu == 0.0:
+                        for p in programmes_ecole:
+                            p_nom = normaliser_chaine(getattr(p, 'nom_matiere', getattr(p, 'matiere', '')))
+                            if p_nom == mat_norm and p.volume_horaire:
+                                volume_prevu = float(p.volume_horaire)
+                                break
+                    
+                    if volume_prevu == 0.0 and mat_norm in BAREME_OFFICIEL_COLLEGE:
+                        volume_prevu = BAREME_OFFICIEL_COLLEGE[mat_norm]
                 else:
-                    # 2. Barème officiel appliqué STRICTEMENT si le cycle actif est le Collège
-                    if cycle_en_cours.lower() == "collège" or cycle_en_cours.lower() == "college":
-                        BAREME_COLLEGE = {
-                            "6ème": {"francais": 205, "anglais": 140, "histoire geographie": 70, "mathematiques": 240, "physique chimie": 35, "science de la vie et de la terre": 70, "economie familiale et sociale": 35, "education physique et sportive": 70, "education civique": 35},
-                            "5ème": {"francais": 140, "anglais": 140, "histoire geographie": 70, "mathematiques": 175, "physique chimie": 35, "science de la vie et de la terre": 70, "economie familiale et sociale": 35, "education physique et sportive": 70, "education civique": 35},
-                            "4ème": {"francais": 140, "anglais": 140, "histoire geographie": 70, "mathematiques": 175, "physique chimie": 105, "science de la vie et de la terre": 70, "economie familiale et sociale": 35, "education physique et sportive": 70, "education civique": 35},
-                            "3ème": {"francais": 140, "anglais": 140, "histoire geographie": 70, "mathematiques": 175, "physique chimie": 105, "science de la vie et de la terre": 105, "economie familiale et sociale": 35, "education physique et sportive": 70, "education civique": 35},
-                        }
-                        if niveau_cible in BAREME_COLLEGE and norm_key in BAREME_COLLEGE[niveau_cible]:
-                            heures_prevues = float(BAREME_COLLEGE[niveau_cible][norm_key])
-                        elif hasattr(matiere_obj, "volume_horaire") and matiere_obj.volume_horaire:
-                            heures_prevues = float(matiere_obj.volume_horaire)
-                        else:
-                            heures_prevues = 0.0
-                    else:
-                        # Pour le Lycée, si aucun programme n'est saisi, on retourne strictement 0 pour prouver que le filtre marche
-                        if hasattr(matiere_obj, "volume_horaire") and matiere_obj.volume_horaire:
-                            heures_prevues = float(matiere_obj.volume_horaire)
-                        else:
-                            heures_prevues = 0.0
+                    prog_obj = None
+                    classe_norm = normaliser_chaine(classe_selectionnee) if 'classe_selectionnee' in locals() else normaliser_chaine(classe_enseignant)
+                    
+                    for p in programmes_ecole:
+                        p_nom = normaliser_chaine(getattr(p, 'nom_matiere', getattr(p, 'matiere', '')))
+                        texte_ligne = normaliser_chaine(f"{getattr(p, 'classe', '')} {getattr(p, 'code_matiere', '')} {getattr(p, 'matiere', '')} {getattr(p, 'nom_matiere', '')}")
+                        if p_nom == mat_norm and (classe_norm in texte_ligne):
+                            prog_obj = p
+                            break
+                    
+                    if not prog_obj:
+                        for p in programmes_ecole:
+                            p_nom = normaliser_chaine(getattr(p, 'nom_matiere', getattr(p, 'matiere', '')))
+                            if p_nom == mat_norm:
+                                prog_obj = p
+                                break
 
-                volume_total_prevu = heures_prevues
+                    volume_prevu = float(prog_obj.volume_horaire) if prog_obj and prog_obj.volume_horaire else float(getattr(matiere_obj, "volume_horaire", 0) or 0)
 
-                # Calcul des heures dispensées pour CETTE classe et CETTE matière
-                seances_matiere = (
+                volume_total_prevu = volume_prevu
+
+                toutes_entrees = (
                     db.query(CahierTexte)
                     .filter(
                         CahierTexte.school_id == ecole_active_id,
                         CahierTexte.classe_id == classe_obj.id,
-                        CahierTexte.matiere_id == matiere_obj.id,
                     )
                     .all()
                 )
 
-                volume_dispense = 0.0
-                for s in seances_matiere:
-                    d_str = str(getattr(s, "duree_seance", "1 heure"))
-                    try:
-                        chiffre = float("".join(filter(str.isdigit, d_str)) or 1)
-                        volume_dispense += chiffre
-                    except Exception:
-                        volume_dispense += 1.0
+                seances_mat = [e for e in toutes_entrees if getattr(e, 'matiere_id', None) == matiere_obj.id or normaliser_chaine(getattr(e, 'matiere', getattr(e, 'discipline', ''))) == mat_norm]
 
-                reste_a_faire = max(0.0, volume_total_prevu - volume_dispense)
+                volume_dispense = 0.0
+                for seance in seances_mat:
+                    duree_val = float(getattr(seance, 'duree', 0.0) or 0.0)
+                    if duree_val > 0:
+                        volume_dispense += duree_val
+                    else:
+                        d_str = str(getattr(seance, "duree_seance", "1 heure"))
+                        try:
+                            chiffre = float("".join(filter(str.isdigit, d_str)) or 1)
+                            volume_dispense += chiffre
+                        except Exception:
+                            volume_dispense += 1.0
+
+                reste_a_recouvrer = max(0.0, volume_total_prevu - volume_dispense)
                 progression_pct = min(
                     100, int((volume_dispense / volume_total_prevu) * 100)
                     if volume_total_prevu > 0
@@ -463,7 +487,7 @@ def afficher_espace_enseignants():
                 with col_h2:
                     st.metric("Volume Total Annuel Prévu", f"{volume_total_prevu:g}h")
                 with col_h3:
-                    st.metric("Reste à Faire", f"{reste_a_faire:g}h")
+                    st.metric("Reste à Faire", f"{reste_a_recouvrer:g}h")
 
                 st.progress(
                     max(0.0, min(1.0, progression_pct / 100.0)),

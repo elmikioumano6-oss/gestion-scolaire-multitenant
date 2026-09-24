@@ -29,6 +29,7 @@ class School(Base):
     users = relationship("User", back_populates="school", cascade="all, delete-orphan")
     matieres = relationship("Matiere", back_populates="school", cascade="all, delete-orphan")
     enseignants = relationship("Enseignant", back_populates="school", cascade="all, delete-orphan")
+    programmes = relationship("Programme", back_populates="school", cascade="all, delete-orphan")
 
 
 class AnneeScolaire(Base):
@@ -179,6 +180,8 @@ class Programme(Base):
     volume_horaire = Column(Float, default=0.0)
     semestre = Column(String, nullable=True)
     description = Column(String, nullable=True)
+
+    school = relationship("School", back_populates="programmes")
 
 
 class Note(Base):
