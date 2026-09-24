@@ -113,6 +113,9 @@ class User(Base):
     password = Column(String)
     role = Column(String)
 
+    salaire_base = Column(Float, default=0.0)
+    primes_fixes = Column(Float, default=0.0)
+
     derniere_activite = Column(DateTime, nullable=True)
     changer_mdp_requis = Column(Boolean, default=True)
     deleted_at = Column(DateTime, nullable=True)
@@ -210,7 +213,11 @@ class Enseignant(Base):
     qualite = Column(String, nullable=True)
     telephone = Column(String, nullable=True)
     email = Column(String, nullable=True)
+    
     statut = Column(String, default="Permanent")
+    salaire_base = Column(Float, default=0.0)
+    taux_horaire = Column(Float, default=0.0)
+    
     volume_horaire = Column(Float, default=18.0)
     classes_attribuees = Column(String, nullable=True)
     matieres_attribuees = Column(String, nullable=True)
