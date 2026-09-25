@@ -59,7 +59,7 @@ def afficher_personnels():
                 f" ({cycle_en_cours})**"
             )
 
-            # Récupération sécurisée des utilisateurs en base de données pour l'école active (en excluant le super_admin global)
+            # Récupération sécurisée des utilisateurs en base de données pour l'école active
             users_query = db.query(User).filter(
                 User.school_id == ecole_active_id, User.role != "super_admin"
             )
@@ -104,12 +104,16 @@ def afficher_personnels():
                             "enseignant",
                             "comptable",
                             "surveillant",
+                            "secretaire",
+                            "planton",
+                            "jardinier",
+                            "gardien",
                         ]
                         current_role = getattr(u, "role", "enseignant")
                         idx_role = (
                             roles_possibles.index(current_role)
                             if current_role in roles_possibles
-                            else 2
+                            else 3 # Index par défaut (enseignant) si le rôle n'est pas dans la liste
                         )
 
                         nouveau_role = st.selectbox(
@@ -169,9 +173,22 @@ def afficher_personnels():
                             "enseignant",
                             "comptable",
                             "surveillant",
+                            "secretaire",
+                            "planton",
+                            "jardinier",
+                            "gardien",
                         ],
                     )
                     email_user = st.text_input("Adresse Email professionnelle")
+                
+                # --- Informations Salariales ---
+                st.markdown("##### Informations Salariales")
+                col_sal1, col_sal2 = st.columns(2)
+                with col_sal1:
+                    salaire_base = st.number_input("Salaire de base (FCFA)", min_value=0.0, step=1000.0)
+                with col_sal2:
+                    primes_fixes = st.number_input("Primes fixes / Avantages (FCFA)", min_value=0.0, step=500.0)
+                # --------------------------------------------
 
                 submitted_user = st.form_submit_button(
                     "🔐 Créer le compte utilisateur", type="primary"
@@ -206,6 +223,8 @@ def afficher_personnels():
                                 username=identifiant.strip(),
                                 password=hashed_pwd,
                                 role=role_attribue,
+                                salaire_base=salaire_base,
+                                primes_fixes=primes_fixes
                             )
                             if hasattr(nouvel_utilisateur, "email"):
                                 nouvel_utilisateur.email = (

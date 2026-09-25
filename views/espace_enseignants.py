@@ -36,7 +36,7 @@ SYNONYMES_MATIERES = {
 }
 
 BAREME_OFFICIEL_COLLEGE = {
-    "francis": 140.0,
+    "francais": 140.0,
     "anglais": 140.0,
     "histoire geographie": 70.0,
     "mathematiques": 175.0,
@@ -59,11 +59,38 @@ def normaliser_chaine(texte):
 
 
 def afficher_espace_enseignants():
-    st.subheader("👨‍🏫 Espace Pédagogique Enseignant")
+    # --- Injection CSS pour un design Premium ---
+    st.markdown("""
+        <style>
+        .teacher-card {
+            background: linear-gradient(135deg, #2b5876 0%, #4e4376 100%);
+            border-radius: 12px;
+            padding: 20px;
+            color: white;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+            margin-bottom: 25px;
+            display: flex;
+            align-items: center;
+        }
+        .teacher-card h2 { margin: 0; color: #ffffff; font-weight: 600; font-size: 1.8rem; padding-bottom: 5px; }
+        .teacher-card p { margin: 0; opacity: 0.9; font-size: 1rem; color: #e2e8f0; }
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            background-color: rgba(255,255,255,0.03);
+            border-radius: 12px;
+            color: #a0aec0;
+            border: 1px dashed rgba(255,255,255,0.2);
+            margin-top: 15px;
+        }
+        .empty-state h4 { color: #e2e8f0; margin-top: 10px; }
+        </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown("## 👨‍🏫 Espace Pédagogique Enseignant")
     st.markdown(
         "Plateforme unifiée pour l'appel, la saisie des notes, le cahier de texte"
-        " et le suivi des charges horaires avec restriction stricte aux classes"
-        " assignées et isolation multi-tenant complète."
+        " et le suivi des charges horaires."
     )
     st.markdown("---")
 
@@ -126,11 +153,19 @@ def afficher_espace_enseignants():
 
         noms_classes = sorted(list(set(c.libelle for c in classes_disponibles if c.libelle)))
 
-        st.markdown(
-            f"### Espace Enseignant (`{username}`) — **{school_name}"
-            f" ({cycle_en_cours})**"
-        )
+        # --- 1. Carte Enseignant Élégante ---
+        st.markdown(f"""
+            <div class="teacher-card">
+                <div style="font-size: 3.5rem; margin-right: 25px;">👨‍🏫</div>
+                <div>
+                    <h2>Bienvenue, Prof. {username.capitalize()}</h2>
+                    <p>Établissement : <b>{school_name}</b> &nbsp;|&nbsp; Cycle : {cycle_en_cours}</p>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
 
+        # --- 2. Zone de Contexte ---
+        st.markdown("#### 🎯 Paramètres de la séance")
         col1, col2 = st.columns(2)
         with col1:
             classe_enseignant = st.selectbox(
@@ -141,7 +176,6 @@ def afficher_espace_enseignants():
             (c for c in classes_disponibles if c.libelle == classe_enseignant), None
         )
 
-        # --- RÉCUPÉRATION STRICTE DES MATIÈRES UTILISANT LA LOGIQUE DU SUIVI DES PROGRAMMES ---
         matieres_query = db.query(Matiere).filter(
             Matiere.classe_id == classe_obj.id if classe_obj else True,
             Matiere.school_id == ecole_active_id
@@ -175,6 +209,8 @@ def afficher_espace_enseignants():
             matiere_enseignant = st.selectbox(
                 "Vos matières dispensées", noms_matieres, key="ens_matiere_select"
             )
+        
+        st.markdown("<br>", unsafe_allow_html=True)
 
         matiere_obj = next(
             (
@@ -194,6 +230,7 @@ def afficher_espace_enseignants():
                 eleves_query = eleves_query.filter(Eleve.deleted_at.is_(None))
             eleves = eleves_query.order_by(Eleve.nom).all()
 
+        # --- 3. Navigation par Onglets ---
         tab_cahier, tab_notes, tab_appel, tab_charge = st.tabs([
             "📖 Cahier de Texte",
             "📝 Saisie des Notes",
@@ -201,11 +238,10 @@ def afficher_espace_enseignants():
             "📊 Horaires & Reste à faire",
         ])
 
-        # --- 1. CAHIER DE TEXTE ---
+        # ONGLET 1: CAHIER DE TEXTE
         with tab_cahier:
             st.markdown(
-                f"#### 📖 Saisie du Cahier de Texte — **{classe_enseignant}**"
-                f" ({matiere_enseignant})"
+                f"#### 📖 Remplir le Cahier de Texte — **{classe_enseignant}** ({matiere_enseignant})"
             )
             with st.form("form_ens_cahier_texte_avance"):
                 col_c1, col_c2 = st.columns(2)
@@ -232,25 +268,27 @@ def afficher_espace_enseignants():
                     placeholder="Détaillez les notions et le contenu dispensé...",
                     key="ens_contenu_cours",
                 )
-                difficultees = st.text_area(
-                    "Difficultés rencontrées / Remarques (Optionnel)",
-                    placeholder="Observations pédagogiques particulières...",
-                    key="ens_difficultees",
-                )
-                mesures_correctives = st.text_area(
-                    "Mesures correctives / Travail à faire (Optionnel)",
-                    placeholder="Exercices assignés pour la prochaine séance...",
-                    key="ens_mesures",
-                )
+                
+                # Regroupement des champs optionnels pour aérer l'interface
+                with st.expander("➕ Ajouter des remarques ou exercices (Optionnel)"):
+                    difficultees = st.text_area(
+                        "Difficultés rencontrées / Remarques",
+                        placeholder="Observations pédagogiques particulières...",
+                        key="ens_difficultees",
+                    )
+                    mesures_correctives = st.text_area(
+                        "Mesures correctives / Travail à faire",
+                        placeholder="Exercices assignés pour la prochaine séance...",
+                        key="ens_mesures",
+                    )
 
                 submitted_cahier = st.form_submit_button(
                     "📤 Enregistrer & Transmettre à l'Inspection", type="primary"
                 )
+                
                 if submitted_cahier:
                     if not titre_seance.strip() or not contenu_seance.strip():
-                        st.error(
-                            "⚠️ Veuillez renseigner le titre et le contenu détaillé du cours."
-                        )
+                        st.error("⚠️ Veuillez renseigner le titre et le contenu détaillé du cours.")
                     elif not classe_obj or not matiere_obj:
                         st.error("⚠️ Classe ou matière invalide.")
                     else:
@@ -260,37 +298,33 @@ def afficher_espace_enseignants():
                             classe_id=classe_obj.id,
                             matiere_id=matiere_obj.id,
                             user_id=st.session_state.get("user_id"),
-                            date_cours=datetime.combine(
-                                date_seance, datetime.min.time()
-                            ),
+                            date_cours=datetime.combine(date_seance, datetime.min.time()),
                             duree_seance=duree_seance,
                             titre=titre_seance.strip(),
                             contenu=contenu_seance.strip(),
                             difficultees=difficultees.strip() if difficultees else None,
-                            mesures_correctives=(
-                                mesures_correctives.strip()
-                                if mesures_correctives
-                                else None
-                            ),
+                            mesures_correctives=mesures_correctives.strip() if mesures_correctives else None,
                             est_substitue=0,
                             auteur_saisie=username,
                             statut_validation="Validé",
                         )
                         db.add(nouvelle_entree)
                         db.commit()
-                        st.success(
-                            "✅ Entrée du cahier de texte enregistrée et transmise au"
-                            " registre de l'établissement avec succès !"
-                        )
+                        st.success("✅ Entrée du cahier de texte enregistrée et transmise au registre de l'établissement avec succès !")
 
-        # --- 2. SAISIE DES NOTES ---
+        # ONGLET 2: NOTES
         with tab_notes:
             st.markdown(
-                f"#### 📝 Saisie des Notes — **{classe_enseignant}**"
-                f" ({matiere_enseignant})"
+                f"#### 📝 Grille d'Évaluation — **{classe_enseignant}** ({matiere_enseignant})"
             )
             if not eleves:
-                st.info("Aucun élève enregistré dans cette classe.")
+                st.markdown(f"""
+                    <div class="empty-state">
+                        <div style="font-size: 3rem; margin-bottom: 10px;">👥</div>
+                        <h4>Aucun élève trouvé</h4>
+                        <p>Il n'y a actuellement aucun élève inscrit dans la classe de {classe_enseignant}.</p>
+                    </div>
+                """, unsafe_allow_html=True)
             else:
                 col_n1, col_n2 = st.columns(2)
                 with col_n1:
@@ -302,13 +336,7 @@ def afficher_espace_enseignants():
                 with col_n2:
                     semestre = st.selectbox(
                         "Période Académique",
-                        [
-                            "Semestre 1",
-                            "Semestre 2",
-                            "Trimestre 1",
-                            "Trimestre 2",
-                            "Trimestre 3",
-                        ],
+                        ["Semestre 1", "Semestre 2", "Trimestre 1", "Trimestre 2", "Trimestre 3"],
                         key="ens_semestre_notes",
                     )
 
@@ -316,8 +344,7 @@ def afficher_espace_enseignants():
                     saisie_temp = {}
                     for e in eleves:
                         saisie_temp[e.id] = st.number_input(
-                            f"{e.nom} {e.prenom} (Matricule: {getattr(e, 'matricule', 'N/A')})"
-                            " — Note sur 20",
+                            f"👤 {e.nom} {e.prenom} (Matricule: {getattr(e, 'matricule', 'N/A')}) — Note sur 20",
                             min_value=0.0,
                             max_value=20.0,
                             value=0.0,
@@ -343,13 +370,19 @@ def afficher_espace_enseignants():
                         db.commit()
                         st.success("✅ Notes synchronisées avec succès !")
 
-        # --- 3. FEUILLE D'APPEL ---
+        # ONGLET 3: APPEL
         with tab_appel:
             st.markdown(
-                f"#### 📋 Feuille d'Appel Numérique — **{classe_enseignant}**"
+                f"#### 📋 Contrôle de Présence — **{classe_enseignant}**"
             )
             if not eleves:
-                st.info("Aucun élève enregistré dans cette classe.")
+                st.markdown(f"""
+                    <div class="empty-state">
+                        <div style="font-size: 3rem; margin-bottom: 10px;">📋</div>
+                        <h4>Liste d'appel indisponible</h4>
+                        <p>Veuillez vérifier l'inscription des élèves dans cette classe.</p>
+                    </div>
+                """, unsafe_allow_html=True)
             else:
                 date_appel = st.date_input(
                     "Date de l'appel", value=datetime.now().date(), key="ens_date_appel"
@@ -371,7 +404,7 @@ def afficher_espace_enseignants():
                     key=f"ens_appel_editor_{classe_enseignant}",
                 )
 
-                if st.button("📤 Valider et transmettre l'appel à la vie scolaire"):
+                if st.button("📤 Valider et transmettre l'appel à la vie scolaire", type="primary"):
                     for index, row in edited_appel.iterrows():
                         motif_str = str(row["Motif d'absence"])
                         statut_presence = (
@@ -393,11 +426,10 @@ def afficher_espace_enseignants():
                     db.commit()
                     st.success("✅ Feuille d'appel validée avec succès !")
 
-        # --- 4. HORAIRES & RESTE À FAIRE (Même logique exacte que le Suivi des Programmes) ---
+        # ONGLET 4: HORAIRES
         with tab_charge:
             st.markdown(
-                f"#### 📊 Suivi de la Charge Horaire & Reste à Faire —"
-                f" **{matiere_enseignant} ({classe_enseignant})**"
+                f"#### 📊 Progression et Heures — **{matiere_enseignant} ({classe_enseignant})**"
             )
 
             if classe_obj and matiere_obj:
@@ -430,7 +462,7 @@ def afficher_espace_enseignants():
                         volume_prevu = BAREME_OFFICIEL_COLLEGE[mat_norm]
                 else:
                     prog_obj = None
-                    classe_norm = normaliser_chaine(classe_selectionnee) if 'classe_selectionnee' in locals() else normaliser_chaine(classe_enseignant)
+                    classe_norm = normaliser_chaine(classe_enseignant)
                     
                     for p in programmes_ecole:
                         p_nom = normaliser_chaine(getattr(p, 'nom_matiere', getattr(p, 'matiere', '')))

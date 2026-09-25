@@ -51,10 +51,50 @@ def normaliser_chaine(texte):
 
 
 def afficher_espace_inspection():
-    st.subheader("🔍 Espace Inspection & Supervision Pédagogique")
+    # --- Injection CSS pour un design Premium & Institutionnel ---
+    st.markdown("""
+        <style>
+        .inspection-card {
+            background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%);
+            border-radius: 12px;
+            padding: 20px;
+            color: white;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+            margin-bottom: 25px;
+            display: flex;
+            align-items: center;
+        }
+        .inspection-card h2 { margin: 0; color: #ffffff; font-weight: 600; font-size: 1.8rem; padding-bottom: 5px; }
+        .inspection-card p { margin: 0; opacity: 0.9; font-size: 1rem; color: #e2e8f0; }
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            background-color: rgba(255,255,255,0.03);
+            border-radius: 12px;
+            color: #a0aec0;
+            border: 1px dashed rgba(255,255,255,0.2);
+            margin-top: 15px;
+        }
+        .empty-state h4 { color: #e2e8f0; margin-top: 10px; }
+        .tab-title {
+            color: #4da6ff;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }
+        .visa-box {
+            background-color: rgba(72, 187, 120, 0.1);
+            border-left: 4px solid #48bb78;
+            padding: 10px 15px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown("## 🔍 Supervision Pédagogique")
     st.markdown(
-        "Portail de contrôle universel conforme aux normes de supervision (MEN Niger / "
-        "Standards internationaux) : Visas pédagogiques, suivi des programmes et traçabilité d'audit."
+        "Portail de contrôle universel (Normes MEN Niger / Standards internationaux) : "
+        "Visas pédagogiques, suivi des programmes et traçabilité d'audit."
     )
     st.markdown("---")
 
@@ -81,6 +121,17 @@ def afficher_espace_inspection():
             valeur_apres=f"Utilisateur: {username_connecte}",
         )
 
+        # --- 1. Carte Inspecteur ---
+        st.markdown(f"""
+            <div class="inspection-card">
+                <div style="font-size: 3.5rem; margin-right: 25px;">🏛️</div>
+                <div>
+                    <h2>Bureau de l'Inspection</h2>
+                    <p>Établissement : <b>{school_name}</b> &nbsp;|&nbsp; Cycle en cours : <b>{cycle_en_cours}</b></p>
+                </div>
+            </div>
+        """, unsafe_allow_html=True)
+
         tab_cours, tab_progression, tab_visite, tab_stats = st.tabs([
             "📖 Suivi & Visa des Cours",
             "📈 Taux de Couverture (MEN)",
@@ -88,10 +139,9 @@ def afficher_espace_inspection():
             "📈 Indicateurs & Audit",
         ])
 
+        # ONGLET 1 : SUIVI DES COURS ET CAHIER DE TEXTE
         with tab_cours:
-            st.markdown(
-                f"### Contrôle des Séances & Visa Pédagogique — **{school_name} ({cycle_en_cours})**"
-            )
+            st.markdown(f"<h4 class='tab-title'>📖 Contrôle des Séances & Visa Pédagogique</h4>", unsafe_allow_html=True)
             st.markdown("Apposez un **Visa Numérique Officiel** pour certifier la supervision des cahiers de texte.")
 
             classes_cycle = (
@@ -127,24 +177,36 @@ def afficher_espace_inspection():
                     )
 
                     if not entrees:
-                        st.info(f"Aucune entrée dans le cahier de texte pour la classe {classe_sel}.")
+                        st.markdown(f"""
+                            <div class="empty-state">
+                                <div style="font-size: 3rem; margin-bottom: 10px;">📓</div>
+                                <h4>Cahier de texte vierge</h4>
+                                <p>Aucune séance n'a encore été saisie par les enseignants pour la classe de <b>{classe_sel}</b>.</p>
+                            </div>
+                        """, unsafe_allow_html=True)
                     else:
+                        st.markdown("<br>", unsafe_allow_html=True)
                         for ent in entrees:
                             date_str = ent.date.strftime('%d/%m/%Y') if ent.date else "N/D"
-                            with st.expander(f"📅 Cours du {date_str} — Enseignant : {ent.enseignant_username or 'N/D'} ({getattr(ent, 'duree', 1.0)}h)"):
+                            visa_actuel = getattr(ent, 'visa_inspecteur', None)
+                            
+                            # Ajout d'un emoji visuel pour différencier les cours validés
+                            titre_expander = f"✅ Cours du {date_str}" if visa_actuel else f"⏳ Cours du {date_str}"
+                            
+                            with st.expander(f"{titre_expander} — Enseignant : {ent.enseignant_username or 'N/D'} ({getattr(ent, 'duree', 1.0)}h)"):
                                 st.write(f"**Contenu :** {ent.contenu_realise}")
                                 st.write(f"**Difficultés :** {ent.difficultees or 'Aucune'}")
                                 
+                                st.markdown("---")
                                 col_v1, col_v2 = st.columns([3, 1])
                                 with col_v1:
-                                    visa_status = getattr(ent, 'visa_inspecteur', None)
-                                    if visa_status:
-                                        st.success(f"✅ {visa_status}")
+                                    if visa_actuel:
+                                        st.markdown(f"<div class='visa-box'><strong>Certifié :</strong> {visa_actuel}</div>", unsafe_allow_html=True)
                                     else:
-                                        st.warning("⚠️ Non visé par l'inspection")
+                                        st.warning("⚠️ En attente de supervision")
                                 with col_v2:
-                                    if not visa_status:
-                                        if st.button("✍️ Apposer le Visa", key=f"visa_{ent.id}"):
+                                    if not visa_actuel:
+                                        if st.button("✍️ Apposer le Visa", key=f"visa_{ent.id}", use_container_width=True):
                                             setattr(ent, 'visa_inspecteur', f"Visé par {username_connecte} le {datetime.now().strftime('%d/%m/%Y à %H:%M')}")
                                             db.commit()
                                             log_action_erp(
@@ -154,11 +216,12 @@ def afficher_espace_inspection():
                                                 valeur_avant="Non visé",
                                                 valeur_apres="Visé officiellement",
                                             )
-                                            st.success("Visa apposé avec succès !")
+                                            st.success("Visa apposé !")
                                             st.rerun()
 
+        # ONGLET 2 : PROGRESSION
         with tab_progression:
-            st.markdown(f"### 📈 Taux de Couverture des Programmes (MEN Niger) — **{cycle_en_cours}**")
+            st.markdown(f"<h4 class='tab-title'>📈 Taux de Couverture des Programmes (MEN Niger)</h4>", unsafe_allow_html=True)
             st.markdown("Évaluation dynamique et globale du volume horaire total dispensé par rapport au cumul des volumes horaires officiels.")
 
             classes_cycle_prog = (
@@ -253,7 +316,7 @@ def afficher_espace_inspection():
 
                     taux_global = min(100.0, (total_heures_realisees / objectif_total) * 100) if objectif_total > 0 else 0.0
 
-                    st.caption(f"🌍 Cycle actif : **{cycle_en_cours}** | Classe : **{classe_prog_sel}** | Mode : _{origine_calcul}_")
+                    st.caption(f"🌍 Mode de calcul : _{origine_calcul}_")
 
                     col_m1, col_m2, col_m3 = st.columns(3)
                     with col_m1:
@@ -271,18 +334,41 @@ def afficher_espace_inspection():
                         st.warning(f"🟠 Avancement modéré pour **{classe_prog_sel}** (Taux : {taux_global:.1f}%)")
                     else:
                         st.success(f"🟢 Rythme de couverture satisfaisant pour **{classe_prog_sel}** (Taux : {taux_global:.1f}%)")
-                else:
-                    st.info("Veuillez sélectionner une classe valide.")
 
+        # ONGLET 3 : VISITE DE CLASSE
         with tab_visite:
-            st.markdown(f"### 📋 Grille Numérisée de Visite de Classe")
+            st.markdown(f"<h4 class='tab-title'>📋 Grille Numérisée de Visite de Classe</h4>", unsafe_allow_html=True)
             st.markdown("Outil réglementaire d'évaluation pédagogique de l'enseignant (pédagogie, tenue de classe, supports).")
             
+            # 1. Récupération des enseignants de l'école
+            enseignants_query = db.query(Enseignant).filter(Enseignant.school_id == resolved_school_id)
+            if hasattr(Enseignant, "deleted_at"):
+                enseignants_query = enseignants_query.filter(Enseignant.deleted_at.is_(None))
+            liste_enseignants = enseignants_query.all()
+            noms_enseignants = sorted([f"{prof.nom} {prof.prenom}" for prof in liste_enseignants])
+
+            # 2. Récupération des matières (dédupliquées ET FILTRÉES PAR CYCLE)
+            matieres_query = db.query(Matiere).filter(
+                Matiere.school_id == resolved_school_id,
+                Matiere.cycle == cycle_en_cours 
+            )
+            if hasattr(Matiere, "deleted_at"):
+                matieres_query = matieres_query.filter(Matiere.deleted_at.is_(None))
+            liste_matieres = matieres_query.all()
+            noms_matieres = sorted(list(set([(m.libelle if hasattr(m, 'libelle') and m.libelle else getattr(m, 'nom', 'Matière')).title() for m in liste_matieres])))
+
             with st.form("form_fiche_visite"):
                 col_f1, col_f2 = st.columns(2)
                 with col_f1:
-                    prof_inspecte = st.text_input("Nom de l'enseignant inspecté *")
-                    discipline_eval = st.text_input("Discipline / Matière *")
+                    prof_inspecte = st.selectbox(
+                        "Nom de l'enseignant inspecté *", 
+                        options=noms_enseignants if noms_enseignants else ["Aucun enseignant enregistré"]
+                    )
+                    
+                    discipline_eval = st.selectbox(
+                        "Discipline / Matière *", 
+                        options=noms_matieres if noms_matieres else ["Aucune matière enregistrée dans ce cycle"]
+                    )
                 with col_f2:
                     note_pedagogique = st.slider("Note pédagogique attribuée (/20)", 0.0, 20.0, 14.0, 0.5)
                     appreciation_globale = st.selectbox("Appréciation générale", ["Très Satisfaisant", "Satisfaisant", "Passable", "Insuffisant"])
@@ -291,8 +377,8 @@ def afficher_espace_inspection():
                 
                 submitted_visite = st.form_submit_button("💾 Enregistrer et archiver la fiche de visite", type="primary")
                 if submitted_visite:
-                    if not prof_inspecte.strip() or not remarques_inspecteur.strip():
-                        st.error("⚠️ Veuillez renseigner le nom de l'enseignant et le rapport d'inspection.")
+                    if not prof_inspecte.strip() or not remarques_inspecteur.strip() or prof_inspecte == "Aucun enseignant enregistré":
+                        st.error("⚠️ Veuillez renseigner un enseignant valide et le rapport d'inspection.")
                     else:
                         log_action_erp(
                             module="Espace Inspection",
@@ -303,8 +389,9 @@ def afficher_espace_inspection():
                         )
                         st.success(f"✅ Fiche de visite pour **{prof_inspecte}** enregistrée et sécurisée dans la piste d'audit !")
 
+        # ONGLET 4 : STATS SOC 2
         with tab_stats:
-            st.markdown("### 📊 Indicateurs de Gouvernance & Sécurité (SOC 2 / ISO 27001)")
+            st.markdown("<h4 class='tab-title'>📊 Indicateurs de Gouvernance & Sécurité (SOC 2 / ISO 27001)</h4>", unsafe_allow_html=True)
             total_cours = (
                 db.query(CahierTexte)
                 .filter(CahierTexte.school_id == target_school_id)
