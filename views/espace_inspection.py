@@ -63,6 +63,7 @@ def afficher_espace_inspection():
             margin-bottom: 25px;
             display: flex;
             align-items: center;
+            border-left: 5px solid #d4af37; /* Liseré doré (Officiel) */
         }
         .inspection-card h2 { margin: 0; color: #ffffff; font-weight: 600; font-size: 1.8rem; padding-bottom: 5px; }
         .inspection-card p { margin: 0; opacity: 0.9; font-size: 1rem; color: #e2e8f0; }
@@ -87,6 +88,13 @@ def afficher_espace_inspection():
             padding: 10px 15px;
             border-radius: 4px;
             margin-bottom: 10px;
+        }
+        .filter-box {
+            background-color: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 10px;
+            padding: 15px 20px;
+            margin-bottom: 20px;
         }
         </style>
     """, unsafe_allow_html=True)
@@ -141,7 +149,7 @@ def afficher_espace_inspection():
 
         # ONGLET 1 : SUIVI DES COURS ET CAHIER DE TEXTE
         with tab_cours:
-            st.markdown(f"<h4 class='tab-title'>📖 Contrôle des Séances & Visa Pédagogique</h4>", unsafe_allow_html=True)
+            st.markdown("<h4 class='tab-title'>📖 Contrôle des Séances & Visa Pédagogique</h4>", unsafe_allow_html=True)
             st.markdown("Apposez un **Visa Numérique Officiel** pour certifier la supervision des cahiers de texte.")
 
             classes_cycle = (
@@ -158,9 +166,12 @@ def afficher_espace_inspection():
             if not noms_classes:
                 st.info(f"Aucune classe configurée pour le cycle **{cycle_en_cours}**.")
             else:
+                st.markdown('<div class="filter-box">', unsafe_allow_html=True)
                 classe_sel = st.selectbox(
                     "Sélectionner la classe à superviser", noms_classes, key="insp_classe_sel"
                 )
+                st.markdown('</div>', unsafe_allow_html=True)
+                
                 classe_obj = next(
                     (c for c in classes_cycle if c.libelle == classe_sel), None
                 )
@@ -172,7 +183,7 @@ def afficher_espace_inspection():
                             CahierTexte.school_id == target_school_id,
                             CahierTexte.classe_id == classe_obj.id,
                         )
-                        .order_by(CahierTexte.date.desc())
+                        .order_by(CahierTexte.date_cours.desc())
                         .all()
                     )
 
@@ -187,14 +198,14 @@ def afficher_espace_inspection():
                     else:
                         st.markdown("<br>", unsafe_allow_html=True)
                         for ent in entrees:
-                            date_str = ent.date.strftime('%d/%m/%Y') if ent.date else "N/D"
+                            date_str = ent.date_cours.strftime('%d/%m/%Y') if getattr(ent, 'date_cours', None) else (ent.date.strftime('%d/%m/%Y') if getattr(ent, 'date', None) else "N/D")
                             visa_actuel = getattr(ent, 'visa_inspecteur', None)
                             
                             # Ajout d'un emoji visuel pour différencier les cours validés
                             titre_expander = f"✅ Cours du {date_str}" if visa_actuel else f"⏳ Cours du {date_str}"
                             
-                            with st.expander(f"{titre_expander} — Enseignant : {ent.enseignant_username or 'N/D'} ({getattr(ent, 'duree', 1.0)}h)"):
-                                st.write(f"**Contenu :** {ent.contenu_realise}")
+                            with st.expander(f"{titre_expander} — Enseignant : {ent.enseignant_username or 'N/D'} ({getattr(ent, 'duree_seance', '1h')})"):
+                                st.write(f"**Contenu :** {getattr(ent, 'contenu_realise', getattr(ent, 'contenu', 'N/D'))}")
                                 st.write(f"**Difficultés :** {ent.difficultees or 'Aucune'}")
                                 
                                 st.markdown("---")
@@ -221,7 +232,7 @@ def afficher_espace_inspection():
 
         # ONGLET 2 : PROGRESSION
         with tab_progression:
-            st.markdown(f"<h4 class='tab-title'>📈 Taux de Couverture des Programmes (MEN Niger)</h4>", unsafe_allow_html=True)
+            st.markdown("<h4 class='tab-title'>📈 Taux de Couverture des Programmes (MEN Niger)</h4>", unsafe_allow_html=True)
             st.markdown("Évaluation dynamique et globale du volume horaire total dispensé par rapport au cumul des volumes horaires officiels.")
 
             classes_cycle_prog = (
@@ -238,9 +249,12 @@ def afficher_espace_inspection():
             if not noms_classes_prog:
                 st.info(f"Aucune classe configurée pour le cycle **{cycle_en_cours}**.")
             else:
+                st.markdown('<div class="filter-box">', unsafe_allow_html=True)
                 classe_prog_sel = st.selectbox(
                     "🔍 Sélectionner la classe pour le suivi global :", noms_classes_prog, key="insp_prog_classe_sel"
                 )
+                st.markdown('</div>', unsafe_allow_html=True)
+                
                 classe_prog_obj = next(
                     (c for c in classes_cycle_prog if c.libelle == classe_prog_sel), None
                 )
@@ -337,7 +351,7 @@ def afficher_espace_inspection():
 
         # ONGLET 3 : VISITE DE CLASSE
         with tab_visite:
-            st.markdown(f"<h4 class='tab-title'>📋 Grille Numérisée de Visite de Classe</h4>", unsafe_allow_html=True)
+            st.markdown("<h4 class='tab-title'>📋 Grille Numérisée de Visite de Classe</h4>", unsafe_allow_html=True)
             st.markdown("Outil réglementaire d'évaluation pédagogique de l'enseignant (pédagogie, tenue de classe, supports).")
             
             # 1. Récupération des enseignants de l'école

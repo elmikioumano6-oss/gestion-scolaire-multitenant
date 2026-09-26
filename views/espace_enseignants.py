@@ -74,6 +74,13 @@ def afficher_espace_enseignants():
         }
         .teacher-card h2 { margin: 0; color: #ffffff; font-weight: 600; font-size: 1.8rem; padding-bottom: 5px; }
         .teacher-card p { margin: 0; opacity: 0.9; font-size: 1rem; color: #e2e8f0; }
+        .context-box {
+            background-color: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 10px;
+            padding: 15px 20px 5px 20px;
+            margin-bottom: 25px;
+        }
         .empty-state {
             text-align: center;
             padding: 40px 20px;
@@ -84,13 +91,18 @@ def afficher_espace_enseignants():
             margin-top: 15px;
         }
         .empty-state h4 { color: #e2e8f0; margin-top: 10px; }
+        .tab-title {
+            color: #4da6ff;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }
         </style>
     """, unsafe_allow_html=True)
 
     st.markdown("## 👨‍🏫 Espace Pédagogique Enseignant")
     st.markdown(
-        "Plateforme unifiée pour l'appel, la saisie des notes, le cahier de texte"
-        " et le suivi des charges horaires."
+        "Plateforme unifiée pour l'appel, la saisie des notes, le cahier de texte "
+        "et le suivi des charges horaires."
     )
     st.markdown("---")
 
@@ -137,7 +149,7 @@ def afficher_espace_enseignants():
 
         affectations_prof = st.session_state.get("teacher_assignments", {})
         if (
-            user_role in ["directeur", "admin", "administrateur", "super_admin"]
+            user_role in ["directeur", "admin", "administrateur", "super_admin", "censeur"]
             or not affectations_prof.get(username)
         ):
             classes_disponibles = toutes_classes_cycle
@@ -164,7 +176,8 @@ def afficher_espace_enseignants():
             </div>
         """, unsafe_allow_html=True)
 
-        # --- 2. Zone de Contexte ---
+        # --- 2. Zone de Contexte (Sélection Classe & Matière stricte) ---
+        st.markdown('<div class="context-box">', unsafe_allow_html=True)
         st.markdown("#### 🎯 Paramètres de la séance")
         col1, col2 = st.columns(2)
         with col1:
@@ -176,47 +189,33 @@ def afficher_espace_enseignants():
             (c for c in classes_disponibles if c.libelle == classe_enseignant), None
         )
 
+        # --- LOGIQUE DE RÉCUPÉRATION DES MATIÈRES (CALQUÉE SUR L'ESPACE INSPECTION) ---
         matieres_query = db.query(Matiere).filter(
-            Matiere.classe_id == classe_obj.id if classe_obj else True,
-            Matiere.school_id == ecole_active_id
+            Matiere.school_id == ecole_active_id,
+            Matiere.cycle == cycle_en_cours 
         )
         if hasattr(Matiere, "deleted_at"):
             matieres_query = matieres_query.filter(Matiere.deleted_at.is_(None))
-        matieres_brutes = matieres_query.all()
-
-        if not matieres_brutes:
-            matieres_query_cycle = db.query(Matiere).filter(
-                Matiere.cycle == cycle_en_cours, Matiere.school_id == ecole_active_id
-            )
-            if hasattr(Matiere, "deleted_at"):
-                matieres_query_cycle = matieres_query_cycle.filter(Matiere.deleted_at.is_(None))
-            matieres_brutes = matieres_query_cycle.all()
-
-        matieres_uniques_dict = {}
-        for mat in matieres_brutes:
-            nom_brut = mat.libelle if hasattr(mat, "libelle") and mat.libelle else getattr(mat, "nom", "Matière")
-            norm_key = normaliser_chaine(nom_brut)
-            if norm_key not in matieres_uniques_dict:
-                matieres_uniques_dict[norm_key] = mat
-        matieres_cycle = list(matieres_uniques_dict.values())
-
-        noms_matieres = sorted([
-            (m.libelle if hasattr(m, 'libelle') and m.libelle else getattr(m, 'nom', 'Matière')).title()
-            for m in matieres_cycle
-        ])
+            
+        liste_matieres_brutes = matieres_query.all()
+        
+        # Déduplication et formatage parfaits
+        noms_matieres = sorted(list(set([
+            (m.libelle if hasattr(m, 'libelle') and m.libelle else getattr(m, 'nom', 'Matière')).title() 
+            for m in liste_matieres_brutes
+        ])))
 
         with col2:
             matiere_enseignant = st.selectbox(
-                "Vos matières dispensées", noms_matieres, key="ens_matiere_select"
+                "Vos matières dispensées", noms_matieres if noms_matieres else ["Aucune matière trouvée"], key="ens_matiere_select"
             )
-        
-        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
+        # Récupération de l'objet matière correspondant pour les insertions
         matiere_obj = next(
             (
-                m for m in matieres_cycle
-                if (m.libelle if hasattr(m, 'libelle') and m.libelle else getattr(m, 'nom', '')).title()
-                == matiere_enseignant
+                m for m in liste_matieres_brutes
+                if (m.libelle if hasattr(m, 'libelle') and m.libelle else getattr(m, 'nom', '')).title() == matiere_enseignant
             ),
             None,
         )
@@ -240,9 +239,7 @@ def afficher_espace_enseignants():
 
         # ONGLET 1: CAHIER DE TEXTE
         with tab_cahier:
-            st.markdown(
-                f"#### 📖 Remplir le Cahier de Texte — **{classe_enseignant}** ({matiere_enseignant})"
-            )
+            st.markdown(f"<h4 class='tab-title'>📖 Remplir le Cahier de Texte — {classe_enseignant} ({matiere_enseignant})</h4>", unsafe_allow_html=True)
             with st.form("form_ens_cahier_texte_avance"):
                 col_c1, col_c2 = st.columns(2)
                 with col_c1:
@@ -269,7 +266,6 @@ def afficher_espace_enseignants():
                     key="ens_contenu_cours",
                 )
                 
-                # Regroupement des champs optionnels pour aérer l'interface
                 with st.expander("➕ Ajouter des remarques ou exercices (Optionnel)"):
                     difficultees = st.text_area(
                         "Difficultés rencontrées / Remarques",
@@ -314,9 +310,7 @@ def afficher_espace_enseignants():
 
         # ONGLET 2: NOTES
         with tab_notes:
-            st.markdown(
-                f"#### 📝 Grille d'Évaluation — **{classe_enseignant}** ({matiere_enseignant})"
-            )
+            st.markdown(f"<h4 class='tab-title'>📝 Grille d'Évaluation — {classe_enseignant} ({matiere_enseignant})</h4>", unsafe_allow_html=True)
             if not eleves:
                 st.markdown(f"""
                     <div class="empty-state">
@@ -372,9 +366,7 @@ def afficher_espace_enseignants():
 
         # ONGLET 3: APPEL
         with tab_appel:
-            st.markdown(
-                f"#### 📋 Contrôle de Présence — **{classe_enseignant}**"
-            )
+            st.markdown(f"<h4 class='tab-title'>📋 Contrôle de Présence — {classe_enseignant}</h4>", unsafe_allow_html=True)
             if not eleves:
                 st.markdown(f"""
                     <div class="empty-state">
@@ -428,9 +420,7 @@ def afficher_espace_enseignants():
 
         # ONGLET 4: HORAIRES
         with tab_charge:
-            st.markdown(
-                f"#### 📊 Progression et Heures — **{matiere_enseignant} ({classe_enseignant})**"
-            )
+            st.markdown(f"<h4 class='tab-title'>📊 Progression et Heures — {matiere_enseignant} ({classe_enseignant})</h4>", unsafe_allow_html=True)
 
             if classe_obj and matiere_obj:
                 programmes_ecole = db.query(Programme).filter(Programme.school_id == ecole_active_id).all()

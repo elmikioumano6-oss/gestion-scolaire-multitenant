@@ -100,13 +100,11 @@ def afficher_espace_parent():
         if not eleves:
             if user_role and user_role.lower() == "parent":
                 st.warning(
-                    "⚠️ Aucun profil d'élève n'est actuellement rattaché à votre compte"
-                    " parent. Veuillez contacter l'administration."
+                    "⚠️ Aucun profil d'élève n'est actuellement rattaché à votre compte parent. Veuillez contacter l'administration."
                 )
             else:
                 st.info(
-                    f"📌 Aucun élève enregistré pour le cycle **{cycle_en_cours}** dans"
-                    " cet établissement."
+                    f"📌 Aucun élève enregistré pour le cycle **{cycle_en_cours}** dans cet établissement."
                 )
         else:
             noms_eleves = [
