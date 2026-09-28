@@ -1,10 +1,14 @@
 from datetime import datetime
+import urllib.parse
+import string
+import random
 import unicodedata
-from database.audit import log_action_erp
-from database.db_config import SessionLocal
-from database.models import Classe, Enseignant, Matiere, School
 import pandas as pd
 import streamlit as st
+from werkzeug.security import generate_password_hash
+from database.audit import log_action_erp
+from database.db_config import SessionLocal
+from database.models import Classe, Enseignant, Matiere, School, User
 
 
 # --- Dictionnaire et fonction de normalisation (Logique Espace Enseignant) ---
@@ -75,15 +79,31 @@ def get_matieres_dynamiques(selected_classes_labels, classes_cycle, ecole_active
             m_dict[n_key] = m
             
     return sorted([(m.libelle if hasattr(m, 'libelle') and m.libelle else getattr(m, 'nom', 'Matière')).title() for m in m_dict.values()])
+
+def generer_lien_whatsapp_prof(telephone, nom_prof, username, password_clair):
+    """Prépare le lien WhatsApp avec le texte pré-formaté pour l'enseignant."""
+    telephone_propre = str(telephone).replace(" ", "").replace("+", "")
+    message = (
+        f"Bonjour M./Mme {nom_prof}, 👋\n\n"
+        f"Votre compte enseignant a été créé avec succès au sein de notre établissement.\n\n"
+        f"Voici vos identifiants pour accéder à votre Espace Pédagogique (Cahier de texte, Saisie des notes, Appels) :\n\n"
+        f"🌐 *Lien* : https://portail.votre-ecole.com\n"
+        f"👤 *Utilisateur* : {username}\n"
+        f"🔑 *Mot de passe* : {password_clair}\n\n"
+        f"Il est conseillé de modifier ce mot de passe lors de votre première connexion.\n\n"
+        f"Cordialement,\n*L'Administration*"
+    )
+    texte_encode = urllib.parse.quote(message)
+    return f"https://wa.me/{telephone_propre}?text={texte_encode}"
+
 # -------------------------------------------------------------------------
 
 
 def afficher_enseignants():
     st.subheader("👥 Gestion du Corps Professoral & Enseignants")
     st.markdown(
-        "Suivi, administration et affectations pédagogiques des enseignants"
-        " rattachés à l'établissement avec traçabilité ERP et archivage (Soft"
-        " Delete)."
+        "Suivi, administration et affectations pédagogiques des enseignants "
+        "avec création automatique de comptes et traçabilité ERP."
     )
     st.markdown("---")
 
@@ -170,22 +190,13 @@ def afficher_enseignants():
                     c = st.columns([1.5, 1.5, 2, 2, 2])
                     c[0].write(f"**{prof.nom}** {prof.prenom}")
                     c[1].write(
-                        f"📞 {prof.telephone or 'N/D'}\n📧"
-                        f" {getattr(prof, 'email', 'N/D')}"
+                        f"📞 {prof.telephone or 'N/D'}\n📧 {getattr(prof, 'email', 'N/D')}"
                     )
                     c[2].write(
-                        getattr(
-                            prof,
-                            "classes_attribuees",
-                            getattr(prof, "classes", "Aucune"),
-                        )
+                        getattr(prof, "classes_attribuees", getattr(prof, "classes", "Aucune"))
                     )
                     c[3].write(
-                        getattr(
-                            prof,
-                            "matieres_attribuees",
-                            getattr(prof, "matieres", "Aucune"),
-                        )
+                        getattr(prof, "matieres_attribuees", getattr(prof, "matieres", "Aucune"))
                     )
 
                     btn_col1, btn_col2 = c[4].columns(2)
@@ -193,9 +204,7 @@ def afficher_enseignants():
                         if st.button("✏️", key=f"edit_prof_{prof.id}", help="Modifier"):
                             st.session_state[f"editing_prof_{prof.id}"] = True
                     with btn_col2:
-                        if st.button(
-                            "🗑️", key=f"del_prof_{prof.id}", help="Archiver / Supprimer"
-                        ):
+                        if st.button("🗑️", key=f"del_prof_{prof.id}", help="Archiver / Supprimer"):
                             st.session_state[f"deleting_prof_{prof.id}"] = True
 
                     # --- GESTION DE LA SUPPRESSION / ARCHIVAGE ---
@@ -205,9 +214,7 @@ def afficher_enseignants():
                         )
                         col_conf1, col_conf2 = st.columns(2)
                         with col_conf1:
-                            if st.button(
-                                "Confirmer", key=f"confirm_del_prof_{prof.id}", type="primary"
-                            ):
+                            if st.button("Confirmer", key=f"confirm_del_prof_{prof.id}", type="primary"):
                                 if hasattr(prof, "deleted_at"):
                                     prof.deleted_at = datetime.now()
                                     db.commit()
@@ -217,10 +224,7 @@ def afficher_enseignants():
 
                                 log_action_erp(
                                     module="Enseignants",
-                                    action=(
-                                        "Suppression/Archivage du professeur"
-                                        f" {prof.nom} {prof.prenom}"
-                                    ),
+                                    action=f"Suppression/Archivage du professeur {prof.nom} {prof.prenom}",
                                     statut="Critique",
                                     valeur_avant="Actif",
                                     valeur_apres="Inactif",
@@ -312,10 +316,7 @@ def afficher_enseignants():
 
                             log_action_erp(
                                 module="Enseignants",
-                                action=(
-                                    "Modification des affectations de"
-                                    f" {new_nom.upper()} {new_prenom}"
-                                ),
+                                action=f"Modification des affectations de {new_nom.upper()} {new_prenom}",
                                 statut="Critique",
                                 valeur_avant=ancienne_val,
                                 valeur_apres=nouvelle_val,
@@ -334,17 +335,36 @@ def afficher_enseignants():
         with tab_ajout:
             st.markdown(f"### Enregistrement d'un Nouvel Enseignant — **{school_name} ({cycle_en_cours})**")
 
+            # Affichage du bloc WhatsApp s'il y a eu une création récente
+            if "nouveau_prof" in st.session_state:
+                info = st.session_state["nouveau_prof"]
+                st.success(f"✅ Compte utilisateur créé avec succès pour **{info['nom_prof']}** !")
+                
+                if info["telephone"]:
+                    lien_wa = generer_lien_whatsapp_prof(
+                        info["telephone"], info["nom_prof"], info["username"], info["password"]
+                    )
+                    st.link_button("📱 Envoyer les identifiants au Professeur via WhatsApp", url=lien_wa, type="primary", use_container_width=True)
+                else:
+                    st.warning("⚠️ Aucun numéro de téléphone renseigné. Vous devez transmettre ces identifiants manuellement :")
+                    st.info(f"**Utilisateur** : {info['username']} | **Mot de passe** : {info['password']}")
+                
+                if st.button("➕ Inscrire un autre enseignant"):
+                    del st.session_state["nouveau_prof"]
+                    st.rerun()
+                
+                st.markdown("---")
+
             if not classes_cycle:
                 st.warning(f"⚠️ Veuillez d'abord configurer des classes pour le cycle **{cycle_en_cours}**.")
             else:
-                # --- Suppression de st.form() pour permettre le rafraîchissement dynamique ---
                 col_a1, col_a2 = st.columns(2)
                 with col_a1:
                     nom_prof = st.text_input("Nom de l'enseignant *", key="add_nom")
                     email_prof = st.text_input("Adresse Email", key="add_email")
                 with col_a2:
                     prenom_prof = st.text_input("Prénom de l'enseignant *", key="add_prenom")
-                    tel_prof = st.text_input("Numéro de Téléphone", key="add_tel")
+                    tel_prof = st.text_input("Numéro de Téléphone (Format WhatsApp)", key="add_tel")
 
                 st.markdown("#### Affectations Pédagogiques")
                 classes_attribuees = st.multiselect(
@@ -365,7 +385,7 @@ def afficher_enseignants():
                 with col_sal2:
                     salaire_base = st.number_input("Salaire de base (si permanent) (FCFA)", min_value=0.0, step=1000.0, key="add_sal")
 
-                submitted_prof = st.button("💾 Enregistrer l'enseignant", type="primary", key="btn_add_prof")
+                submitted_prof = st.button("💾 Enregistrer & Créer le compte", type="primary", key="btn_add_prof")
                 
                 if submitted_prof:
                     if not nom_prof.strip() or not prenom_prof.strip():
@@ -388,43 +408,69 @@ def afficher_enseignants():
                             str_classes = ", ".join(classes_attribuees) if classes_attribuees else "Aucune"
                             str_matieres = ", ".join(matieres_attribuees) if matieres_attribuees else "Aucune"
 
-                            nouvel_enseignant = Enseignant(
-                                school_id=ecole_active_id,
-                                nom=nom_prof.strip().upper(),
-                                prenom=prenom_prof.strip(),
-                                telephone=tel_prof.strip() if tel_prof else None,
-                                taux_horaire=taux_horaire,
-                                salaire_base=salaire_base
-                            )
+                            try:
+                                # 1. Création de l'enseignant
+                                nouvel_enseignant = Enseignant(
+                                    school_id=ecole_active_id,
+                                    nom=nom_prof.strip().upper(),
+                                    prenom=prenom_prof.strip(),
+                                    telephone=tel_prof.strip() if tel_prof else None,
+                                    taux_horaire=taux_horaire,
+                                    salaire_base=salaire_base
+                                )
 
-                            if hasattr(nouvel_enseignant, "email"):
-                                nouvel_enseignant.email = email_prof.strip() if email_prof else None
-                            if hasattr(nouvel_enseignant, "classes_attribuees"):
-                                nouvel_enseignant.classes_attribuees = str_classes
-                            if hasattr(nouvel_enseignant, "classes"):
-                                nouvel_enseignant.classes = str_classes
-                            if hasattr(nouvel_enseignant, "matieres_attribuees"):
-                                nouvel_enseignant.matieres_attribuees = str_matieres
-                            if hasattr(nouvel_enseignant, "matieres"):
-                                nouvel_enseignant.matieres = str_matieres
+                                if hasattr(nouvel_enseignant, "email"):
+                                    nouvel_enseignant.email = email_prof.strip() if email_prof else None
+                                if hasattr(nouvel_enseignant, "classes_attribuees"):
+                                    nouvel_enseignant.classes_attribuees = str_classes
+                                if hasattr(nouvel_enseignant, "classes"):
+                                    nouvel_enseignant.classes = str_classes
+                                if hasattr(nouvel_enseignant, "matieres_attribuees"):
+                                    nouvel_enseignant.matieres_attribuees = str_matieres
+                                if hasattr(nouvel_enseignant, "matieres"):
+                                    nouvel_enseignant.matieres = str_matieres
 
-                            db.add(nouvel_enseignant)
-                            db.commit()
+                                db.add(nouvel_enseignant)
+                                db.flush()
 
-                            log_action_erp(
-                                module="Enseignants",
-                                action=f"Enregistrement de l'enseignant : {nom_prof.strip().upper()} {prenom_prof.strip()}",
-                                statut="Succès",
-                                valeur_avant="Inexistant",
-                                valeur_apres=f"Affecté à {len(classes_attribuees)} classe(s)",
-                            )
+                                # 2. Création automatique du compte User Enseignant
+                                caracteres = string.ascii_letters + string.digits
+                                password_genere = ''.join(random.choice(caracteres) for i in range(8))
+                                username_prof = f"prof_{nom_prof.strip().lower().replace(' ', '')}{random.randint(10, 99)}"
 
-                            st.success(
-                                f"✅ L'enseignant **{nom_prof.strip().upper()} {prenom_prof.strip()}** a été enregistré avec succès !"
-                            )
-                            
-                            # Réinitialisation forcée après enregistrement pour vider les champs
-                            st.rerun()
+                                nouveau_user_prof = User(
+                                    username=username_prof,
+                                    password=generate_password_hash(password_genere),
+                                    role="enseignant",
+                                    school_id=ecole_active_id
+                                )
+                                # Lier au profil enseignant si la clé étrangère existe dans User
+                                if hasattr(nouveau_user_prof, "enseignant_id"):
+                                    nouveau_user_prof.enseignant_id = nouvel_enseignant.id
+                                    
+                                db.add(nouveau_user_prof)
+                                db.commit()
+
+                                log_action_erp(
+                                    module="Enseignants",
+                                    action=f"Enregistrement de l'enseignant {nom_prof.strip().upper()} {prenom_prof.strip()} + Création Compte",
+                                    statut="Succès",
+                                    valeur_avant="Inexistant",
+                                    valeur_apres=f"Affecté à {len(classes_attribuees)} classe(s)",
+                                )
+                                
+                                # Stockage en session pour l'affichage conditionnel de WhatsApp
+                                st.session_state["nouveau_prof"] = {
+                                    "telephone": tel_prof.strip(),
+                                    "nom_prof": f"{nom_prof.strip().upper()} {prenom_prof.strip()}",
+                                    "username": username_prof,
+                                    "password": password_genere
+                                }
+                                st.rerun()
+
+                            except Exception as e:
+                                db.rollback()
+                                st.error(f"Erreur technique lors de la création de l'enseignant : {e}")
 
     finally:
         db.close()

@@ -10,20 +10,88 @@ import streamlit as st
 
 
 def afficher_super_admin():
-    st.subheader("🌐 Administration Globale de la Plateforme")
-    st.markdown(
-        "Pilotage centralisé des établissements partenaires, gestion des"
-        " abonnements, des essais et des statuts d'accès avec traçabilité ERP."
-    )
-    st.markdown("---")
+    # --- Injection CSS pour un design Premium Super Admin ---
+    st.markdown("""
+        <style>
+        .super-admin-card {
+            background: linear-gradient(135deg, #111827 0%, #374151 100%);
+            border-radius: 12px;
+            padding: 20px;
+            color: white;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+            margin-bottom: 25px;
+            display: flex;
+            align-items: center;
+            border-left: 5px solid #f59e0b; /* Liseré doré (Privilège) */
+        }
+        .super-admin-card h2 { margin: 0; color: #ffffff; font-weight: 600; font-size: 1.8rem; padding-bottom: 5px; }
+        .super-admin-card p { margin: 0; opacity: 0.9; font-size: 1rem; color: #e2e8f0; }
+        </style>
+    """, unsafe_allow_html=True)
 
     if not st.session_state.get("is_super_admin", False):
         st.warning("⚠️ Accès strictement réservé au Super Administrateur.")
         return
 
+    # --- En-tête Design ---
+    st.markdown(f"""
+        <div class="super-admin-card">
+            <div style="font-size: 3.5rem; margin-right: 25px;">🌐</div>
+            <div>
+                <h2>Administration Globale (Tenants)</h2>
+                <p>Pilotage centralisé des établissements, gestion des abonnements et auto-suspension.</p>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
     db = SessionLocal()
     try:
-        # --- 1. KPI'S GLOBAUX DU SUPER ADMIN (AFFICHÉS EN PREMIER) ---
+        # =========================================================
+        # 🧹 AUTO-NETTOYAGE BLINDÉ : DÉSACTIVATION DES COMPTES EXPIRÉS
+        # =========================================================
+        aujourd_hui = datetime.now()
+        ecoles_actives = db.query(School).filter(School.actif == True).all()
+        nb_suspendus = 0
+
+        for ecole in ecoles_actives:
+            # On rassemble toutes les dates d'expiration possibles de votre modèle
+            dates_a_verifier = [
+                getattr(ecole, "date_expiration", None),
+                getattr(ecole, "trial_expires_at", None),
+                getattr(ecole, "date_fin_essai", None)
+            ]
+            
+            # On ne garde que les dates qui existent vraiment
+            dates_valides = [d for d in dates_a_verifier if d is not None]
+            
+            if dates_valides:
+                # On prend la date la plus lointaine
+                date_limite = max(dates_valides)
+                
+                # Sécurité : on s'assure que c'est bien un format datetime complet
+                if type(date_limite) is not datetime:
+                    date_limite = datetime.combine(date_limite, datetime.min.time())
+
+                # LE COUPERET : Si la date limite est dans le passé
+                if date_limite < aujourd_hui:
+                    ecole.actif = False # L'école est suspendue
+                    
+                    # On suspend aussi tous les accès des utilisateurs de cette école
+                    utilisateurs_ecole = db.query(User).filter(User.school_id == ecole.id).all()
+                    for u in utilisateurs_ecole:
+                        if hasattr(u, "actif"):
+                            u.actif = False
+                            
+                    nb_suspendus += 1
+
+        # Si on a tué au moins un compte, on sauvegarde et on rafraîchit l'écran !
+        if nb_suspendus > 0:
+            db.commit()
+            st.toast(f"🔒 {nb_suspendus} établissement(s) expiré(s) automatiquement suspendu(s) !")
+            st.rerun()
+        # =========================================================
+
+        # --- 1. KPI'S GLOBAUX DU SUPER ADMIN ---
         total_ecoles = db.query(School).count()
         total_eleves_plateforme = (
             db.query(Eleve).filter(Eleve.deleted_at.is_(None)).count()
@@ -57,13 +125,12 @@ def afficher_super_admin():
             "🔒 Sécurité et Mises à jour globales des comptes", expanded=False
         ):
             st.markdown(
-                "Si vous avez des comptes administrateurs ou censeurs créés avant la"
-                " mise en place de la sécurité, forcez ici l'exigence d'un changement"
-                " de mot de passe à leur prochaine connexion."
+                "Si vous avez des comptes administrateurs ou censeurs créés avant la "
+                "mise en place de la sécurité, forcez ici l'exigence d'un changement "
+                "de mot de passe à leur prochaine connexion."
             )
             if st.button(
-                "🔑 Forcer le changement de mot de passe pour TOUS les administrateurs"
-                " existants",
+                "🔑 Forcer le changement de mot de passe pour TOUS les administrateurs existants",
                 type="primary",
             ):
                 db_sec_all = SessionLocal()
@@ -78,10 +145,7 @@ def afficher_super_admin():
 
                     log_action_erp(
                         module="Super Admin",
-                        action=(
-                            f"Forçage global du changement de mot de passe pour {nb_maj}"
-                            " utilisateurs."
-                        ),
+                        action=f"Forçage global du changement de mot de passe pour {nb_maj} utilisateurs.",
                         statut="Critique",
                         valeur_avant="Sécurité standard",
                         valeur_apres="Mise à jour obligatoire du mot de passe",
@@ -89,8 +153,7 @@ def afficher_super_admin():
 
                     db_sec_all.commit()
                     st.success(
-                        f"✅ Succès ! {nb_maj} compte(s) configuré(s) pour exiger un"
-                        " changement de mot de passe."
+                        f"✅ Succès ! {nb_maj} compte(s) configuré(s) pour exiger un changement de mot de passe."
                     )
                 except Exception as ex:
                     db_sec_all.rollback()
@@ -105,25 +168,22 @@ def afficher_super_admin():
             cred = st.session_state["last_created_credentials"]
             st.success(f"✅ Compte généré avec succès pour **{cred['school_name']}** !")
 
-            # L'URL corrigée pointe désormais vers votre domaine de production officiel
             lien_plateforme = "https://app.gestionscolairepro.com"
 
             msg = (
-                f"Bonjour, votre espace de gestion pour l'établissement"
-                f" {cred['school_name']} est actif sur la plateforme Gestion Scolaire"
-                f" Pro.\n\n🔗 Lien d'accès : {lien_plateforme}\n👤 Identifiant :"
-                f" {cred['username']}\n🔑 Mot de passe provisoire :"
-                f" {cred['password']}\n\n⚠️ Un changement de mot de passe vous sera"
-                f" demandé à la première connexion."
+                f"Bonjour, votre espace de gestion pour l'établissement "
+                f"*{cred['school_name']}* est actif sur la plateforme Gestion Scolaire Pro.\n\n"
+                f"🔗 *Lien d'accès* : {lien_plateforme}\n"
+                f"👤 *Identifiant* : {cred['username']}\n"
+                f"🔑 *Mot de passe provisoire* : {cred['password']}\n\n"
+                f"⚠️ Un changement de mot de passe vous sera demandé à la première connexion."
             )
             encoded_msg = urllib.parse.quote(msg)
 
             raw_contacts = str(cred.get("contacts", ""))
             liste_brute = [
                 p.strip()
-                for p in raw_contacts.replace(",", "/")
-                .replace("-", "/")
-                .split("/")
+                for p in raw_contacts.replace(",", "/").replace("-", "/").split("/")
                 if p.strip()
             ]
 
@@ -140,8 +200,7 @@ def afficher_super_admin():
                 if numeros_valides:
                     if len(numeros_valides) > 1:
                         choix_label = st.selectbox(
-                            "📱 Cet établissement a plusieurs numéros. Lequel voulez-vous"
-                            " utiliser pour WhatsApp ?",
+                            "📱 Cet établissement a plusieurs numéros. Lequel voulez-vous utiliser pour WhatsApp ?",
                             options=[n[0] for n in numeros_valides],
                             key="select_whatsapp_number",
                         )
@@ -154,17 +213,14 @@ def afficher_super_admin():
                     wa_url = f"https://wa.me/{selected_clean}?text={encoded_msg}"
                     st.markdown(
                         f"""
-                            <a href="{wa_url}" target="_blank" style="display:inline-block;background-color:#25D366;color:white;padding:10px 20px;border-radius:5px;text-decoration:none;font-weight:bold;margin-bottom:10px;">
-                                📲 Envoyer les accès par WhatsApp au {choix_label}
-                            </a>
-                            """,
+                        <a href="{wa_url}" target="_blank" style="display:inline-block;background-color:#25D366;color:white;padding:10px 20px;border-radius:5px;text-decoration:none;font-weight:bold;margin-bottom:10px;">
+                            📲 Envoyer les accès par WhatsApp au {choix_label}
+                        </a>
+                        """,
                         unsafe_allow_html=True,
                     )
                 else:
-                    st.warning(
-                        "⚠️ Aucun numéro de téléphone valide n'a été renseigné pour ce"
-                        " contact."
-                    )
+                    st.warning("⚠️ Aucun numéro de téléphone valide n'a été renseigné pour ce contact.")
 
             with col_wa2:
                 if st.button("Fermer cet encadré"):
@@ -190,7 +246,6 @@ def afficher_super_admin():
                     statut_texte = (
                         "✅ Actif" if getattr(ecole, "actif", True) else "⛔ Suspendu"
                     )
-                    
                     badge_essai = " 🧪 [ESSAI]" if getattr(ecole, "is_trial", False) else ""
 
                     nb_eleves_ecole = (
@@ -200,14 +255,12 @@ def afficher_super_admin():
                     )
 
                     with st.expander(
-                        f"🏫 {ecole.nom}{badge_essai} (ID: {ecole.id}) [Code: {ecole.code}] — Statut :"
-                        f" {statut_texte} | Élèves : {nb_eleves_ecole}"
+                        f"🏫 {ecole.nom}{badge_essai} (ID: {ecole.id}) [Code: {ecole.code}] — Statut : {statut_texte} | Élèves : {nb_eleves_ecole}"
                     ):
                         current_active_school = st.session_state.get("school_id")
                         if current_active_school == ecole.id:
                             st.success(
-                                "🟢 Cet établissement est actuellement actif dans votre session"
-                                " de travail."
+                                "🟢 Cet établissement est actuellement actif dans votre session de travail."
                             )
                         else:
                             if st.button(
@@ -218,8 +271,7 @@ def afficher_super_admin():
                                 st.session_state["school_id"] = ecole.id
                                 st.session_state["school_name"] = ecole.nom
                                 st.success(
-                                    f"✅ Basculement réussi vers **{ecole.nom}** !"
-                                    " Redirection..."
+                                    f"✅ Basculement réussi vers **{ecole.nom}** ! Redirection..."
                                 )
                                 st.rerun()
 
@@ -236,7 +288,7 @@ def afficher_super_admin():
                                 st.write(f"**Contacts :** {getattr(ecole, 'contacts', 'N/D')}")
                                 if getattr(ecole, 'is_trial', False):
                                     st.warning("🧪 Compte en mode Essai / Démo")
-                                    if ecole.trial_expires_at:
+                                    if hasattr(ecole, 'trial_expires_at') and ecole.trial_expires_at:
                                         st.write(f"**Fin d'essai :** {ecole.trial_expires_at.strftime('%d/%m/%Y')}")
 
                             with col2:
@@ -258,108 +310,67 @@ def afficher_super_admin():
                                     d_val = datetime.now().date() + timedelta(days=30)
 
                                 nouvelle_date_exp = st.date_input(
-                                    "Date limite d'accès / Fin d'essai",
+                                    "Date limite d'accès / Fin d'abonnement",
                                     value=d_val,
                                     key=f"exp_{ecole.id}",
                                 )
 
-                                submitted_update = st.form_submit_button(
-                                    "💾 Mettre à jour l'établissement"
-                                )
+                                submitted_update = st.form_submit_button("💾 Mettre à jour l'établissement")
                                 if submitted_update:
-                                    ecole_maj = (
-                                        db.query(School).filter(School.id == ecole.id).first()
-                                    )
+                                    ecole_maj = db.query(School).filter(School.id == ecole.id).first()
                                     if ecole_maj:
                                         ecole_maj.actif = nouveau_statut_actif
                                         ecole_maj.date_expiration = datetime.combine(
                                             nouvelle_date_exp, datetime.min.time()
                                         )
 
-                                        utilisateurs_ecole = (
-                                            db.query(User)
-                                            .filter(User.school_id == ecole.id)
-                                            .all()
-                                        )
+                                        # Mise à jour des utilisateurs rattachés
+                                        utilisateurs_ecole = db.query(User).filter(User.school_id == ecole.id).all()
                                         for u in utilisateurs_ecole:
                                             if hasattr(u, "actif"):
                                                 u.actif = nouveau_statut_actif
 
                                         log_action_erp(
                                             module="Gestion des Tenants",
-                                            action=(
-                                                "Mise à jour des droits pour l'établissement"
-                                                f" {ecole_maj.nom}"
-                                            ),
-                                            statut=(
-                                                "Critique" if not nouveau_statut_actif else "Succès"
-                                            ),
+                                            action=f"Mise à jour des droits pour l'établissement {ecole_maj.nom}",
+                                            statut="Critique" if not nouveau_statut_actif else "Succès",
                                             valeur_avant=f"Actif: {statut_actuel} | Exp: {d_val}",
-                                            valeur_apres=(
-                                                f"Actif: {nouveau_statut_actif} | Exp:"
-                                                f" {nouvelle_date_exp}"
-                                            ),
+                                            valeur_apres=f"Actif: {nouveau_statut_actif} | Exp: {nouvelle_date_exp}",
                                         )
 
                                         db.commit()
-                                        st.success(
-                                            f"✅ Paramètres mis à jour pour {ecole_maj.nom} !"
-                                        )
+                                        st.success(f"✅ Paramètres mis à jour pour {ecole_maj.nom} !")
                                         st.rerun()
 
                         st.markdown("---")
                         st.markdown("#### 👤 Gestion des Comptes Administrateurs / Censeurs")
 
-                        utilisateurs_ecole = (
-                            db.query(User).filter(User.school_id == ecole.id).all()
-                        )
+                        utilisateurs_ecole = db.query(User).filter(User.school_id == ecole.id).all()
                         if utilisateurs_ecole:
                             noms_vus_super = set()
                             for u in utilisateurs_ecole:
                                 if u.username not in noms_vus_super:
                                     noms_vus_super.add(u.username)
                                     st.markdown(
-                                        f"- **Utilisateur :** `{u.username}` | **Rôle :**"
-                                        f" `{u.role}` | **Mot de passe à changer :**"
-                                        f" `{'Oui' if u.changer_mdp_requis else 'Non'}`"
+                                        f"- **Utilisateur :** `{u.username}` | **Rôle :** `{u.role}` | "
+                                        f"**Mot de passe à changer :** `{'Oui' if u.changer_mdp_requis else 'Non'}`"
                                     )
                         else:
-                            st.warning(
-                                "⚠️ Aucun compte utilisateur n'est encore associé à cet"
-                                " établissement."
-                            )
+                            st.warning("⚠️ Aucun compte utilisateur n'est encore associé à cet établissement.")
 
                         with st.form(key=f"form_admin_existant_{ecole.id}"):
-                            st.write(
-                                "Créer ou réinitialiser un accès administrateur pour cette"
-                                " école :"
-                            )
-                            adm_username = st.text_input(
-                                "Identifiant de connexion", key=f"adm_user_{ecole.id}"
-                            )
-                            adm_password = st.text_input(
-                                "Mot de passe provisoire",
-                                type="password",
-                                key=f"adm_pass_{ecole.id}",
-                            )
-                            btn_save_adm = st.form_submit_button(
-                                "Créer / Réinitialiser le compte Admin"
-                            )
+                            st.write("Créer ou réinitialiser un accès administrateur pour cette école :")
+                            adm_username = st.text_input("Identifiant de connexion", key=f"adm_user_{ecole.id}")
+                            adm_password = st.text_input("Mot de passe provisoire", type="password", key=f"adm_pass_{ecole.id}")
+                            btn_save_adm = st.form_submit_button("Créer / Réinitialiser le compte Admin")
 
                             if btn_save_adm:
                                 if not adm_username.strip() or not adm_password.strip():
                                     st.error("Veuillez renseigner l'identifiant et le mot de passe.")
                                 elif len(adm_password) < 6:
-                                    st.error(
-                                        "Le mot de passe provisoire doit contenir au moins 6"
-                                        " caractères."
-                                    )
+                                    st.error("Le mot de passe provisoire doit contenir au moins 6 caractères.")
                                 else:
-                                    existing_usr = (
-                                        db.query(User)
-                                        .filter(User.username == adm_username.strip())
-                                        .first()
-                                    )
+                                    existing_usr = db.query(User).filter(User.username == adm_username.strip()).first()
                                     if existing_usr:
                                         if existing_usr.school_id == ecole.id:
                                             existing_usr.password = bcrypt.hashpw(
@@ -370,10 +381,7 @@ def afficher_super_admin():
 
                                             log_action_erp(
                                                 module="Gestion des Tenants",
-                                                action=(
-                                                    "Réinitialisation du compte administrateur"
-                                                    f" '{adm_username.strip()}' pour {ecole.nom}"
-                                                ),
+                                                action=f"Réinitialisation du compte administrateur '{adm_username.strip()}' pour {ecole.nom}",
                                                 statut="Critique",
                                                 valeur_avant="Ancien mot de passe",
                                                 valeur_apres="Nouveau mot de passe provisoire exigé",
@@ -386,16 +394,10 @@ def afficher_super_admin():
                                                 "password": adm_password.strip(),
                                                 "contacts": ecole.contacts or "",
                                             }
-                                            st.success(
-                                                f"✅ Compte {adm_username.strip()} mis à jour avec"
-                                                " succès !"
-                                            )
+                                            st.success(f"✅ Compte {adm_username.strip()} mis à jour avec succès !")
                                             st.rerun()
                                         else:
-                                            st.error(
-                                                "⛔ Cet identifiant est déjà utilisé par un autre"
-                                                " utilisateur dans une autre école."
-                                            )
+                                            st.error("⛔ Cet identifiant est déjà utilisé par un autre utilisateur dans une autre école.")
                                     else:
                                         hashed_p = bcrypt.hashpw(
                                             adm_password.encode("utf-8"), bcrypt.gensalt()
@@ -411,17 +413,11 @@ def afficher_super_admin():
 
                                         log_action_erp(
                                             module="Gestion des Tenants",
-                                            action=(
-                                                "Création d'un nouveau compte administrateur"
-                                                f" '{adm_username.strip()}' pour {ecole.nom}"
-                                            ),
+                                            action=f"Création d'un nouveau compte administrateur '{adm_username.strip()}' pour {ecole.nom}",
                                             statut="Succès",
                                             valeur_avant="Inexistant",
-                                            valeur_apres=(
-                                                "Compte actif avec mot de passe provisoire"
-                                            ),
+                                            valeur_apres="Compte actif avec mot de passe provisoire",
                                         )
-
                                         db.commit()
 
                                         st.session_state["last_created_credentials"] = {
@@ -430,83 +426,46 @@ def afficher_super_admin():
                                             "password": adm_password.strip(),
                                             "contacts": ecole.contacts or "",
                                         }
-                                        st.success(
-                                            f"✅ Compte administrateur `{adm_username.strip()}` créé"
-                                            f" avec succès pour {ecole.nom} !"
-                                        )
+                                        st.success(f"✅ Compte administrateur `{adm_username.strip()}` créé avec succès pour {ecole.nom} !")
                                         st.rerun()
 
         with tab2:
-            st.markdown(
-                "### Enregistrer un Nouvel Établissement et son Administrateur"
-            )
+            st.markdown("### Enregistrer un Nouvel Établissement et son Administrateur")
             with st.form("form_create_school"):
                 st.markdown("#### 1. Informations de l'établissement")
-                code_ecole = st.text_input(
-                    "Code unique de l'établissement (ex: RAHMAT, CHALLENGE)"
-                )
+                code_ecole = st.text_input("Code unique de l'établissement (ex: RAHMAT, CHALLENGE)")
                 nom_ecole = st.text_input("Nom de l'établissement")
-                devise_ecole = st.text_input(
-                    "Devise", value="Discipline - Qualité - Réussite"
-                )
-                adresse_ecole = st.text_input(
-                    "Adresse / Quartier, Ville", value="Niamey, Niger"
-                )
-                contacts_ecole = st.text_input(
-                    "Numéros de téléphone (séparés par /)"
-                )
-                periode_essai_mois = st.number_input(
-                    "Période d'essai (en mois)", min_value=1, max_value=12, value=1
-                )
+                devise_ecole = st.text_input("Devise", value="Discipline - Qualité - Réussite")
+                adresse_ecole = st.text_input("Adresse / Quartier, Ville", value="Niamey, Niger")
+                contacts_ecole = st.text_input("Numéros de téléphone (séparés par /)")
+                periode_essai_mois = st.number_input("Période d'essai (en mois)", min_value=1, max_value=12, value=1)
 
                 st.markdown("#### 2. Compte Administrateur / Censeur initial")
-                admin_username = st.text_input(
-                    "Identifiant de connexion (ex: admin_rahmat)"
-                )
-                admin_password = st.text_input(
-                    "Mot de passe provisoire", type="password"
-                )
+                admin_username = st.text_input("Identifiant de connexion (ex: admin_rahmat)")
+                admin_password = st.text_input("Mot de passe provisoire", type="password")
 
-                submitted_school = st.form_submit_button(
-                    "Créer l'établissement et générer le compte"
-                )
+                submitted_school = st.form_submit_button("Créer l'établissement et générer le compte")
+                
                 if submitted_school:
                     if not nom_ecole.strip() or not code_ecole.strip():
-                        st.error(
-                            "⚠️ Le nom et le code unique de l'établissement sont"
-                            " obligatoires."
-                        )
+                        st.error("⚠️ Le nom et le code unique de l'établissement sont obligatoires.")
                     elif not admin_username.strip() or not admin_password.strip():
-                        st.error(
-                            "⚠️ L'identifiant et le mot de passe administrateur sont"
-                            " obligatoires."
-                        )
+                        st.error("⚠️ L'identifiant et le mot de passe administrateur sont obligatoires.")
                     elif len(admin_password) < 6:
-                        st.error(
-                            "⚠️ Le mot de passe provisoire doit contenir au moins 6"
-                            " caractères."
-                        )
+                        st.error("⚠️ Le mot de passe provisoire doit contenir au moins 6 caractères.")
                     else:
                         code_nettoye = code_ecole.strip().upper()
-                        code_existant = (
-                            db.query(School).filter(School.code == code_nettoye).first()
-                        )
+                        code_existant = db.query(School).filter(School.code == code_nettoye).first()
+                        
                         if code_existant:
-                            st.error(
-                                f"⚠️ Un établissement avec le code '{code_nettoye}' existe déjà."
-                            )
+                            st.error(f"⚠️ Un établissement avec le code '{code_nettoye}' existe déjà.")
                         else:
-                            user_existant = (
-                                db.query(User)
-                                .filter(User.username == admin_username.strip())
-                                .first()
-                            )
+                            user_existant = db.query(User).filter(User.username == admin_username.strip()).first()
+                            
                             if user_existant:
                                 st.error(f"⚠️ L'identifiant '{admin_username.strip()}' est déjà utilisé.")
                             else:
-                                date_expiration_val = datetime.now() + timedelta(
-                                    days=30 * periode_essai_mois
-                                )
+                                date_expiration_val = datetime.now() + timedelta(days=30 * periode_essai_mois)
                                 nouvelle_ecole = School(
                                     code=code_nettoye,
                                     nom=nom_ecole.strip(),
@@ -534,15 +493,11 @@ def afficher_super_admin():
 
                                 log_action_erp(
                                     module="Gestion des Tenants",
-                                    action=(
-                                        "Création du nouvel établissement"
-                                        f" '{nom_ecole.strip()}' (Code: {code_nettoye})"
-                                    ),
+                                    action=f"Création du nouvel établissement '{nom_ecole.strip()}' (Code: {code_nettoye})",
                                     statut="Succès",
                                     valeur_avant="Inexistant",
                                     valeur_apres=f"Créé avec admin '{admin_username.strip()}'",
                                 )
-
                                 db.commit()
 
                                 st.session_state["last_created_credentials"] = {
@@ -553,8 +508,8 @@ def afficher_super_admin():
                                 }
 
                                 st.success(
-                                    f"✅ L'établissement **{nom_ecole}** et son compte"
-                                    " administrateur ont été créés avec succès !"
+                                    f"✅ L'établissement **{nom_ecole}** et son compte "
+                                    "administrateur ont été créés avec succès !"
                                 )
                                 st.rerun()
 
