@@ -1,7 +1,7 @@
 from datetime import datetime
 from database.db_config import Base
 from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, String, Text
-from sqlalchemy.orm import relationship, synonym
+from sqlalchemy.orm import relationship, synonym, validates
 
 
 class School(Base):
@@ -383,6 +383,12 @@ class Paiement(Base):
 
     eleve = relationship("Eleve", back_populates="paiements")
 
+    @validates('montant')
+    def validate_montant(self, key, value):
+        if value is None or float(value) <= 0:
+            raise ValueError("Erreur d'intégrité financière : Le montant d'un paiement doit être strictement positif (> 0).")
+        return float(value)
+
 
 class Depense(Base):
     __tablename__ = "depenses"
@@ -395,3 +401,9 @@ class Depense(Base):
     categorie = Column(String(100), nullable=False)
     date_depense = Column(DateTime, default=datetime.now)
     auteur = Column(String(100), nullable=True)
+
+    @validates('montant')
+    def validate_montant(self, key, value):
+        if value is None or float(value) <= 0:
+            raise ValueError("Erreur d'intégrité financière : Le montant d'une dépense doit être strictement positif (> 0).")
+        return float(value)

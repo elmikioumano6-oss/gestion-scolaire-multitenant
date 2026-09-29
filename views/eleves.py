@@ -15,8 +15,8 @@ def generer_lien_whatsapp(telephone, nom_parent, nom_eleve, username, password_c
     message = (
         f"Bonjour {nom_parent}, 👋\n\n"
         f"Nous vous confirmons l'inscription de *{nom_eleve}* au sein de notre établissement.\n\n"
-        f"Afin de suivre sa scolarité en temps réel, voici vos identifiants sécurisés pour accéder à l'Espace Famille :\n\n"
-        f"🌐 *Lien* : https://portail.votre-ecole.com\n"
+        f"Afin de suivre sa scolarité en temps réel (notes, versements, reliquat), voici vos identifiants sécurisés pour accéder à l'Espace Famille :\n\n"
+        f"🌐 *Lien* : https://app.gestionscolairepro.com\n"
         f"👤 *Utilisateur* : {username}\n"
         f"🔑 *Mot de passe* : {password_clair}\n\n"
         f"Veuillez modifier ce mot de passe lors de votre première connexion.\n\n"
@@ -29,8 +29,8 @@ def generer_lien_whatsapp(telephone, nom_parent, nom_eleve, username, password_c
 def afficher_eleves(niveau_actif="Collège"):
     st.subheader("🎓 Inscription et Gestion des Élèves")
     st.markdown(
-        "Enregistrement et suivi des effectifs scolaires avec création automatique "
-        "des comptes parents et génération de liens WhatsApp."
+        "Enregistrement des effectifs avec création automatique des comptes parents, "
+        "génération de liens WhatsApp et encaissement initial de la 1ère tranche."
     )
     st.markdown("---")
 
@@ -219,10 +219,10 @@ def afficher_eleves(niveau_actif="Collège"):
                     st.markdown("<hr style='margin: 0.2rem 0; border-color: rgba(255,255,255,0.05);'>", unsafe_allow_html=True)
 
         # ==========================================
-        # ONGLET 2 : INSCRIPTION & GÉNÉRATION WHATSAPP
+        # ONGLET 2 : INSCRIPTION, ACOMPTE & WHATSAPP
         # ==========================================
         with tab_ajout:
-            st.markdown("### Formulaire d'Inscription & Ventilation Financière")
+            st.markdown("### Formulaire d'Inscription")
 
             classes_dispo = (
                 db.query(Classe)
@@ -242,6 +242,7 @@ def afficher_eleves(niveau_actif="Collège"):
             options_classes = list(dict_classes.keys())
 
             with st.form("form_inscription_eleve"):
+                st.markdown("#### 1. Informations de l'élève")
                 col1, col2 = st.columns(2)
                 with col1:
                     nom_e = st.text_input("Nom de l'élève *")
@@ -267,11 +268,13 @@ def afficher_eleves(niveau_actif="Collège"):
                         f"- Transport : **{trans_ref} F** | Cantine : **{cant_ref} F**"
                     )
 
-                st.markdown("#### 💰 Ventilation des Versements Initiaux à l'Inscription (FCFA)")
+                st.markdown("#### 2. Encaissement Initial (Acompte / 1ère tranche)")
+                st.caption("ℹ️ *Saisissez uniquement le montant payé AUJOURD'HUI. Le reliquat sera calculé automatiquement et pourra être payé plus tard dans le module **Encaissements**.*")
+                
                 col_v1, col_v2, col_v3 = st.columns(3)
                 with col_v1:
                     versement_inscription = st.number_input(
-                        "Part Inscription", min_value=0.0,
+                        "Frais d'Inscription (Fixe)", min_value=0.0,
                         value=float(classe_obj_selectionnee.frais_inscription or 0.0) if classe_obj_selectionnee else 0.0, step=1000.0
                     )
                     versement_coges = st.number_input(
@@ -279,11 +282,25 @@ def afficher_eleves(niveau_actif="Collège"):
                         value=float(getattr(classe_obj_selectionnee, "frais_coges", 0.0)) if classe_obj_selectionnee else 0.0, step=500.0
                     )
                 with col_v2:
+                    # Ici l'acompte de scolarité est à 0.0 par défaut, c'est juste une avance
                     versement_scolarite = st.number_input("Acompte Scolarité (1ère Tranche)", min_value=0.0, value=0.0, step=5000.0)
-                    versement_transport = st.number_input("Part Transport", min_value=0.0, value=0.0, step=1000.0)
+                    versement_transport = st.number_input("Avance Transport (Optionnel)", min_value=0.0, value=0.0, step=1000.0)
                 with col_v3:
-                    versement_cantine = st.number_input("Part Cantine", min_value=0.0, value=0.0, step=1000.0)
-                    mode_reglement = st.selectbox("Mode de règlement", ["Espèces", "Virement bancaire", "Chèque", "Mobile Money"])
+                    versement_cantine = st.number_input("Avance Cantine (Optionnel)", min_value=0.0, value=0.0, step=1000.0)
+
+                st.markdown("#### 3. Méthode de Paiement & Mobile Money")
+                col_pay1, col_pay2 = st.columns(2)
+                with col_pay1:
+                    mode_reglement = st.selectbox(
+                        "Mode de règlement", 
+                        ["Espèces", "Airtel Money", "MyNita", "Moov Money", "Virement bancaire", "Chèque"]
+                    )
+                    st.caption("ℹ️ En cas de Mobile Money, vérifiez la réception du transfert avant de valider.")
+                with col_pay2:
+                    reference_transaction = st.text_input(
+                        "ID de transaction (Requis si Airtel / Nita / Moov) *", 
+                        placeholder="Ex: PP2409... ou NITA-0101..."
+                    )
 
                 st.markdown("#### 🏷️ Réduction sur les Frais de Scolarité (Optionnel)")
                 col_red1, col_red2 = st.columns(2)
@@ -292,11 +309,13 @@ def afficher_eleves(niveau_actif="Collège"):
                 with col_red2:
                     montant_reduction = st.number_input("Montant de la réduction (FCFA)", min_value=0.0, value=0.0, step=5000.0)
 
-                submitted = st.form_submit_button("Valider l'inscription & créer le compte Parent", type="primary")
+                submitted = st.form_submit_button("Valider l'inscription, encaisser l'acompte & Créer le compte Famille", type="primary")
 
                 if submitted:
                     if not nom_e or not prenom_e or not matricule_e:
-                        st.error("Le nom, le prénom et le matricule de l'élève sont obligatoires.")
+                        st.error("⚠️ Le nom, le prénom et le matricule de l'élève sont obligatoires.")
+                    elif mode_reglement in ["Airtel Money", "MyNita", "Moov Money"] and not reference_transaction.strip():
+                        st.error(f"⚠️ Vous avez sélectionné '{mode_reglement}'. Vous devez impérativement saisir l'ID de la transaction figurant sur le SMS de réception.")
                     else:
                         doublon_mat = db.query(Eleve).filter(
                             Eleve.school_id == school_id, Eleve.matricule == matricule_e.strip(), Eleve.deleted_at.is_(None)
@@ -321,7 +340,7 @@ def afficher_eleves(niveau_actif="Collège"):
                                     montant_reduction=montant_reduction,
                                 )
                                 db.add(nouvel_eleve)
-                                db.flush() # Récupération de l'ID élève sans commit final
+                                db.flush()
 
                                 # 2. Création automatique du compte parent
                                 caracteres = string.ascii_letters + string.digits
@@ -338,11 +357,10 @@ def afficher_eleves(niveau_actif="Collège"):
                                 db.add(nouveau_user_parent)
                                 db.flush()
 
-                                # Liaison dans la table élève (si votre modèle le gère)
                                 if hasattr(nouvel_eleve, 'parent_id'):
                                     nouvel_eleve.parent_id = nouveau_user_parent.id
 
-                                # 3. Enregistrement des paiements ventilés
+                                # 3. Enregistrement de l'acompte initial
                                 versements_effectues = {
                                     "Frais d'inscription": versement_inscription,
                                     "Cotisation COGES": versement_coges,
@@ -354,7 +372,14 @@ def afficher_eleves(niveau_actif="Collège"):
                                 for motif_paiement, montant_verse in versements_effectues.items():
                                     if montant_verse > 0:
                                         total_encaisse += montant_verse
-                                        ref_recu = f"REC-{random.randint(10000, 99999)}"
+                                        
+                                        # Génération de la référence
+                                        if mode_reglement in ["Airtel Money", "MyNita", "Moov Money"]:
+                                            prefix_mobile = mode_reglement[:3].upper()
+                                            ref_recu = f"{prefix_mobile}-{reference_transaction.strip()}-{random.randint(10, 99)}"
+                                        else:
+                                            ref_recu = f"REC-{random.randint(10000, 99999)}"
+
                                         nouveau_paiement = Paiement(
                                             school_id=school_id,
                                             reference_recu=ref_recu,
@@ -370,15 +395,15 @@ def afficher_eleves(niveau_actif="Collège"):
                                 db.commit()
                                 log_action_erp(
                                     module="Inscription Élèves",
-                                    action=f"Inscription de l'élève {nom_e.upper()} {prenom_e} + Création Compte Parent",
+                                    action=f"Inscription de l'élève {nom_e.upper()} {prenom_e} via {mode_reglement}",
                                     statut="Succès",
                                     valeur_avant="Inexistant",
-                                    valeur_apres=f"Inscrit en {classe_choisie_nom} | Total: {total_encaisse:,.0f} F",
+                                    valeur_apres=f"Inscrit en {classe_choisie_nom} | Acompte: {total_encaisse:,.0f} F",
                                 )
                                 
-                                st.success(f"Élève **{nom_e} {prenom_e}** inscrit avec succès ! Total à la caisse : **{total_encaisse:,.0f} FCFA**.")
+                                st.success(f"✅ Élève **{nom_e} {prenom_e}** inscrit avec succès ! Acompte encaissé ({mode_reglement}) : **{total_encaisse:,.0f} FCFA**.")
                                 
-                                # 4. Gestion de l'affichage du lien WhatsApp hors du formulaire
+                                # 4. Gestion de l'affichage WhatsApp
                                 st.session_state["nouvel_inscrit"] = {
                                     "tuteur": tuteur_e.strip(),
                                     "nom_parent": f"Famille {nom_e.upper()}",
@@ -391,7 +416,7 @@ def afficher_eleves(niveau_actif="Collège"):
                                 db.rollback()
                                 st.error(f"Erreur technique lors de l'inscription : {e}")
 
-            # --- Affichage du bouton WhatsApp après soumission du formulaire ---
+            # --- Affichage du bouton WhatsApp ---
             if "nouvel_inscrit" in st.session_state:
                 info = st.session_state["nouvel_inscrit"]
                 
