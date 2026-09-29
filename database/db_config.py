@@ -26,33 +26,40 @@ if not DATABASE_URL:
 if "localhost" in DATABASE_URL:
     DATABASE_URL = DATABASE_URL.replace("localhost", "127.0.0.1")
 
-connect_args = {"connect_timeout": 10} if not DATABASE_URL.startswith("sqlite") else {"timeout": 10}
-
-# Configuration de l'engine avec un pool renforcé et anti-microcoupures
+# Configuration de l'engine avec renforcement de la concurrence (Faille 1)
 if DATABASE_URL.startswith("sqlite"):
     engine = create_engine(
         DATABASE_URL,
-        connect_args=connect_args
+        connect_args={"timeout": 15}  # Patient 15 secondes au lieu de crasher sur "database is locked"
     )
+    
+    # Activation du mode WAL (Write-Ahead Logging) pour autoriser lectures/écritures simultanées
+    @event.listens_for(engine, "connect")
+    def set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.close()
+        
 else:
     engine = create_engine(
         DATABASE_URL,
         pool_size=10,
         max_overflow=20,
-        pool_pre_ping=True,      # Vérifie la santé de la connexion avant chaque requête
+        pool_pre_ping=True,       # Vérifie la santé de la connexion avant chaque requête
         pool_recycle=1800,        # Recycle les connexions toutes les 30 minutes
-        connect_args=connect_args
+        connect_args={"connect_timeout": 10}
     )
 
-# Écouteur d'événements pour contrer les micro-coupures réseau (ping de reconnexion automatique)
-@event.listens_for(engine, "checkout")
-def ping_connection(dbapi_connection, connection_record, connection_proxy):
-    cursor = dbapi_connection.cursor()
-    try:
-        cursor.execute("SELECT 1")
-    except Exception:
-        raise exc.DisconnectionError()
-    cursor.close()
+    # Écouteur d'événements pour contrer les micro-coupures réseau (ping de reconnexion automatique)
+    @event.listens_for(engine, "checkout")
+    def ping_connection(dbapi_connection, connection_record, connection_proxy):
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("SELECT 1")
+        except Exception:
+            raise exc.DisconnectionError()
+        cursor.close()
 
 class TenantSession(Session):
     """Session SQLAlchemy personnalisée qui isole automatiquement les données par school_id."""
@@ -115,7 +122,7 @@ def init_db():
             "ALTER TABLE schools ADD COLUMN subdomain VARCHAR;",
             "ALTER TABLE classes ADD COLUMN deleted_at TIMESTAMP;",
             "ALTER TABLE eleves ADD COLUMN deleted_at TIMESTAMP;",
-            "ALTER TABLE matieres ADD COLUMN volume_horaire FLOAT DEFAULT 0.0;"  # Ajouté ici
+            "ALTER TABLE matieres ADD COLUMN volume_horaire FLOAT DEFAULT 0.0;"
         ]
 
         with engine.connect() as conn:
