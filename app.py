@@ -179,24 +179,17 @@ def main():
         current_user = db_sec.query(User).filter(User.username == nom_utilisateur).first()
         
         if not current_user:
-            st.warning("⚠️ Utilisateur introuvable.")
+            st.warning("⚠️ Session expirée ou utilisateur introuvable.")
             st.session_state.clear()
             st.rerun()
 
-        # --- SECURITE : TIMEOUT D'INACTIVITÉ (30 MIN) ---
-        if current_user.derniere_activite:
-            derniere_act = current_user.derniere_activite
-            # S'assurer que le datetime est UTC pour le calcul
-            if derniere_act.tzinfo is None:
-                derniere_act = derniere_act.replace(tzinfo=timezone.utc)
-            
-            # Déconnexion après 30 minutes (1800 secondes) d'inactivité
-            if (datetime.now(timezone.utc) - derniere_act).total_seconds() > 1800:
-                logger.info(f"Session expirée (Timeout) pour {nom_utilisateur}")
-                st.warning("⏳ Session expirée pour inactivité (30 min). Veuillez vous reconnecter.")
-                st.session_state.clear()
-                time.sleep(2)
-                st.rerun()
+        # Synchronisation du school_id si nécessaire
+        if current_user.school_id and not st.session_state.get("school_id"):
+            st.session_state["school_id"] = current_user.school_id
+            school_obj = db_sec.query(School).filter(School.id == current_user.school_id).first()
+            if school_obj:
+                st.session_state["school_name"] = school_obj.nom
+                st.session_state["school_code"] = school_obj.code
 
         # --- VÉRIFICATION ÉTABLISSEMENT ---
         if current_user.school_id and not is_super_admin:
@@ -220,7 +213,6 @@ def main():
                     submit_btn = st.form_submit_button("Enregistrer", use_container_width=True, type="primary")
 
                     if submit_btn:
-                        # Regex robuste : 8 caractères mini, 1 majuscule, 1 chiffre
                         if not re.match(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z\d@$!%*?&]{8,}$", nouveau_p):
                             st.error("⚠️ Le mot de passe doit contenir au moins 8 caractères, une majuscule et un chiffre.")
                         elif nouveau_p != confirme_p:
@@ -240,7 +232,7 @@ def main():
                                 st.error(f"Erreur : {ex}")
             return
 
-        # Mise à jour de l'activité (Timezone Universel)
+        # Mise à jour de l'activité sans blocage
         current_user.derniere_activite = datetime.now(timezone.utc)
         db_sec.commit()
 
