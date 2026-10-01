@@ -1,4 +1,5 @@
 import os
+from contextlib import contextmanager
 from sqlalchemy import create_engine, text, event, exc
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
@@ -26,7 +27,7 @@ if not DATABASE_URL:
 if "localhost" in DATABASE_URL:
     DATABASE_URL = DATABASE_URL.replace("localhost", "127.0.0.1")
 
-# Configuration de l'engine avec renforcement de la concurrence (Faille 1)
+# Configuration de l'engine avec renforcement de la concurrence
 if DATABASE_URL.startswith("sqlite"):
     engine = create_engine(
         DATABASE_URL,
@@ -96,6 +97,25 @@ def receive_after_begin(session, transaction, connection):
 SessionLocal = sessionmaker(class_=TenantSession, autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+
+@contextmanager
+def get_db_session():
+    """
+    Gestionnaire de contexte transactionnel strict (ACID).
+    Garantit le commit en cas de succès, le rollback automatique en cas d'exception
+    (évitant tout PendingRollbackError) et la fermeture garantie de la session.
+    """
+    db = SessionLocal()
+    try:
+        yield db
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise e
+    finally:
+        db.close()
+
+
 def init_db():
     """Initialise la base de données et gère les erreurs de connexion SSH/PostgreSQL proprement."""
     try:
@@ -133,9 +153,8 @@ def init_db():
                 except Exception:
                     conn.rollback()
 
-        # 3. Initialisation initiale sécurisée
-        db = SessionLocal()
-        try:
+        # 3. Initialisation initiale sécurisée via le gestionnaire de contexte ACID
+        with get_db_session() as db:
             ecole_defaut = db.query(School).first()
             if not ecole_defaut:
                 ecole_defaut = School(
@@ -146,8 +165,7 @@ def init_db():
                     contacts="99797163"
                 )
                 db.add(ecole_defaut)
-                db.commit()
-                db.refresh(ecole_defaut)
+                db.flush()
 
             # Création du Super Admin
             admin_user = db.query(User).filter(User.username == "admin").first()
@@ -174,13 +192,6 @@ def init_db():
                     changer_mdp_requis=True
                 )
                 db.add(admin_rahmat)
-
-            db.commit()
-        except Exception as e:
-            db.rollback()
-            st.error(f"Erreur lors de la configuration des données initiales : {e}")
-        finally:
-            db.close()
 
     except Exception as e:
         st.error(

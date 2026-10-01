@@ -149,7 +149,8 @@ def afficher_backup():
                 )
 
                 df = pd.DataFrame(data)
-                csv = df.to_csv(index=False).encode("utf-8")
+                # Utilisation de utf-8-sig pour un affichage parfait des accents sous Excel
+                csv = df.to_csv(index=False).encode("utf-8-sig")
                 st.success(
                     f"✅ Export de la table **{ressource}** généré avec succès et "
                     "consigné dans le journal d'audit !"
@@ -194,7 +195,8 @@ def afficher_backup():
                         for item in records_z:
                             rows_z.append({col: getattr(item, col, "") for col in cols})
                         df_z = pd.DataFrame(rows_z)
-                        zip_file.writestr(f"{nom_t}.csv", df_z.to_csv(index=False))
+                        # Encodage utf-8-sig pour les fichiers CSV intégrés dans le ZIP
+                        zip_file.writestr(f"{nom_t}.csv", df_z.to_csv(index=False).encode("utf-8-sig"))
 
             zip_buffer.seek(0)
 
