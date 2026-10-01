@@ -11,9 +11,8 @@ import streamlit as st
 def afficher_backup():
     st.subheader("💾 Sauvegarde & Exportation des Données")
     st.markdown(
-        "Exportation sécurisée et auditée des données institutionnelles par"
-        " établissement avec isolation multi-tenant stricte (Normes SOC 2 / ISO"
-        " 27001)."
+        "Exportation sécurisée et auditée des données institutionnelles par "
+        "établissement avec isolation multi-tenant stricte (Normes SOC 2 / ISO 27001)."
     )
     st.markdown("---")
 
@@ -133,16 +132,16 @@ def afficher_backup():
 
             if not data:
                 st.warning(
-                    f"⚠️ Aucune donnée disponible pour l'export de la table"
-                    f" **{ressource}** dans votre établissement."
+                    f"⚠️ Aucune donnée disponible pour l'export de la table "
+                    f"**{ressource}** dans votre établissement."
                 )
             else:
                 # --- TRAÇABILITÉ D'AUDIT DE L'EXPORT (NORMES SOC 2 / ISO 27001) ---
                 log_action_erp(
                     module="Backup & Export",
                     action=(
-                        f"Export CSV de la table {ressource} ({len(data)} enregistrements"
-                        f" traités) pour l'établissement {school_name}"
+                        f"Export CSV de la table {ressource} ({len(data)} enregistrements "
+                        f"traités) pour l'établissement {school_name}"
                     ),
                     statut="Succès",
                     valeur_avant="Extraction non initiée",
@@ -152,8 +151,8 @@ def afficher_backup():
                 df = pd.DataFrame(data)
                 csv = df.to_csv(index=False).encode("utf-8")
                 st.success(
-                    f"✅ Export de la table **{ressource}** généré avec succès et"
-                    " consigné dans le journal d'audit !"
+                    f"✅ Export de la table **{ressource}** généré avec succès et "
+                    "consigné dans le journal d'audit !"
                 )
                 st.download_button(
                     label=f"📥 Télécharger {ressource.lower()}.csv",
@@ -166,16 +165,15 @@ def afficher_backup():
 
         st.markdown("---")
 
-        # --- SECTION AJOUTÉE : SNAPSHOT GLOBAL ZIP POUR BACKUP ---
+        # --- SECTION : SNAPSHOT GLOBAL ZIP POUR BACKUP ---
         st.markdown("### 📦 Sauvegarde Globale (Archive Snapshot ZIP)")
         st.markdown(
             "Téléchargez l'intégralité des tables de l'établissement sous forme d'archive compressée."
         )
 
         if st.button("🗂️ Générer l'archive ZIP globale de l'établissement", type="secondary"):
-            zip_buffer = io.BytesIO()
+            zip_buffer = BytesIO()
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-                # Dictionnaire des requêtes globales pour le snapshot
                 mapping_tables = {
                     "élèves": (Eleve, ["nom", "prenom", "matricule", "sexe", "cycle", "classe_id", "tuteur"]),
                     "classes": (Classe, ["libelle", "niveau", "cycle", "capacite", "frais_scolarite", "frais_inscription"]),
