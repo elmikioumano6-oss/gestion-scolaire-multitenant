@@ -1,0 +1,20 @@
+{
+  "name": "CSP RAHMAT-FH",
+  "short_name": "RAHMAT-FH",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0F172A",
+  "theme_color": "#10B981",
+  "icons": [
+    {
+      "src": "Logo CSP-RAHMAT-FH.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "Logo CSP-RAHMAT-FH.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

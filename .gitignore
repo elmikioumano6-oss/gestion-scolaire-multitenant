@@ -1,0 +1,10 @@
+venv/
+__pycache__/
+.env
+database.db
+sauvegardes_locales/
+.streamlit/secrets.toml
+fusion.batdeploy_production.bat 
+Deploy_Production.bat 
+deploy_production.bat 
+staging.db
