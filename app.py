@@ -166,7 +166,7 @@ def main():
             st.error("Erreur de chargement. Veuillez rafraîchir la page.")
         return
 
-    # --- 2. GARDIEN DE SÉCURITÉ (GATEKEEPER AVANCÉ) ---
+    # --- 2. GARDIEN DE SÉCURITÉ (GATEKEEPER AVANCÉ - TRANSACTION PROPRE) ---
     nom_utilisateur = st.session_state.get("username")
     role_utilisateur = str(st.session_state.get("role", "")).lower()
     is_super_admin = st.session_state.get("is_super_admin", False)
@@ -175,7 +175,8 @@ def main():
         is_super_admin = False
         st.session_state["is_super_admin"] = False
 
-    with get_db_session() as db_sec:
+    db_sec = SessionLocal()
+    try:
         current_user = db_sec.query(User).filter(User.username == nom_utilisateur).first()
         
         if not current_user:
@@ -232,23 +233,47 @@ def main():
                                 st.error(f"Erreur : {ex}")
             return
 
-        # Mise à jour de l'activité sans blocage
+        # Mise à jour de l'activité avec validation de transaction propre
         current_user.derniere_activite = datetime.now(timezone.utc)
         db_sec.commit()
+
+    except Exception as e:
+        db_sec.rollback()
+        logger.error(f"Erreur critique dans le gardien de sécurité : {e}")
+        raise e
+    finally:
+        db_sec.close()
 
     # --- 3. BARRE LATÉRALE & NAVIGATION ---
     with st.sidebar:
         try:
-            school_name_lower = st.session_state.get("school_name", "").lower()
-            school_code = st.session_state.get("school_code", "").lower()
+            school_id = st.session_state.get("school_id")
+            school_code = str(st.session_state.get("school_code", "")).strip().upper()
+            school_name = str(st.session_state.get("school_name", "")).strip().lower()
 
-            logo_file = "Logo Gestion Scolaire Pro.png"
-            if "rahmat" in school_name_lower or "rahmat" in school_code:
-                logo_file = "Logo CSP-RAHMAT-FH.png"
-            elif "etoile" in school_name_lower:
-                logo_file = "Logo L'ETOILE DU SUCCES.png"
-            elif not os.path.exists(logo_file):
-                logo_file = None
+            logo_file = None
+            fichiers_racine = os.listdir(".")
+
+            # 1. Recherche par correspondance du code ou nom de l'école dans les fichiers de la racine
+            mots_cles = [school_code, school_name]
+            mots_cles_propres = [re.sub(r'[^a-z0-9]', '', m.lower()) for m in mots_cles if m]
+
+            for fichier in fichiers_racine:
+                if fichier.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
+                    nom_fichier_clean = re.sub(r'[^a-z0-9]', '', fichier.lower())
+                    if any(mot in nom_fichier_clean for mot in mots_cles_propres if len(mot) > 2):
+                        logo_file = fichier
+                        break
+
+            # 2. Recherche automatique par ID de l'établissement (ex: logo_15.png)
+            if not logo_file and school_id:
+                candidate = f"logo_{school_id}.png"
+                if os.path.exists(candidate):
+                    logo_file = candidate
+
+            # 3. Repli ultime sur le logo global par défaut
+            if not logo_file and os.path.exists("Logo Gestion Scolaire Pro.png"):
+                logo_file = "Logo Gestion Scolaire Pro.png"
 
             col_logo1, col_logo2, col_logo3 = st.columns([1, 2, 1])
             with col_logo2:

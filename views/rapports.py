@@ -13,7 +13,7 @@ def afficher_rapports():
     st.markdown(
         "Synthèse macroscopique des flux de trésorerie avec ventilation "
         "analytique des salaires (fixes et vacations horaires) et des charges "
-        "opérationnelles."
+        "opérationnelles de l'établissement."
     )
     st.markdown("---")
 
@@ -28,7 +28,13 @@ def afficher_rapports():
 
     db = SessionLocal()
     try:
-        # Récupération des classes du cycle (filtrées strictement par school_id si présent)
+        # SÉCURITÉ : Annulation de toute transaction en suspens pour éviter le PendingRollbackError
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+        # 1. Récupération des classes du cycle actif (pour l'analyse détaillée par classe)
         classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours)
         if hasattr(Classe, "deleted_at"):
             classes_query = classes_query.filter(Classe.deleted_at.is_(None))
@@ -39,32 +45,42 @@ def afficher_rapports():
         classes_dict = {c.id: c for c in classes_cycle}
         classes_ids = list(classes_dict.keys())
 
-        # Récupération sécurisée des élèves (ISOLATION STRICTE PAR ÉCOLE ET PAR CYCLE)
-        eleves_query = db.query(Eleve)
+        # Élèves du cycle actif
+        eleves_cycle_query = db.query(Eleve)
         if hasattr(Eleve, "deleted_at"):
-            eleves_query = eleves_query.filter(Eleve.deleted_at.is_(None))
+            eleves_cycle_query = eleves_cycle_query.filter(Eleve.deleted_at.is_(None))
         if school_id:
-            eleves_query = eleves_query.filter(Eleve.school_id == school_id)
+            eleves_cycle_query = eleves_cycle_query.filter(Eleve.school_id == school_id)
             
         if classes_ids:
-            eleves_query = eleves_query.filter(Eleve.classe_id.in_(classes_ids))
+            eleves_cycle_query = eleves_cycle_query.filter(Eleve.classe_id.in_(classes_ids))
         else:
-            eleves_query = eleves_query.filter(Eleve.classe_id == -1)
+            eleves_cycle_query = eleves_cycle_query.filter(Eleve.classe_id == -1)
 
-        eleves = eleves_query.all()
-        eleves_ids = [e.id for e in eleves]
+        eleves_cycle_list = eleves_cycle_query.all()
+        eleves_cycle_ids = [e.id for e in eleves_cycle_list]
 
-        # Calcul des recettes réelles
-        total_recettes = 0.0
-        if eleves_ids:
-            paiements_eleves = (
-                db.query(Paiement).filter(Paiement.eleve_id.in_(eleves_ids)).all()
-            )
-            total_recettes = (
-                sum(p.montant for p in paiements_eleves) if paiements_eleves else 0.0
-            )
+        # Recettes du cycle actif
+        recettes_cycle = 0.0
+        if eleves_cycle_ids:
+            p_cycle = db.query(Paiement).filter(Paiement.eleve_id.in_(eleves_cycle_ids)).all()
+            recettes_cycle = sum(p.montant for p in p_cycle) if p_cycle else 0.0
 
-        # Organisation en onglets pour une ergonomie professionnelle
+        # 2. Récupération GLOBALE de l'établissement (tous cycles confondus) pour la trésorerie unifiée
+        tous_eleves_ecole_query = db.query(Eleve)
+        if hasattr(Eleve, "deleted_at"):
+            tous_eleves_ecole_query = tous_eleves_ecole_query.filter(Eleve.deleted_at.is_(None))
+        if school_id:
+            tous_eleves_ecole_query = tous_eleves_ecole_query.filter(Eleve.school_id == school_id)
+        tous_eleves_ecole = tous_eleves_ecole_query.all()
+        tous_eleves_ids = [e.id for e in tous_eleves_ecole]
+
+        recettes_globales_ecole = 0.0
+        if tous_eleves_ids:
+            p_global = db.query(Paiement).filter(Paiement.eleve_id.in_(tous_eleves_ids)).all()
+            recettes_globales_ecole = sum(p.montant for p in p_global) if p_global else 0.0
+
+        # Organisation en onglets
         tab_bilan, tab_postes, tab_reductions = st.tabs([
             "📊 Bilan & Trésorerie",
             "🏷️ Ventilation par Poste (Scolarité, COGES, etc.)",
@@ -73,7 +89,7 @@ def afficher_rapports():
 
         with tab_bilan:
             st.markdown(
-                f"### Bilan Financier Global — **{school_name} ({cycle_en_cours})**"
+                f"### Bilan Financier — **{school_name} (Cycle : {cycle_en_cours})**"
             )
 
             # --- FILTRES TEMPORELS POUR LES DÉPENSES ---
@@ -94,13 +110,13 @@ def afficher_rapports():
                     "Mois", options=list(mois_options.keys()), key="filtre_mois_depenses"
                 )
 
-            # Récupération et ventilation analytique des dépenses filtrées par école active
-            depenses_query = db.query(Depense).filter(Depense.cycle == cycle_en_cours)
+            # Dépenses globales de l'établissement (charges unifiées)
+            depenses_query = db.query(Depense)
             if school_id:
                 depenses_query = depenses_query.filter(Depense.school_id == school_id)
             depenses_list = depenses_query.all()
 
-            total_depenses = 0.0
+            total_depenses_globales = 0.0
             total_salaires_fixes = 0.0
             total_salaires_vacations = 0.0
             total_charges_classiques = 0.0
@@ -113,7 +129,7 @@ def afficher_rapports():
                         continue
 
                 montant_d = float(d.montant or 0.0)
-                total_depenses += montant_d
+                total_depenses_globales += montant_d
                 cat = str(getattr(d, "categorie", "")).lower()
                 lib = str(getattr(d, "libelle", "")).lower()
 
@@ -128,43 +144,46 @@ def afficher_rapports():
                 else:
                     total_charges_classiques += montant_d
 
-            resultat_net = total_recettes - total_depenses
+            # Résultat net calculé au niveau global de l'école (Recettes globales de l'école - Dépenses globales de l'école)
+            resultat_net_global = recettes_globales_ecole - total_depenses_globales
 
-            total_attendu_global = 0.0
+            # Calcul du taux de recouvrement du cycle en cours
+            total_attendu_cycle = 0.0
             for classe in classes_cycle:
                 frais_base = float(classe.frais_scolarite or 0.0) + float(
                     getattr(classe, "frais_coges", 0.0) or 0.0
                 )
-                eleves_classe = [e for e in eleves if e.classe_id == classe.id]
+                eleves_classe = [e for e in eleves_cycle_list if e.classe_id == classe.id]
                 for e in eleves_classe:
                     red = float(e.montant_reduction or 0.0)
-                    total_attendu_global += max(0.0, frais_base - red)
+                    total_attendu_cycle += max(0.0, frais_base - red)
 
-            taux_recouvrement_global = (
-                (total_recettes / total_attendu_global * 100)
-                if total_attendu_global > 0
+            taux_recouvrement_cycle = (
+                (recettes_cycle / total_attendu_cycle * 100)
+                if total_attendu_cycle > 0
                 else 0.0
             )
 
+            # Affichage des métriques clés claires et dissociées
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("Total Recettes Encaissées", f"{total_recettes:,.0f} FCFA")
+                st.metric(f"Recettes ({cycle_en_cours})", f"{recettes_cycle:,.0f} FCFA")
             with col2:
-                st.metric("Total Sorties (Charges & Paie)", f"{total_depenses:,.0f} FCFA")
+                st.metric("Total Sorties Globales (École)", f"{total_depenses_globales:,.0f} FCFA")
             with col3:
                 st.metric(
-                    "Résultat Net de Trésorerie",
-                    f"{resultat_net:,.0f} FCFA",
-                    delta="Bénéficiaire" if resultat_net >= 0 else "Déficitaire",
-                    delta_color="normal" if resultat_net >= 0 else "inverse",
+                    "Résultat Net Global (École)",
+                    f"{resultat_net_global:,.0f} FCFA",
+                    delta="Bénéficiaire" if resultat_net_global >= 0 else "Déficitaire",
+                    delta_color="normal" if resultat_net_global >= 0 else "inverse",
                 )
             with col4:
                 st.metric(
-                    "Taux de Recouvrement", f"{taux_recouvrement_global:.1f}%"
+                    f"Recouvrement ({cycle_en_cours})", f"{taux_recouvrement_cycle:.1f}%"
                 )
 
             st.markdown("---")
-            st.markdown("#### 💳 Analyse Analytique des Sorties de Trésorerie")
+            st.markdown("#### 💳 Ventilation Analytique des Sorties Globales de l'Établissement")
             col_a1, col_a2, col_a3 = st.columns(3)
             with col_a1:
                 st.metric("Salaires Fixes (Permanents/Admin)", f"{total_salaires_fixes:,.0f} FCFA")
@@ -186,7 +205,7 @@ def afficher_rapports():
             else:
                 rapport_data = []
                 for classe in classes_cycle:
-                    eleves_classe = [e for e in eleves if e.classe_id == classe.id]
+                    eleves_classe = [e for e in eleves_cycle_list if e.classe_id == classe.id]
                     eleves_classe_ids = [e.id for e in eleves_classe]
 
                     recettes_classe = 0.0
@@ -254,7 +273,7 @@ def afficher_rapports():
 
             for classe in classes_cycle:
                 eleves_classe_count = len(
-                    [e for e in eleves if e.classe_id == classe.id]
+                    [e for e in eleves_cycle_list if e.classe_id == classe.id]
                 )
                 total_scolarite += (
                     float(classe.frais_scolarite or 0.0) * eleves_classe_count
@@ -314,7 +333,7 @@ def afficher_rapports():
 
             eleves_avec_reduction = [
                 e
-                for e in eleves
+                for e in eleves_cycle_list
                 if float(getattr(e, "montant_reduction", 0.0) or 0.0) > 0
             ]
 
