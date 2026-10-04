@@ -2,7 +2,7 @@
 SETLOCAL EnableEXTENSIONS
 SETLOCAL EnableDelayedExpansion
 
-TITLE Deploiement - Gestion Scolaire Pro [Staging]
+TITLE Deploiement - Gestion Scolaire Pro [Staging vers Main]
 COLOR 0B
 
 ECHO ========================================================
@@ -10,19 +10,19 @@ ECHO    DEPLOIEMENT AUTOMATISE - GESTION SCOLAIRE PRO
 ECHO ========================================================
 ECHO.
 
-:: 0. Sécurisation et envoi des modifications locales vers main si nécessaire
-ECHO [0/3] Envoi des modifications vers GitHub (branche main)...
+:: 0. Envoi des modifications de la branche locale staging vers main sur le distant
+ECHO [0/3] Envoi des modifications locales vers GitHub (branche distante main)...
 call git add .
-call git commit -m "Mise à jour automatique staging - %DATE% %TIME%"
-call git push origin main
+call git commit -m "Mise à jour automatique staging -> main - %DATE% %TIME%"
+call git push origin staging:main
 IF ERRORLEVEL 1 (
-    ECHO [INFO] Aucun changement à commuter ou push optionnel déjà à jour sur main.
+    ECHO [INFO] Aucun nouveau changement à commiter ou synchronisation déjà à jour.
 )
 
-:: 1. Synchronisation Git (Fusion de main vers staging ou pull staging)
+:: 1. Synchronisation Git locale (retour sur staging et pull)
 ECHO.
 ECHO [1/3] Synchronisation du code source (GitHub - staging)...
-call git checkout staging
+call git checkout staging 2>nul
 call git pull origin staging
 IF ERRORLEVEL 1 (
     COLOR 0C
