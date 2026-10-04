@@ -10,16 +10,17 @@ ECHO    DEPLOIEMENT AUTOMATISE - GESTION SCOLAIRE PRO
 ECHO ========================================================
 ECHO.
 
-:: 0. Envoi des modifications de la branche locale staging vers main sur le distant
-ECHO [0/3] Envoi des modifications locales vers GitHub (branche distante main)...
+:: 0. Envoi sécurisé des modifications vers main sur le distant
+ECHO [0/3] Synchronisation et envoi vers GitHub (branche distante main)...
 call git add .
-call git commit -m "Mise à jour automatique staging -> main - %DATE% %TIME%"
+call git commit -m "Mise à jour automatique staging -> main - %DATE% %TIME%" 2>nul
+call git pull origin main --rebase
 call git push origin staging:main
 IF ERRORLEVEL 1 (
-    ECHO [INFO] Aucun nouveau changement à commiter ou synchronisation déjà à jour.
+    ECHO [AVERTISSEMENT] Le push vers main a rencontré un conflit mineur ou est déjà à jour.
 )
 
-:: 1. Synchronisation Git locale (retour sur staging et pull)
+:: 1. Synchronisation Git locale (staging)
 ECHO.
 ECHO [1/3] Synchronisation du code source (GitHub - staging)...
 call git checkout staging 2>nul
