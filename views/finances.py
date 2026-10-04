@@ -19,15 +19,21 @@ def afficher_tableau_finances():
 
     db = SessionLocal()
     try:
-        # Récupération des classes de l'établissement
+        # Récupération des classes de l'établissement (avec filtrage optionnel par cycle si la colonne existe)
         query_classes = db.query(Classe).filter(Classe.school_id == school_id)
         if hasattr(Classe, "deleted_at"):
             query_classes = query_classes.filter(Classe.deleted_at.is_(None))
         
-        # Filtrage optionnel par cycle si la colonne existe
+        # Si la table Classe possède un attribut 'cycle', on peut filtrer rigoureusement
+        if hasattr(Classe, "cycle") and cycle_en_cours:
+            query_classes = query_classes.filter(Classe.cycle == cycle_en_cours)
+
         classes = query_classes.all()
 
         data_tableau = []
+        total_attendu_global = 0.0
+        total_encaisse_global = 0.0
+
         for c in classes:
             # Récupérer tous les élèves de cette classe
             query_eleves = db.query(Eleve).filter(Eleve.classe_id == c.id)
@@ -37,7 +43,7 @@ def afficher_tableau_finances():
             
             effectif = len(eleves_classe)
             
-            # Calcul rigoureux de l'attendu net pour cette classe (basé sur chaque élève + frais + réductions)
+            # Calcul rigoureux de l'attendu net pour cette classe
             attendu_classe = 0.0
             eleves_ids = []
             for e in eleves_classe:
@@ -59,6 +65,9 @@ def afficher_tableau_finances():
                 paiements_classe = db.query(Paiement).filter(Paiement.eleve_id.in_(eleves_ids)).all()
                 encaissé_classe = sum(p.montant for p in paiements_classe)
 
+            total_attendu_global += attendu_classe
+            total_encaisse_global += encaissé_classe
+
             # Reste à recouvrer mathématiquement exact
             reste_a_recouvrer = max(0.0, attendu_classe - encaissé_classe)
 
@@ -72,8 +81,20 @@ def afficher_tableau_finances():
             })
 
         if not data_tableau:
-            st.info("Aucune classe enregistrée.")
+            st.info(f"Aucune classe enregistrée pour le cycle **{cycle_en_cours}**.")
         else:
+            # --- En-têtes synthétiques globaux pour le cycle en cours ---
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric(f"Budget Attendu ({cycle_en_cours})", f"{total_attendu_global:,.0f} FCFA")
+            with col2:
+                st.metric(f"Total Encaissé ({cycle_en_cours})", f"{total_encaisse_global:,.0f} FCFA")
+            with col3:
+                taux_realisation = (total_encaisse_global / total_attendu_global * 100) if total_attendu_global > 0 else 0.0
+                st.metric("Taux de Réalisation", f"{taux_realisation:.1f}%")
+
+            st.markdown("---")
+
             df_repartition = pd.DataFrame(data_tableau)
             
             # Affichage formaté proprement pour l'utilisateur

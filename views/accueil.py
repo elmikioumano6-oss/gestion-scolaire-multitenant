@@ -74,9 +74,21 @@ def get_dashboard_stats(school_id, is_super_admin):
         total_recettes = (
             q_paiements.with_entities(func.sum(Paiement.montant)).scalar() or 0.0
         )
-        total_depenses = (
-            q_depenses.with_entities(func.sum(Depense.montant)).scalar() or 0.0
-        )
+        
+        # --- CORRECTION DE LA SOMME DES DÉPENSES (Alignement sur l'exercice actif) ---
+        depenses_list = q_depenses.all()
+        annee_courante_str = str(datetime.now().year)
+        
+        total_depenses = 0.0
+        for d in depenses_list:
+            montant_d = float(d.montant or 0.0)
+            if d.date_depense:
+                # On ne comptabilise que les dépenses de l'année en cours pour écarter les tests obsolètes
+                if str(d.date_depense.year) == annee_courante_str:
+                    total_depenses += montant_d
+            else:
+                total_depenses += montant_d
+
         solde_net = float(total_recettes) - float(total_depenses)
 
         total_attendu = total_eleves * 65000

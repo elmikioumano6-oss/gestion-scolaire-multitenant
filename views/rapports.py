@@ -28,13 +28,12 @@ def afficher_rapports():
 
     db = SessionLocal()
     try:
-        # SÉCURITÉ : Annulation de toute transaction en suspens pour éviter le PendingRollbackError
         try:
             db.rollback()
         except Exception:
             pass
 
-        # 1. Récupération des classes du cycle actif (pour l'analyse détaillée par classe)
+        # 1. Récupération des classes du cycle actif
         classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours)
         if hasattr(Classe, "deleted_at"):
             classes_query = classes_query.filter(Classe.deleted_at.is_(None))
@@ -60,13 +59,13 @@ def afficher_rapports():
         eleves_cycle_list = eleves_cycle_query.all()
         eleves_cycle_ids = [e.id for e in eleves_cycle_list]
 
-        # Recettes du cycle actif
+        # Recettes du cycle actif uniquement
         recettes_cycle = 0.0
         if eleves_cycle_ids:
             p_cycle = db.query(Paiement).filter(Paiement.eleve_id.in_(eleves_cycle_ids)).all()
             recettes_cycle = sum(p.montant for p in p_cycle) if p_cycle else 0.0
 
-        # 2. Récupération GLOBALE de l'établissement (tous cycles confondus) pour la trésorerie unifiée
+        # Recettes globales de l'établissement
         tous_eleves_ecole_query = db.query(Eleve)
         if hasattr(Eleve, "deleted_at"):
             tous_eleves_ecole_query = tous_eleves_ecole_query.filter(Eleve.deleted_at.is_(None))
@@ -110,7 +109,7 @@ def afficher_rapports():
                     "Mois", options=list(mois_options.keys()), key="filtre_mois_depenses"
                 )
 
-            # Dépenses globales de l'établissement (charges unifiées)
+            # Dépenses globales de l'établissement
             depenses_query = db.query(Depense)
             if school_id:
                 depenses_query = depenses_query.filter(Depense.school_id == school_id)
@@ -144,7 +143,9 @@ def afficher_rapports():
                 else:
                     total_charges_classiques += montant_d
 
-            # Résultat net calculé au niveau global de l'école (Recettes globales de l'école - Dépenses globales de l'école)
+            # CORRECTION : Le solde net du cycle représente les encaissements propres du cycle, 
+            # tandis que les charges globales sont présentées de manière distincte pour l'établissement.
+            solde_net_cycle = recettes_cycle
             resultat_net_global = recettes_globales_ecole - total_depenses_globales
 
             # Calcul du taux de recouvrement du cycle en cours
@@ -164,18 +165,18 @@ def afficher_rapports():
                 else 0.0
             )
 
-            # Affichage des métriques clés claires et dissociées
+            # Affichage des métriques corrigées
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric(f"Recettes ({cycle_en_cours})", f"{recettes_cycle:,.0f} FCFA")
+                st.metric(f"Total Encaissé ({cycle_en_cours})", f"{recettes_cycle:,.0f} FCFA")
             with col2:
                 st.metric("Total Sorties Globales (École)", f"{total_depenses_globales:,.0f} FCFA")
             with col3:
                 st.metric(
-                    "Résultat Net Global (École)",
-                    f"{resultat_net_global:,.0f} FCFA",
-                    delta="Bénéficiaire" if resultat_net_global >= 0 else "Déficitaire",
-                    delta_color="normal" if resultat_net_global >= 0 else "inverse",
+                    f"Solde Net en Caisse ({cycle_en_cours})",
+                    f"{solde_net_cycle:,.0f} FCFA",
+                    delta="Disponible",
+                    delta_color="normal",
                 )
             with col4:
                 st.metric(
@@ -369,7 +370,6 @@ def afficher_rapports():
 
     finally:
         db.close()
-
 
 # Alias de compatibilité exhaustive pour le routeur app.py
 afficher_rapports = afficher_rapports
