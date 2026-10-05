@@ -1,5 +1,5 @@
 from database.db_config import SessionLocal
-from database.models import Classe, Eleve, Paiement, School
+from database.models import Classe, Depense, Eleve, Paiement, School
 import pandas as pd
 import streamlit as st
 
@@ -83,13 +83,17 @@ def afficher_tableau_finances():
         if not data_tableau:
             st.info(f"Aucune classe enregistrée pour le cycle **{cycle_en_cours}**.")
         else:
-            # --- En-têtes synthétiques globaux pour le cycle en cours ---
-            col1, col2, col3 = st.columns(3)
+            # --- En-têtes synthétiques globaux pour le cycle en cours (Corrigés et dissociés) ---
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
                 st.metric(f"Budget Attendu ({cycle_en_cours})", f"{total_attendu_global:,.0f} FCFA")
             with col2:
                 st.metric(f"Total Encaissé ({cycle_en_cours})", f"{total_encaisse_global:,.0f} FCFA")
             with col3:
+                # Le solde net en caisse du cycle reflète sa trésorerie brute encaissée sans imputation arbitraire de charges globales
+                solde_net_caisse = total_encaisse_global
+                st.metric("Solde Net en Caisse", f"{solde_net_caisse:,.0f} FCFA", delta="Disponible", delta_color="normal")
+            with col4:
                 taux_realisation = (total_encaisse_global / total_attendu_global * 100) if total_attendu_global > 0 else 0.0
                 st.metric("Taux de Réalisation", f"{taux_realisation:.1f}%")
 
