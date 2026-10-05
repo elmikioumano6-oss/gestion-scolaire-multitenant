@@ -2,11 +2,11 @@
 SETLOCAL EnableEXTENSIONS
 SETLOCAL EnableDelayedExpansion
 
-TITLE Deploiement & Workflow - Gestion Scolaire Pro
+TITLE Deploiement et Workflow - Gestion Scolaire Pro
 COLOR 0B
 
 ECHO ========================================================
-ECHO    GESTION SCOLAIRE PRO - WORKFLOW & DEPLOIEMENT SECURISE
+ECHO    GESTION SCOLAIRE PRO - WORKFLOW ET DEPLOIEMENT SECURISE
 ECHO ========================================================
 ECHO.
 
@@ -23,19 +23,18 @@ IF NOT "%CURRENT_BRANCH%"=="staging" (
 )
 ECHO [OK] Positionne sur 'staging'.
 
-:: 2. Validation et publication vers le distant (main)
+:: 2. Validation et publication sécurisée vers le distant (main)
 ECHO.
 ECHO [2/4] Publication des modifications vers GitHub (main)...
 git add .
-:: On tente un commit, si rien n'a changé, on ignore l'erreur de commit vide
 git commit -m "Mise à jour automatique staging -> main - %DATE% %TIME%" >nul 2>&1
 
-git push origin staging:main
+:: Envoi forcé sécurisé (force-with-lease) pour écraser main proprement avec staging
+git push origin staging:main --force-with-lease
 IF ERRORLEVEL 1 (
     COLOR 0C
     ECHO.
-    ECHO [ERREUR CRITIQUE] Le push vers 'main' a ete rejete ^(conflit distant^).
-    ECHO Veuillez verifier l'etat de votre depot distant.
+    ECHO [ERREUR CRITIQUE] Le push vers 'main' a ete rejete.
     GOTO :error_exit
 )
 ECHO [OK] Modifications publiees avec succes sur 'main'.
