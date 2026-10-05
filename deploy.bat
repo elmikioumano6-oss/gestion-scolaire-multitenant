@@ -6,55 +6,38 @@ TITLE Deploiement et Workflow - Gestion Scolaire Pro
 COLOR 0B
 
 ECHO ========================================================
-ECHO    GESTION SCOLAIRE PRO - WORKFLOW ET DEPLOIEMENT SECURISE
+ECHO    GESTION SCOLAIRE PRO - WORKFLOW ET DEPLOIEMENT RAPIDE
 ECHO ========================================================
 ECHO.
 
 :: 1. Vérification stricte de la branche locale
-ECHO [1/4] Verification de l'environnement Git local...
 FOR /F "tokens=*" %%i IN ('git branch --show-current') DO SET CURRENT_BRANCH=%%i
 
 IF NOT "%CURRENT_BRANCH%"=="staging" (
     COLOR 0C
     ECHO.
     ECHO [ERREUR] Vous devez imperativement etre sur la branche 'staging'.
-    ECHO Branche actuelle detectee : %CURRENT_BRANCH%
     GOTO :error_exit
 )
-ECHO [OK] Positionne sur 'staging'.
 
-:: 2. Validation et publication sécurisée vers le distant (main)
+:: 2. Affichage des modifications et publication vers le distant (main)
+ECHO [1/3] Fichiers et vues modifies :
+git status -s
 ECHO.
-ECHO [2/4] Publication des modifications vers GitHub (main)...
-git add .
-git commit -m "Mise à jour automatique staging -> main - %DATE% %TIME%" >nul 2>&1
 
-:: Envoi forcé sécurisé (force-with-lease) pour écraser main proprement avec staging
+git add .
+git commit -m "Mise à jour automatique staging -> main - %DATE% %TIME%"
 git push origin staging:main --force-with-lease
 IF ERRORLEVEL 1 (
     COLOR 0C
-    ECHO.
-    ECHO [ERREUR CRITIQUE] Le push vers 'main' a ete rejete.
+    ECHO [ERREUR CRITIQUE] Le push vers 'main' a echoue.
     GOTO :error_exit
 )
-ECHO [OK] Modifications publiees avec succes sur 'main'.
+ECHO [OK] Publie avec succes sur 'main'.
 
-:: 3. Mise à jour des dépendances Python
+:: 3. Exécution optionnelle des migrations de base de données
 ECHO.
-ECHO [3/4] Verification et mise a jour des dependances...
-python -m pip install --upgrade pip --quiet
-IF EXIST requirements.txt (
-    call pip install -r requirements.txt
-    IF ERRORLEVEL 1 (
-        COLOR 0C
-        ECHO [ERREUR] L'installation des dependances a echoue.
-        GOTO :error_exit
-    )
-)
-
-:: 4. Exécution des migrations de base de données
-ECHO.
-ECHO [4/4] Execution des migrations de base de donnees...
+ECHO [2/3] Verification des migrations de base de donnees...
 IF EXIST migrate.py (
     call python migrate.py
 ) ELSE IF EXIST init_db.py (
@@ -67,7 +50,7 @@ IF EXIST migrate.py (
 COLOR 0A
 ECHO.
 ECHO ========================================================
-ECHO    DEPLOIEMENT TERMINE AVEC SUCCES ! (Vous etes sur staging)
+ECHO    TERMINE AVEC SUCCES ! (Vous etes sur staging)
 ECHO ========================================================
 GOTO :end
 
@@ -75,12 +58,11 @@ GOTO :end
 COLOR 0C
 ECHO.
 ECHO ========================================================
-ECHO    OPERATION INTERROMPUE - SECURITE ACTIVE
+ECHO    OPERATION INTERROMPUE
 ECHO ========================================================
 
 :end
 ECHO.
-ECHO Appuyez sur une touche pour fermer cette fenetre...
 PAUSE >NUL
 ENDLOCAL
 EXIT /B
