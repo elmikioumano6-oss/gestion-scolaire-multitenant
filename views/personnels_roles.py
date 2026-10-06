@@ -88,6 +88,23 @@ def afficher_personnels():
                 cols[3].markdown("**Actions / Modification de Rôle**")
                 st.markdown("---")
 
+                roles_possibles = [
+                    "fondateur",
+                    "directeur",
+                    "proviseur",
+                    "censeur",
+                    "enseignant",
+                    "parent",
+                    "comptable",
+                    "econome",
+                    "surveillant",
+                    "secretaire",
+                    "inspecteur",
+                    "planton",
+                    "jardinier",
+                    "gardien",
+                ]
+
                 for u in utilisateurs:
                     c = st.columns([2, 2, 2, 2])
                     c[0].write(f"👤 **{getattr(u, 'username', 'N/A')}**")
@@ -97,23 +114,11 @@ def afficher_personnels():
                     )
 
                     with c[3]:
-                        roles_possibles = [
-                            "directeur",
-                            "proviseur",
-                            "censeur",
-                            "enseignant",
-                            "comptable",
-                            "surveillant",
-                            "secretaire",
-                            "planton",
-                            "jardinier",
-                            "gardien",
-                        ]
                         current_role = getattr(u, "role", "enseignant")
                         idx_role = (
                             roles_possibles.index(current_role)
                             if current_role in roles_possibles
-                            else 3 # Index par défaut (enseignant) si le rôle n'est pas dans la liste
+                            else 4  # Index par défaut si le rôle n'est pas dans la liste
                         )
 
                         nouveau_role = st.selectbox(
@@ -167,13 +172,17 @@ def afficher_personnels():
                     role_attribue = st.selectbox(
                         "Rôle RBAC dans l'établissement",
                         [
+                            "fondateur",
                             "directeur",
                             "proviseur",
                             "censeur",
                             "enseignant",
+                            "parent",
                             "comptable",
+                            "econome",
                             "surveillant",
                             "secretaire",
+                            "inspecteur",
                             "planton",
                             "jardinier",
                             "gardien",

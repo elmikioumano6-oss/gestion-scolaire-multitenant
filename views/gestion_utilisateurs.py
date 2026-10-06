@@ -21,9 +21,17 @@ def afficher_gestion_utilisateurs():
 
     school_id = st.session_state.get("school_id")
     is_super_admin = st.session_state.get("is_super_admin", False)
+    username_connecte = st.session_state.get("username", "")
 
     db = SessionLocal()
     try:
+        # --- MISE À JOUR AUTOMATIQUE DE LA DERNIÈRE ACTIVITÉ ---
+        if username_connecte:
+            user_actif_session = db.query(User).filter(User.username == username_connecte).first()
+            if user_actif_session and hasattr(user_actif_session, "derniere_activite"):
+                user_actif_session.derniere_activite = datetime.now()
+                db.commit()
+
         if school_id:
             ecole_courante = (
                 db.query(School).filter(School.id == school_id).first()
@@ -46,6 +54,16 @@ def afficher_gestion_utilisateurs():
 
     db = SessionLocal()
     try:
+        user_obj_connecte = db.query(User).filter(User.username == username_connecte).first()
+        user_role_connecte = getattr(user_obj_connecte, "role", "").lower() if user_obj_connecte else ""
+        
+        is_school_admin = user_role_connecte in [
+            "admin",
+            "directeur",
+            "fondateur",
+            "proviseur",
+        ] or "admin" in username_connecte.lower()
+
         tab_liste, tab_ajout = st.tabs([
             "📋 Liste des Utilisateurs",
             "➕ Nouvel Utilisateur",
@@ -95,6 +113,26 @@ def afficher_gestion_utilisateurs():
                 df_users = pd.DataFrame(data_u)
                 st.dataframe(df_users, use_container_width=True)
 
+                # --- SECTION DE SUPPRESSION MULTI-TENANT SÉCURISÉE ---
+                if is_school_admin or is_super_admin:
+                    st.markdown("---")
+                    st.markdown("### 🗑 Supprimer un utilisateur")
+                    
+                    usernames_disponibles = [u.username for u in utilisateurs_db if u.username != username_connecte]
+                    
+                    if usernames_disponibles:
+                        user_a_supprimer = st.selectbox("Sélectionner l'utilisateur à supprimer", usernames_disponibles, key="select_suppr_user_multitenant")
+                        if st.button("❌ Supprimer définitivement", type="primary"):
+                            user_obj_del = db.query(User).filter(User.username == user_a_supprimer).first()
+                            if user_obj_del:
+                                db.query(Eleve).filter(Eleve.parent_id == user_obj_del.id).update({Eleve.parent_id: None})
+                                db.delete(user_obj_del)
+                                db.commit()
+                                st.success(f"L'utilisateur {user_a_supprimer} a été supprimé avec succès !")
+                                st.rerun()
+                    else:
+                        st.info("Aucun autre utilisateur disponible à la suppression.")
+
         with tab_ajout:
             st.markdown(
                 f"### Création d'un Nouveau Compte Utilisateur — **{school_name}**"
@@ -122,6 +160,7 @@ def afficher_gestion_utilisateurs():
                 )
             with col2:
                 role_options = {
+                    "fondateur": "Fondateur / Propriétaire",
                     "directeur": "Directeur / Administrateur",
                     "proviseur": "Proviseur / Direction Secondaire",
                     "censeur": "Censeur des Études",
@@ -141,6 +180,7 @@ def afficher_gestion_utilisateurs():
                 )
 
             role_descriptions = {
+                "fondateur": "Supervision stratégique globale, accès illimité à l'administration et aux finances de l'établissement.",
                 "directeur": "Accès complet à la gestion administrative, financière et aux paramètres de l'école.",
                 "proviseur": "Supervision globale du cycle secondaire, pilotage pédagogique et validation des décisions.",
                 "censeur": "Gestion des emplois du temps, des notes, des cahiers de textes et de la discipline.",
@@ -151,7 +191,7 @@ def afficher_gestion_utilisateurs():
                 "parent": "Accès restreint au portail famille pour le suivi exclusif de l'enfant.",
             }
             st.markdown(
-                f"<div style='background-color: rgba(217, 119, 6, 0.1); padding: 8px 12px; border-radius: 6px; border-left: 3px solid #D97706; font-size: 0.85rem; color: #E2E8F0; margin-bottom: 10px;'>ℹ️ <b>Permission :</b> {role_descriptions.get(role_attribue, 'Accès standard')}</div>",
+                f"<div style='background-color: rgba(217, 119, 6, 0.1); padding: 8px 12px; border-radius: 6px; border-left: 3px solid #D97706; font-size: 0.85rem; color: #E2E8F0; margin-bottom: 10px;'>ℹ️️ <b>Permission :</b> {role_descriptions.get(role_attribue, 'Accès standard')}</div>",
                 unsafe_allow_html=True,
             )
 
@@ -160,7 +200,6 @@ def afficher_gestion_utilisateurs():
             if role_attribue == "parent":
                 st.markdown("#### 🔗 Association des enfants")
                 
-                # Filtrage dynamique des élèves selon le cycle sélectionné
                 eleves_query = db.query(Eleve).filter(
                     Eleve.school_id == (school_id or 1),
                     Eleve.deleted_at.is_(None)
@@ -174,3 +213,9 @@ def afficher_gestion_utilisateurs():
                 if options_eleves_form:
                     choix_eleves_form = st.multiselect("Sélectionner le ou les enfants concernés *", list(options_eleves_form.keys()))
                     eleves_associes_ids = [options_eleves_form[nom] for nom in choix_eleves_form]
+
+    except Exception as e:
+        db.rollback()
+        st.error(f"Une erreur est survenue lors du chargement de la gestion des utilisateurs : {e}")
+    finally:
+        db.close()
