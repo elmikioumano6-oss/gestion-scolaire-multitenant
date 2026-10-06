@@ -84,7 +84,6 @@ def afficher_espace_parent():
             eleves_query = eleves_query.filter(
                 (Eleve.parent_id == user_obj.id)
                 | (Eleve.id == user_obj.eleve_id)
-                | (Eleve.contact_parent == user_obj.username)
             )
         else:
             if not is_super_admin and school_id:
