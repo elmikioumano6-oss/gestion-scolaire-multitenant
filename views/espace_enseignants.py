@@ -564,6 +564,6 @@ def afficher_espace_enseignants():
         db.close()
 
 
-afficher_espace_enseignants = afficher_enseignants
-afficher_enseignants = afficher_enseignants
-afficher_espace_enseignant = afficher_enseignants
+# Alias pour assurer la rétrocompatibilité complète avec app.py
+afficher_enseignants = afficher_espace_enseignants
+afficher_espace_enseignant = afficher_espace_enseignants
