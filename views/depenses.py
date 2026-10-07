@@ -15,11 +15,10 @@ def formater_fcfa(montant):
 
 
 def afficher_depenses():
-    st.subheader("📉 Gestion des Dépenses & Salaires")
+    st.subheader("📉 Gestion des Dépenses, Salaires & Acomptes")
     st.markdown(
-        "Suivi des charges opérationnelles, paie des salaires fixes et calcul"
-        " des vacations par cycle avec récupération automatique ou ajustement"
-        " manuel."
+        "Suivi des charges opérationnelles, paie des salaires fixes, des acomptes"
+        " et calcul des vacations par cycle avec traçabilité ERP."
     )
     st.markdown("---")
 
@@ -46,7 +45,7 @@ def afficher_depenses():
         target_school_id = school_id or 1
 
         tab_saisie, tab_historique = st.tabs([
-            "➕ Enregistrer une Dépense / Salaire",
+            "➕ Enregistrer un Décaissement / Acompte",
             "📋 Historique & Contre-Passation",
         ])
 
@@ -61,6 +60,7 @@ def afficher_depenses():
                 [
                     "Dépense Opérationnelle Classique",
                     "Salaire Fixe (Permanent / Admin)",
+                    "Acompte sur Salaire",
                     "Salaire Vacation (Horaire)",
                 ],
                 horizontal=True,
@@ -73,8 +73,106 @@ def afficher_depenses():
             )
             liste_profs = [f"{e.nom} {e.prenom}" for e in enseignants_db]
 
-            # --- CAS 1 : SALAIRE VACATION ---
-            if type_saisie == "Salaire Vacation (Horaire)":
+            # --- CAS 1 : ACOMPTE SUR SALAIRE ---
+            if type_saisie == "Acompte sur Salaire":
+                with st.form("form_add_acompte"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        beneficiaire_acompte = st.text_input(
+                            "Nom et Prénom du Personnel / Bénéficiaire *"
+                        )
+                        montant_acompte = st.number_input(
+                            "Montant de l'acompte (FCFA) *",
+                            min_value=0.0,
+                            step=5000.0,
+                            value=0.0,
+                        )
+                        mois_concerne = st.selectbox(
+                            "Mois de référence (Paie)",
+                            [
+                                "Janvier",
+                                "Février",
+                                "Mars",
+                                "Avril",
+                                "Mai",
+                                "Juin",
+                                "Juillet",
+                                "Août",
+                                "Septembre",
+                                "Octobre",
+                                "Novembre",
+                                "Décembre",
+                            ],
+                            index=datetime.now().month - 1,
+                        )
+                    with col2:
+                        ref_piece = st.text_input(
+                            "N° de Bon d'Acompte / Référence *",
+                            placeholder="Ex: ACOMPTE-SEP-001",
+                        )
+                        mode_paiement = st.selectbox(
+                            "Mode de versement",
+                            [
+                                "Espèces (Caisse)",
+                                "Virement Bancaire",
+                                "Mobile Money (Orange/Moov)",
+                            ],
+                        )
+                        date_depense = st.date_input(
+                            "Date de versement de l'acompte", value=datetime.now()
+                        )
+
+                    submitted_acompte = st.form_submit_button(
+                        "💾 Valider et Enregistrer l'Acompte", type="primary"
+                    )
+                    if submitted_acompte:
+                        ref_clean = ref_piece.strip()
+                        libelle_final = f"Acompte sur salaire - {beneficiaire_acompte} (Mois : {mois_concerne})"
+                        categorie_final = "Acomptes Salaires"
+
+                        if not beneficiaire_acompte.strip() or montant_acompte <= 0:
+                            st.error("⚠️ Veuillez renseigner le nom du bénéficiaire et un montant supérieur à zéro.")
+                        elif not ref_clean:
+                            st.error("⚠️ Le numéro de bon ou la référence est obligatoire.")
+                        else:
+                            doublon_piece = (
+                                db.query(Depense)
+                                .filter(
+                                    Depense.school_id == target_school_id,
+                                    Depense.reference_piece == ref_clean,
+                                )
+                                .first()
+                            )
+                            if doublon_piece:
+                                st.error(f"⚠️ La référence '{ref_clean}' existe déjà dans le système.")
+                            else:
+                                nouvelle_depense = Depense(
+                                    school_id=target_school_id,
+                                    cycle=cycle_en_cours,
+                                    libelle=libelle_final,
+                                    montant=montant_acompte,
+                                    categorie=categorie_final,
+                                    reference_piece=ref_clean,
+                                    mode_paiement=mode_paiement,
+                                    date_depense=datetime.combine(
+                                        date_depense, datetime.now().time()
+                                    ),
+                                    auteur=username_connecte,
+                                )
+                                db.add(nouvelle_depense)
+                                log_action_erp(
+                                    module="Gestion des Dépenses & Acomptes",
+                                    action=f"Versement Acompte : {libelle_final} ({formater_fcfa(montant_acompte)} FCFA) - Réf: {ref_clean}",
+                                    statut="Critique",
+                                    valeur_avant="0 FCFA",
+                                    valeur_apres=f"{formater_fcfa(montant_acompte)} FCFA",
+                                )
+                                db.commit()
+                                st.success(f"✅ Acompte de {formater_fcfa(montant_acompte)} FCFA enregistré avec succès pour **{beneficiaire_acompte}** sous la référence **{ref_clean}** !")
+                                st.rerun()
+
+            # --- CAS 2 : SALAIRE VACATION ---
+            elif type_saisie == "Salaire Vacation (Horaire)":
                 col1, col2 = st.columns(2)
                 with col1:
                     enseignant_concerne = st.selectbox(
@@ -244,7 +342,7 @@ def afficher_depenses():
                                 )
                                 st.rerun()
 
-            # --- CAS 2 : SALAIRE FIXE OU DÉPENSE CLASSIQUE ---
+            # --- CAS 3 : SALAIRE FIXE OU DÉPENSE CLASSIQUE ---
             else:
                 with st.form("form_add_depense_classique"):
                     col1, col2 = st.columns(2)

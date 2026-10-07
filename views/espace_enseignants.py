@@ -14,7 +14,6 @@ from database.models import (
     Presence,
     School,
 )
-from database.queries import get_classes_cached, get_matieres_cached
 
 SYNONYMES_MATIERES = {
     "sciences physiques": "physique chimie",
@@ -56,6 +55,61 @@ def normaliser_chaine(texte):
     sans_accent = "".join([c for c in nfkd if not unicodedata.combining(c)])
     nettoye = " ".join(sans_accent.lower().replace("-", " ").replace("_", " ").replace("è", "e").replace("é", " e").split())
     return SYNONYMES_MATIERES.get(nettoye, nettoye)
+
+
+def get_matieres_dynamiques_espace_prof(selected_classes_labels, classes_cycle, ecole_active_id, cycle_en_cours, db):
+    """Récupère et filtre les matières de manière robuste et dynamique pour l'Espace Enseignants."""
+    m_brutes = []
+    
+    # 1. Si une classe spécifique est sélectionnée, on filtre par classe_id
+    if selected_classes_labels:
+        sel_ids = [c.id for c in classes_cycle if c.libelle in selected_classes_labels]
+        if sel_ids:
+            try:
+                mat_q = db.query(Matiere).filter(
+                    Matiere.school_id == ecole_active_id, 
+                    Matiere.classe_id.in_(sel_ids)
+                )
+                if hasattr(Matiere, "deleted_at"):
+                    mat_q = mat_q.filter(Matiere.deleted_at.is_(None))
+                m_brutes = mat_q.all()
+            except Exception:
+                m_brutes = []
+
+    # 2. Si aucune classe n'est sélectionnée, filtre large par cycle (insensible à la casse)
+    if not m_brutes and cycle_en_cours:
+        try:
+            mat_q_cycle = db.query(Matiere).filter(
+                Matiere.school_id == ecole_active_id
+            )
+            if hasattr(Matiere, "cycle"):
+                mat_q_cycle = mat_q_cycle.filter(Matiere.cycle.ilike(f"%{cycle_en_cours}%"))
+                
+            if hasattr(Matiere, "deleted_at"):
+                mat_q_cycle = mat_q_cycle.filter(Matiere.deleted_at.is_(None))
+            m_brutes = mat_q_cycle.all()
+        except Exception:
+            m_brutes = []
+
+    # 3. Fallback ultime : toutes les matières de l'école
+    if not m_brutes:
+        try:
+            mat_q_all = db.query(Matiere).filter(Matiere.school_id == ecole_active_id)
+            if hasattr(Matiere, "deleted_at"):
+                mat_q_all = mat_q_all.filter(Matiere.deleted_at.is_(None))
+            m_brutes = mat_q_all.all()
+        except Exception:
+            m_brutes = []
+
+    # Déduplication par nom normalisé
+    m_dict = {}
+    for m in m_brutes:
+        n_brut = m.libelle if hasattr(m, "libelle") and m.libelle else getattr(m, "nom", "Matière")
+        n_key = normaliser_chaine(n_brut)
+        if n_key and n_key not in m_dict:
+            m_dict[n_key] = m
+            
+    return sorted([(m.libelle if hasattr(m, 'libelle') and m.libelle else getattr(m, 'nom', 'Matière')).title() for m in m_dict.values()])
 
 
 def afficher_espace_enseignants():
@@ -176,7 +230,7 @@ def afficher_espace_enseignants():
             </div>
         """, unsafe_allow_html=True)
 
-        # --- 2. Zone de Contexte (Sélection Classe & Matière stricte) ---
+        # --- 2. Zone de Contexte (Sélection Classe & Matière dynamique) ---
         st.markdown('<div class="context-box">', unsafe_allow_html=True)
         st.markdown("#### 🎯 Paramètres de la séance")
         col1, col2 = st.columns(2)
@@ -189,21 +243,8 @@ def afficher_espace_enseignants():
             (c for c in classes_disponibles if c.libelle == classe_enseignant), None
         )
 
-        # --- LOGIQUE DE RÉCUPÉRATION DES MATIÈRES (CALQUÉE SUR L'ESPACE INSPECTION) ---
-        matieres_query = db.query(Matiere).filter(
-            Matiere.school_id == ecole_active_id,
-            Matiere.cycle == cycle_en_cours 
-        )
-        if hasattr(Matiere, "deleted_at"):
-            matieres_query = matieres_query.filter(Matiere.deleted_at.is_(None))
-            
-        liste_matieres_brutes = matieres_query.all()
-        
-        # Déduplication et formatage parfaits
-        noms_matieres = sorted(list(set([
-            (m.libelle if hasattr(m, 'libelle') and m.libelle else getattr(m, 'nom', 'Matière')).title() 
-            for m in liste_matieres_brutes
-        ])))
+        # --- LOGIQUE DE RÉCUPÉRATION DYNAMIQUE DES MATIÈRES ---
+        noms_matieres = get_matieres_dynamiques_espace_prof([classe_enseignant], toutes_classes_cycle, ecole_active_id, cycle_en_cours, db)
 
         with col2:
             matiere_enseignant = st.selectbox(
@@ -212,9 +253,10 @@ def afficher_espace_enseignants():
         st.markdown('</div>', unsafe_allow_html=True)
 
         # Récupération de l'objet matière correspondant pour les insertions
+        matieres_brutes_db = db.query(Matiere).filter(Matiere.school_id == ecole_active_id).all()
         matiere_obj = next(
             (
-                m for m in liste_matieres_brutes
+                m for m in matieres_brutes_db
                 if (m.libelle if hasattr(m, 'libelle') and m.libelle else getattr(m, 'nom', '')).title() == matiere_enseignant
             ),
             None,
@@ -522,6 +564,6 @@ def afficher_espace_enseignants():
         db.close()
 
 
-afficher_espace_enseignants = afficher_espace_enseignants
-afficher_enseignants = afficher_espace_enseignants
-afficher_espace_enseignant = afficher_espace_enseignants
+afficher_espace_enseignants = afficher_enseignants
+afficher_enseignants = afficher_enseignants
+afficher_espace_enseignant = afficher_enseignants

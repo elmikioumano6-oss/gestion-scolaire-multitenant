@@ -40,10 +40,9 @@ def normaliser_chaine(texte):
     return SYNONYMES_MATIERES.get(nettoye, nettoye)
 
 def get_matieres_dynamiques(selected_classes_labels, classes_cycle, ecole_active_id, cycle_en_cours, db):
-    """Récupère et filtre les matières de manière robuste (classes, cycle, puis toutes les matières de l'école)."""
+    """Récupère et filtre les matières en excluant strictement la philosophie pour le collège."""
     m_brutes = []
     
-    # 1. Si des classes spécifiques sont sélectionnées, on filtre par classe_id
     if selected_classes_labels:
         sel_ids = [c.id for c in classes_cycle if c.libelle in selected_classes_labels]
         if sel_ids:
@@ -58,20 +57,20 @@ def get_matieres_dynamiques(selected_classes_labels, classes_cycle, ecole_active
             except Exception:
                 m_brutes = []
 
-    # 2. Si aucune classe n'est sélectionnée, on essaie de filtrer par le cycle actif
-    if not m_brutes:
+    if not m_brutes and cycle_en_cours:
         try:
             mat_q_cycle = db.query(Matiere).filter(
-                Matiere.school_id == ecole_active_id, 
-                Matiere.cycle == cycle_en_cours
+                Matiere.school_id == ecole_active_id
             )
+            if hasattr(Matiere, "cycle"):
+                mat_q_cycle = mat_q_cycle.filter(Matiere.cycle.ilike(f"%{cycle_en_cours}%"))
+                
             if hasattr(Matiere, "deleted_at"):
                 mat_q_cycle = mat_q_cycle.filter(Matiere.deleted_at.is_(None))
             m_brutes = mat_q_cycle.all()
         except Exception:
             m_brutes = []
 
-    # 3. Fallback ultime : si toujours vide, on prend toutes les matières de l'école (Lycée et Collège confondus)
     if not m_brutes:
         try:
             mat_q_all = db.query(Matiere).filter(Matiere.school_id == ecole_active_id)
@@ -81,11 +80,17 @@ def get_matieres_dynamiques(selected_classes_labels, classes_cycle, ecole_active
         except Exception:
             m_brutes = []
 
-    # Déduplication par nom normalisé
     m_dict = {}
+    cycle_actuel_lower = str(cycle_en_cours).lower()
+    
     for m in m_brutes:
         n_brut = m.libelle if hasattr(m, "libelle") and m.libelle else getattr(m, "nom", "Matière")
         n_key = normaliser_chaine(n_brut)
+        
+        if "collège" in cycle_actuel_lower or "college" in cycle_actuel_lower:
+            if "philosophie" in n_key or "philo" in n_key:
+                continue
+
         if n_key and n_key not in m_dict:
             m_dict[n_key] = m
             
@@ -106,8 +111,6 @@ def generer_lien_whatsapp_prof(telephone, nom_prof, username, password_clair):
     )
     texte_encode = urllib.parse.quote(message)
     return f"https://wa.me/{telephone_propre}?text={texte_encode}"
-
-# -------------------------------------------------------------------------
 
 
 def afficher_enseignants():
@@ -149,7 +152,6 @@ def afficher_enseignants():
 
     db = SessionLocal()
     try:
-        # Récupération sécurisée des classes
         classes_query = db.query(Classe).filter(
             Classe.cycle == cycle_en_cours, Classe.school_id == ecole_active_id
         )
@@ -174,7 +176,6 @@ def afficher_enseignants():
                 ens_query = ens_query.filter(Enseignant.deleted_at.is_(None))
             tous_enseignants = ens_query.all()
 
-            # Filtrage par cycle
             noms_classes_cycle = {c.libelle for c in classes_cycle}
             enseignants = []
             for prof in tous_enseignants:
@@ -218,7 +219,6 @@ def afficher_enseignants():
                         if st.button("🗑️", key=f"del_prof_{prof.id}", help="Archiver / Supprimer"):
                             st.session_state[f"deleting_prof_{prof.id}"] = True
 
-                    # --- GESTION DE LA SUPPRESSION / ARCHIVAGE ---
                     if st.session_state.get(f"deleting_prof_{prof.id}", False):
                         st.warning(
                             f"Voulez-vous vraiment archiver **{prof.nom} {prof.prenom}** ?"
@@ -249,7 +249,6 @@ def afficher_enseignants():
                                 st.session_state[f"deleting_prof_{prof.id}"] = False
                                 st.rerun()
 
-                    # --- GESTION DE LA MODIFICATION ---
                     if st.session_state.get(f"editing_prof_{prof.id}", False):
                         st.markdown(f"**Modification de l'enseignant : {prof.nom} {prof.prenom}**")
                         
@@ -273,7 +272,6 @@ def afficher_enseignants():
                             "Classes tenues", options=opt_classes, default=[c for c in current_classes if c in opt_classes], key=f"edit_cls_{prof.id}"
                         )
                         
-                        # --- MATIÈRES DYNAMIQUES FILTRÉES POUR L'ÉDITION ---
                         dyn_mats = get_matieres_dynamiques(new_classes, classes_cycle, ecole_active_id, cycle_en_cours, db)
                         opt_matieres = sorted(list(set(dyn_mats + current_matieres)))
 
@@ -346,7 +344,6 @@ def afficher_enseignants():
         with tab_ajout:
             st.markdown(f"### Enregistrement d'un Nouvel Enseignant — **{school_name} ({cycle_en_cours})**")
 
-            # Affichage du bloc WhatsApp s'il y a eu une création récente
             if "nouveau_prof" in st.session_state:
                 info = st.session_state["nouveau_prof"]
                 st.success(f"✅ Compte utilisateur créé avec succès pour **{info['nom_prof']}** !")
@@ -369,122 +366,119 @@ def afficher_enseignants():
             if not classes_cycle:
                 st.warning(f"⚠️ Veuillez d'abord configurer des classes pour le cycle **{cycle_en_cours}**.")
             else:
-                col_a1, col_a2 = st.columns(2)
-                with col_a1:
-                    nom_prof = st.text_input("Nom de l'enseignant *", key="add_nom")
-                    email_prof = st.text_input("Adresse Email", key="add_email")
-                with col_a2:
-                    prenom_prof = st.text_input("Prénom de l'enseignant *", key="add_prenom")
-                    tel_prof = st.text_input("Numéro de Téléphone (Format WhatsApp)", key="add_tel")
+                with st.form("form_ajout_enseignant", clear_on_submit=False):
+                    col_a1, col_a2 = st.columns(2)
+                    with col_a1:
+                        nom_prof = st.text_input("Nom de l'enseignant *", key="add_nom")
+                        email_prof = st.text_input("Adresse Email", key="add_email")
+                    with col_a2:
+                        prenom_prof = st.text_input("Prénom de l'enseignant *", key="add_prenom")
+                        tel_prof = st.text_input("Numéro de Téléphone (Format WhatsApp)", key="add_tel")
 
-                st.markdown("#### Affectations Pédagogiques")
-                classes_attribuees = st.multiselect(
-                    "Classes tenues par l'enseignant", noms_classes, key="add_classes"
-                )
-                
-                # --- MATIÈRES DYNAMIQUES FILTRÉES POUR L'AJOUT ---
-                dyn_mats_add = get_matieres_dynamiques(classes_attribuees, classes_cycle, ecole_active_id, cycle_en_cours, db)
+                    st.markdown("#### Affectations Pédagogiques")
+                    classes_attribuees = st.multiselect(
+                        "Classes tenues par l'enseignant", noms_classes, key="add_classes"
+                    )
+                    
+                    dyn_mats_add = get_matieres_dynamiques(classes_attribuees, classes_cycle, ecole_active_id, cycle_en_cours, db)
 
-                matieres_attribuees = st.multiselect(
-                    "Matières dispensées", dyn_mats_add, key="add_matieres"
-                )
+                    matieres_attribuees = st.multiselect(
+                        "Matières dispensées", dyn_mats_add, key="add_matieres"
+                    )
 
-                st.markdown("#### Informations Salariales")
-                col_sal1, col_sal2 = st.columns(2)
-                with col_sal1:
-                    taux_horaire = st.number_input("Taux Horaire (FCFA / heure)", min_value=0.0, step=500.0, value=1500.0, key="add_taux")
-                with col_sal2:
-                    salaire_base = st.number_input("Salaire de base (si permanent) (FCFA)", min_value=0.0, step=1000.0, key="add_sal")
+                    st.markdown("#### Informations Salariales")
+                    col_sal1, col_sal2 = st.columns(2)
+                    with col_sal1:
+                        taux_horaire = st.number_input("Taux Horaire (FCFA / heure)", min_value=0.0, step=500.0, value=1500.0, key="add_taux")
+                    with col_sal2:
+                        salaire_base = st.number_input("Salaire de base (si permanent) (FCFA)", min_value=0.0, step=1000.0, key="add_sal")
 
-                submitted_prof = st.button("💾 Enregistrer & Créer le compte", type="primary", key="btn_add_prof")
-                
-                if submitted_prof:
-                    if not nom_prof.strip() or not prenom_prof.strip():
-                        st.error("⚠️ Le nom et le prénom de l'enseignant sont obligatoires.")
-                    else:
-                        doublon_existant = (
-                            db.query(Enseignant)
-                            .filter(
-                                Enseignant.school_id == ecole_active_id,
-                                Enseignant.nom == nom_prof.strip().upper(),
-                                Enseignant.prenom == prenom_prof.strip(),
-                            )
-                            .first()
-                        )
-                        if doublon_existant:
-                            st.error(
-                                f"⚠️ Un enseignant nommé **{nom_prof.upper()} {prenom_prof}** est déjà enregistré dans cet établissement."
-                            )
+                    submitted_prof = st.form_submit_button("💾 Enregistrer & Créer le compte", type="primary")
+                    
+                    if submitted_prof:
+                        if not nom_prof.strip() or not prenom_prof.strip():
+                            st.error("⚠️ Le nom et le prénom de l'enseignant sont obligatoires.")
                         else:
-                            str_classes = ", ".join(classes_attribuees) if classes_attribuees else "Aucune"
-                            str_matieres = ", ".join(matieres_attribuees) if matieres_attribuees else "Aucune"
-
-                            try:
-                                # 1. Création de l'enseignant
-                                nouvel_enseignant = Enseignant(
-                                    school_id=ecole_active_id,
-                                    nom=nom_prof.strip().upper(),
-                                    prenom=prenom_prof.strip(),
-                                    telephone=tel_prof.strip() if tel_prof else None,
-                                    taux_horaire=taux_horaire,
-                                    salaire_base=salaire_base
+                            doublon_existant = (
+                                db.query(Enseignant)
+                                .filter(
+                                    Enseignant.school_id == ecole_active_id,
+                                    Enseignant.nom == nom_prof.strip().upper(),
+                                    Enseignant.prenom == prenom_prof.strip(),
                                 )
-
-                                if hasattr(nouvel_enseignant, "email"):
-                                    nouvel_enseignant.email = email_prof.strip() if email_prof else None
-                                if hasattr(nouvel_enseignant, "classes_attribuees"):
-                                    nouvel_enseignant.classes_attribuees = str_classes
-                                if hasattr(nouvel_enseignant, "classes"):
-                                    nouvel_enseignant.classes = str_classes
-                                if hasattr(nouvel_enseignant, "matieres_attribuees"):
-                                    nouvel_enseignant.matieres_attribuees = str_matieres
-                                if hasattr(nouvel_enseignant, "matieres"):
-                                    nouvel_enseignant.matieres = str_matieres
-
-                                db.add(nouvel_enseignant)
-                                db.flush()
-
-                                # 2. Création automatique du compte User Enseignant
-                                caracteres = string.ascii_letters + string.digits
-                                password_genere = ''.join(random.choice(caracteres) for i in range(8))
-                                username_prof = f"prof_{nom_prof.strip().lower().replace(' ', '')}{random.randint(10, 99)}"
-
-                                nouveau_user_prof = User(
-                                    username=username_prof,
-                                    password=generate_password_hash(password_genere),
-                                    role="enseignant",
-                                    school_id=ecole_active_id
+                                .first()
+                            )
+                            if doublon_existant:
+                                st.error(
+                                    f"⚠️ Un enseignant nommé **{nom_prof.upper()} {prenom_prof}** est déjà enregistré dans cet établissement."
                                 )
-                                if hasattr(nouveau_user_prof, "enseignant_id"):
-                                    nouveau_user_prof.enseignant_id = nouvel_enseignant.id
+                            else:
+                                str_classes = ", ".join(classes_attribuees) if classes_attribuees else "Aucune"
+                                str_matieres = ", ".join(matieres_attribuees) if matieres_attribuees else "Aucune"
+
+                                try:
+                                    nouvel_enseignant = Enseignant(
+                                        school_id=ecole_active_id,
+                                        nom=nom_prof.strip().upper(),
+                                        prenom=prenom_prof.strip(),
+                                        telephone=tel_prof.strip() if tel_prof else None,
+                                        taux_horaire=taux_horaire,
+                                        salaire_base=salaire_base
+                                    )
+
+                                    if hasattr(nouvel_enseignant, "email"):
+                                        nouvel_enseignant.email = email_prof.strip() if email_prof else None
+                                    if hasattr(nouvel_enseignant, "classes_attribuees"):
+                                        nouvel_enseignant.classes_attribuees = str_classes
+                                    if hasattr(nouvel_enseignant, "classes"):
+                                        nouvel_enseignant.classes = str_classes
+                                    if hasattr(nouvel_enseignant, "matieres_attribuees"):
+                                        nouvel_enseignant.matieres_attribuees = str_matieres
+                                    if hasattr(nouvel_enseignant, "matieres"):
+                                        nouvel_enseignant.matieres = str_matieres
+
+                                    db.add(nouvel_enseignant)
+                                    db.flush()
+
+                                    caracteres = string.ascii_letters + string.digits
+                                    password_genere = ''.join(random.choice(caracteres) for i in range(8))
+                                    username_prof = f"prof_{nom_prof.strip().lower().replace(' ', '')}{random.randint(10, 99)}"
+
+                                    nouveau_user_prof = User(
+                                        username=username_prof,
+                                        password=generate_password_hash(password_genere),
+                                        role="enseignant",
+                                        school_id=ecole_active_id
+                                    )
+                                    if hasattr(nouveau_user_prof, "enseignant_id"):
+                                        nouveau_user_prof.enseignant_id = nouvel_enseignant.id
+                                        
+                                    db.add(nouveau_user_prof)
+                                    db.commit()
+
+                                    log_action_erp(
+                                        module="Enseignants",
+                                        action=f"Enregistrement de l'enseignant {nom_prof.strip().upper()} {prenom_prof.strip()} + Création Compte",
+                                        statut="Succès",
+                                        valeur_avant="Inexistant",
+                                        valeur_apres=f"Affecté à {len(classes_attribuees)} classe(s)",
+                                    )
                                     
-                                db.add(nouveau_user_prof)
-                                db.commit()
+                                    st.session_state["nouveau_prof"] = {
+                                        "telephone": tel_prof.strip(),
+                                        "nom_prof": f"{nom_prof.strip().upper()} {prenom_prof.strip()}",
+                                        "username": username_prof,
+                                        "password": password_genere
+                                    }
+                                    st.rerun()
 
-                                log_action_erp(
-                                    module="Enseignants",
-                                    action=f"Enregistrement de l'enseignant {nom_prof.strip().upper()} {prenom_prof.strip()} + Création Compte",
-                                    statut="Succès",
-                                    valeur_avant="Inexistant",
-                                    valeur_apres=f"Affecté à {len(classes_attribuees)} classe(s)",
-                                )
-                                
-                                st.session_state["nouveau_prof"] = {
-                                    "telephone": tel_prof.strip(),
-                                    "nom_prof": f"{nom_prof.strip().upper()} {prenom_prof.strip()}",
-                                    "username": username_prof,
-                                    "password": password_genere
-                                }
-                                st.rerun()
-
-                            except Exception as e:
-                                db.rollback()
-                                st.error(f"Erreur technique lors de la création de l'enseignant : {e}")
+                                except Exception as e:
+                                    db.rollback()
+                                    st.error(f"Erreur technique lors de la création de l'enseignant : {e}")
 
     finally:
         db.close()
 
 
-# Alias de compatibilité exhaustive
 afficher_gestion_enseignants = afficher_enseignants
 afficher_enseignants = afficher_enseignants
