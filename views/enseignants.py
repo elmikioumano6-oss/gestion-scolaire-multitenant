@@ -40,35 +40,46 @@ def normaliser_chaine(texte):
     return SYNONYMES_MATIERES.get(nettoye, nettoye)
 
 def get_matieres_dynamiques(selected_classes_labels, classes_cycle, ecole_active_id, cycle_en_cours, db):
-    """Récupère, filtre et déduplique les matières selon les classes sélectionnées."""
+    """Récupère et filtre les matières de manière robuste (classes, cycle, puis toutes les matières de l'école)."""
     m_brutes = []
     
-    # 1. Si des classes sont sélectionnées, on filtre par classe_id
+    # 1. Si des classes spécifiques sont sélectionnées, on filtre par classe_id
     if selected_classes_labels:
         sel_ids = [c.id for c in classes_cycle if c.libelle in selected_classes_labels]
-        mat_q = db.query(Matiere).filter(
-            Matiere.school_id == ecole_active_id, 
-            Matiere.classe_id.in_(sel_ids)
-        )
-        if hasattr(Matiere, "deleted_at"):
-            mat_q = mat_q.filter(Matiere.deleted_at.is_(None))
-        m_brutes = mat_q.all()
-    else:
-        # 2. Logique Espace Enseignant : Si aucune classe sélectionnée, on affiche TOUTES les matières de l'école
-        mat_q = db.query(Matiere).filter(Matiere.school_id == ecole_active_id)
-        if hasattr(Matiere, "deleted_at"):
-            mat_q = mat_q.filter(Matiere.deleted_at.is_(None))
-        m_brutes = mat_q.all()
-        
-    # 3. Fallback sécurité
+        if sel_ids:
+            try:
+                mat_q = db.query(Matiere).filter(
+                    Matiere.school_id == ecole_active_id, 
+                    Matiere.classe_id.in_(sel_ids)
+                )
+                if hasattr(Matiere, "deleted_at"):
+                    mat_q = mat_q.filter(Matiere.deleted_at.is_(None))
+                m_brutes = mat_q.all()
+            except Exception:
+                m_brutes = []
+
+    # 2. Si aucune classe n'est sélectionnée, on essaie de filtrer par le cycle actif
     if not m_brutes:
-        mat_q_cycle = db.query(Matiere).filter(
-            Matiere.school_id == ecole_active_id, 
-            Matiere.cycle == cycle_en_cours
-        )
-        if hasattr(Matiere, "deleted_at"):
-            mat_q_cycle = mat_q_cycle.filter(Matiere.deleted_at.is_(None))
-        m_brutes = mat_q_cycle.all()
+        try:
+            mat_q_cycle = db.query(Matiere).filter(
+                Matiere.school_id == ecole_active_id, 
+                Matiere.cycle == cycle_en_cours
+            )
+            if hasattr(Matiere, "deleted_at"):
+                mat_q_cycle = mat_q_cycle.filter(Matiere.deleted_at.is_(None))
+            m_brutes = mat_q_cycle.all()
+        except Exception:
+            m_brutes = []
+
+    # 3. Fallback ultime : si toujours vide, on prend toutes les matières de l'école (Lycée et Collège confondus)
+    if not m_brutes:
+        try:
+            mat_q_all = db.query(Matiere).filter(Matiere.school_id == ecole_active_id)
+            if hasattr(Matiere, "deleted_at"):
+                mat_q_all = mat_q_all.filter(Matiere.deleted_at.is_(None))
+            m_brutes = mat_q_all.all()
+        except Exception:
+            m_brutes = []
 
     # Déduplication par nom normalisé
     m_dict = {}
@@ -262,7 +273,7 @@ def afficher_enseignants():
                             "Classes tenues", options=opt_classes, default=[c for c in current_classes if c in opt_classes], key=f"edit_cls_{prof.id}"
                         )
                         
-                        # --- MATIÈRES DYNAMIQUES POUR L'ÉDITION ---
+                        # --- MATIÈRES DYNAMIQUES FILTRÉES POUR L'ÉDITION ---
                         dyn_mats = get_matieres_dynamiques(new_classes, classes_cycle, ecole_active_id, cycle_en_cours, db)
                         opt_matieres = sorted(list(set(dyn_mats + current_matieres)))
 
@@ -371,7 +382,7 @@ def afficher_enseignants():
                     "Classes tenues par l'enseignant", noms_classes, key="add_classes"
                 )
                 
-                # --- MATIÈRES DYNAMIQUES POUR L'AJOUT ---
+                # --- MATIÈRES DYNAMIQUES FILTRÉES POUR L'AJOUT ---
                 dyn_mats_add = get_matieres_dynamiques(classes_attribuees, classes_cycle, ecole_active_id, cycle_en_cours, db)
 
                 matieres_attribuees = st.multiselect(
@@ -444,7 +455,6 @@ def afficher_enseignants():
                                     role="enseignant",
                                     school_id=ecole_active_id
                                 )
-                                # Lier au profil enseignant si la clé étrangère existe dans User
                                 if hasattr(nouveau_user_prof, "enseignant_id"):
                                     nouveau_user_prof.enseignant_id = nouvel_enseignant.id
                                     
@@ -459,7 +469,6 @@ def afficher_enseignants():
                                     valeur_apres=f"Affecté à {len(classes_attribuees)} classe(s)",
                                 )
                                 
-                                # Stockage en session pour l'affichage conditionnel de WhatsApp
                                 st.session_state["nouveau_prof"] = {
                                     "telephone": tel_prof.strip(),
                                     "nom_prof": f"{nom_prof.strip().upper()} {prenom_prof.strip()}",
