@@ -89,8 +89,11 @@ def init_tenant_context():
             pass
 
         school = None
-        if subdomain != "default":
-            school = db.query(School).filter(School.subdomain == subdomain).first()
+        try:
+            if subdomain != "default":
+                school = db.query(School).filter(School.subdomain == subdomain).first()
+        except Exception:
+            school = None
 
         if school:
             st.session_state["school_id"] = school.id
@@ -303,8 +306,8 @@ def main():
         if is_super_admin:
             st.markdown("#### 🏛️ Gouvernance ERP")
             st.info(f"Connecté : **{nom_utilisateur}**")
-            options_menu = ["📊 Pilotage & BI", "🏢 Gestion des Tenants", "👥 IAM & Sécurité", "📜 Piste d'Audit", "💾 Infrastructure & Backup", "⚙️ Paramètres Système"]
-            icons_menu = ["speedometer2", "globe", "shield-lock", "clock-history", "database", "gear"]
+            options_menu = ["📊 Pilotage & BI", "🏢 Gestion des Tenants", "👥 IAM & Sécurité", "📜 Piste d'Audit", "💾 Infrastructure & Backup", "🩺 Santé & Diagnostic", "⚙️ Paramètres Système"]
+            icons_menu = ["speedometer2", "globe", "shield-lock", "clock-history", "database", "heart-pulse", "gear"]
             menu_key_val = "menu_super_admin_erp"
 
         elif role_utilisateur == "inspecteur":
@@ -363,7 +366,7 @@ def main():
                 "Suivi des Programmes", "Enseignants", "Personnels et rôles", "Gestion Comptes",
                 "Import Programmes PDF", "Encaissement", "Stats Encaissements", "Tableau Finances",
                 "Soldes & Impayés", "Dépenses", "Fiches de Paie", "Rapports", "Paramètres", "Journal d'activité",
-                "Messages", "Communication Groupée", "Espace Parent", "Backup",
+                "Messages", "Communication Groupée", "Espace Parent", "Backup", "🩺 Santé & Diagnostic"
             ]
             icons_menu = [
                 "house", "speedometer2", "calendar", "calendar-x", "book", "grid", "person-plus", "file-excel", "card-text", 
@@ -371,7 +374,7 @@ def main():
                 "clipboard-check", "award", "journal-richtext", "exclamation-triangle", "person-video3",
                 "graph-up", "person-badge", "shield-lock", "people", "file-pdf", "cash-coin", "bar-chart-fill", 
                 "wallet2", "receipt", "file-earmark-text", "file-earmark-bar-graph", "file-earmark-bar-graph", 
-                "gear", "clock-history", "chat-dots", "megaphone", "house-heart", "database",
+                "gear", "clock-history", "chat-dots", "megaphone", "house-heart", "database", "heart-pulse"
             ]
             menu_key_val = "menu_principal_admin"
 
@@ -414,7 +417,8 @@ def main():
         "🏢 Gestion des Tenants": ("views.super_admin", "afficher_super_admin"),
         "👥 IAM & Sécurité": ("views.gestion_utilisateurs", "afficher_gestion_utilisateurs"),
         "📜 Piste d'Audit": ("views.journal_activite", "afficher_journal_activite"),
-        "💾 Infrastructure & Backup": ("views.backup", "afficher_backup"),
+        "💾 Infrastructure & Backup": ("views.backup", "backup"),
+        "🩺 Santé & Diagnostic": ("views.health_check", "health_check"),
         "⚙️ Paramètres Système": ("views.parametres", "afficher_parametres"),
         "Administration Globale": ("views.super_admin", "afficher_super_admin"),
         "Accueil": ("views.accueil", "afficher_accueil"),
