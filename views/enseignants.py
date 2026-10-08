@@ -11,7 +11,6 @@ from database.db_config import SessionLocal
 from database.models import Classe, Enseignant, Matiere, School, User
 
 
-# --- Dictionnaire et fonction de normalisation (Logique Espace Enseignant) ---
 SYNONYMES_MATIERES = {
     "sciences physiques": "physique chimie",
     "physique chimie": "physique chimie",
@@ -40,36 +39,24 @@ def normaliser_chaine(texte):
     return SYNONYMES_MATIERES.get(nettoye, nettoye)
 
 def get_matieres_dynamiques(selected_classes_labels, classes_cycle, ecole_active_id, cycle_en_cours, db):
-    """Récupère et filtre les matières en excluant strictement la philosophie pour le collège."""
     m_brutes = []
-    
-    if selected_classes_labels:
-        sel_ids = [c.id for c in classes_cycle if c.libelle in selected_classes_labels]
-        if sel_ids:
-            try:
-                mat_q = db.query(Matiere).filter(
-                    Matiere.school_id == ecole_active_id, 
-                    Matiere.classe_id.in_(sel_ids)
-                )
-                if hasattr(Matiere, "deleted_at"):
-                    mat_q = mat_q.filter(Matiere.deleted_at.is_(None))
-                m_brutes = mat_q.all()
-            except Exception:
-                m_brutes = []
+    try:
+        ids_classes_cycle = [c.id for c in classes_cycle if c.id]
+        if not ids_classes_cycle:
+            return []
 
-    if not m_brutes and cycle_en_cours:
-        try:
-            mat_q_cycle = db.query(Matiere).filter(
-                Matiere.school_id == ecole_active_id
-            )
-            if hasattr(Matiere, "cycle"):
-                mat_q_cycle = mat_q_cycle.filter(Matiere.cycle.ilike(f"%{cycle_en_cours}%"))
-                
+        if selected_classes_labels:
+            ids_cibles = [c.id for c in classes_cycle if c.libelle and c.libelle.strip() in selected_classes_labels]
+        else:
+            ids_cibles = ids_classes_cycle
+
+        if ids_cibles and hasattr(Matiere, "classe_id"):
+            mat_q = db.query(Matiere).filter(Matiere.classe_id.in_(ids_cibles))
             if hasattr(Matiere, "deleted_at"):
-                mat_q_cycle = mat_q_cycle.filter(Matiere.deleted_at.is_(None))
-            m_brutes = mat_q_cycle.all()
-        except Exception:
-            m_brutes = []
+                mat_q = mat_q.filter(Matiere.deleted_at.is_(None))
+            m_brutes = mat_q.all()
+    except Exception:
+        m_brutes = []
 
     if not m_brutes:
         try:
@@ -97,28 +84,21 @@ def get_matieres_dynamiques(selected_classes_labels, classes_cycle, ecole_active
     return sorted([(m.libelle if hasattr(m, 'libelle') and m.libelle else getattr(m, 'nom', 'Matière')).title() for m in m_dict.values()])
 
 def generer_lien_whatsapp_prof(telephone, nom_prof, username, password_clair):
-    """Prépare le lien WhatsApp avec le texte pré-formaté pour l'enseignant."""
     telephone_propre = str(telephone).replace(" ", "").replace("+", "")
     message = (
         f"Bonjour M./Mme {nom_prof}, 👋\n\n"
         f"Votre compte enseignant a été créé avec succès au sein de notre établissement.\n\n"
-        f"Voici vos identifiants pour accéder à votre Espace Pédagogique (Cahier de texte, Saisie des notes, Appels) :\n\n"
-        f"🌐 *Lien* : https://portail.votre-ecole.com\n"
+        f"Voici vos identifiants pour accéder à votre Espace Pédagogique :\n\n"
         f"👤 *Utilisateur* : {username}\n"
         f"🔑 *Mot de passe* : {password_clair}\n\n"
-        f"Il est conseillé de modifier ce mot de passe lors de votre première connexion.\n\n"
         f"Cordialement,\n*L'Administration*"
     )
     texte_encode = urllib.parse.quote(message)
     return f"https://wa.me/{telephone_propre}?text={texte_encode}"
 
-
 def afficher_enseignants():
     st.subheader("👥 Gestion du Corps Professoral & Enseignants")
-    st.markdown(
-        "Suivi, administration et affectations pédagogiques des enseignants "
-        "avec création automatique de comptes et traçabilité ERP."
-    )
+    st.markdown("Suivi, administration et affectations pédagogiques des enseignants.")
     st.markdown("---")
 
     school_id = st.session_state.get("school_id")
@@ -130,17 +110,9 @@ def afficher_enseignants():
         if is_super_admin and not target_school_id:
             ecole_defaut = db.query(School).first()
             target_school_id = ecole_defaut.id if ecole_defaut else 1
-
         ecole_active_id = school_id if school_id else target_school_id
-
-        ecole_courante = (
-            db.query(School).filter(School.id == ecole_active_id).first()
-        )
-        school_name = (
-            ecole_courante.nom
-            if ecole_courante
-            else st.session_state.get("school_name", "Établissement")
-        )
+        ecole_courante = db.query(School).filter(School.id == ecole_active_id).first()
+        school_name = ecole_courante.nom if ecole_courante else st.session_state.get("school_name", "Établissement")
     finally:
         db.close()
 
@@ -152,26 +124,17 @@ def afficher_enseignants():
 
     db = SessionLocal()
     try:
-        classes_query = db.query(Classe).filter(
-            Classe.cycle == cycle_en_cours, Classe.school_id == ecole_active_id
-        )
+        classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours, Classe.school_id == ecole_active_id)
         if hasattr(Classe, "deleted_at"):
             classes_query = classes_query.filter(Classe.deleted_at.is_(None))
         classes_cycle = classes_query.all()
-
         noms_classes = sorted(list(set([c.libelle.strip() for c in classes_cycle if c.libelle])))
 
-        tab_liste, tab_ajout = st.tabs([
-            "📋 Liste des Enseignants",
-            "➕ Enregistrer un Enseignant",
-        ])
+        tab_liste, tab_ajout = st.tabs(["📋 Liste des Enseignants", "➕ Enregistrer un Enseignant"])
 
         with tab_liste:
             st.markdown(f"### Enseignants Actifs — **{school_name} ({cycle_en_cours})**")
-
-            ens_query = db.query(Enseignant).filter(
-                Enseignant.school_id == ecole_active_id
-            )
+            ens_query = db.query(Enseignant).filter(Enseignant.school_id == ecole_active_id)
             if hasattr(Enseignant, "deleted_at"):
                 ens_query = ens_query.filter(Enseignant.deleted_at.is_(None))
             tous_enseignants = ens_query.all()
@@ -181,14 +144,11 @@ def afficher_enseignants():
             for prof in tous_enseignants:
                 classes_str = getattr(prof, "classes_attribuees", "") or getattr(prof, "classes", "") or ""
                 classes_prof = [c.strip() for c in classes_str.split(",") if c.strip()]
-                
                 if not classes_prof or any(cls in noms_classes_cycle for cls in classes_prof):
                     enseignants.append(prof)
 
             if not enseignants:
-                st.info(
-                    f"Aucun enseignant actif enregistré pour le moment sous le cycle **{cycle_en_cours}** dans cet établissement."
-                )
+                st.info(f"Aucun enseignant actif enregistré sous le cycle **{cycle_en_cours}**.")
             else:
                 cols = st.columns([1.5, 1.5, 2, 2, 2])
                 cols[0].markdown("**Nom & Prénom**")
@@ -201,28 +161,20 @@ def afficher_enseignants():
                 for prof in enseignants:
                     c = st.columns([1.5, 1.5, 2, 2, 2])
                     c[0].write(f"**{prof.nom}** {prof.prenom}")
-                    c[1].write(
-                        f"📞 {prof.telephone or 'N/D'}\n📧 {getattr(prof, 'email', 'N/D')}"
-                    )
-                    c[2].write(
-                        getattr(prof, "classes_attribuees", getattr(prof, "classes", "Aucune"))
-                    )
-                    c[3].write(
-                        getattr(prof, "matieres_attribuees", getattr(prof, "matieres", "Aucune"))
-                    )
+                    c[1].write(f"📞 {prof.telephone or 'N/D'}\n📧 {getattr(prof, 'email', 'N/D')}")
+                    c[2].write(getattr(prof, "classes_attribuees", getattr(prof, "classes", "Aucune")))
+                    c[3].write(getattr(prof, "matieres_attribuees", getattr(prof, "matieres", "Aucune")))
 
                     btn_col1, btn_col2 = c[4].columns(2)
                     with btn_col1:
                         if st.button("✏️", key=f"edit_prof_{prof.id}", help="Modifier"):
                             st.session_state[f"editing_prof_{prof.id}"] = True
                     with btn_col2:
-                        if st.button("🗑️", key=f"del_prof_{prof.id}", help="Archiver / Supprimer"):
+                        if st.button("🗑️", key=f"del_prof_{prof.id}", help="Supprimer"):
                             st.session_state[f"deleting_prof_{prof.id}"] = True
 
                     if st.session_state.get(f"deleting_prof_{prof.id}", False):
-                        st.warning(
-                            f"Voulez-vous vraiment archiver **{prof.nom} {prof.prenom}** ?"
-                        )
+                        st.warning(f"Voulez-vous vraiment archiver **{prof.nom} {prof.prenom}** ?")
                         col_conf1, col_conf2 = st.columns(2)
                         with col_conf1:
                             if st.button("Confirmer", key=f"confirm_del_prof_{prof.id}", type="primary"):
@@ -232,15 +184,6 @@ def afficher_enseignants():
                                 else:
                                     db.delete(prof)
                                     db.commit()
-
-                                log_action_erp(
-                                    module="Enseignants",
-                                    action=f"Suppression/Archivage du professeur {prof.nom} {prof.prenom}",
-                                    statut="Critique",
-                                    valeur_avant="Actif",
-                                    valeur_apres="Inactif",
-                                )
-
                                 st.success("Enseignant traité avec succès !")
                                 st.session_state[f"deleting_prof_{prof.id}"] = False
                                 st.rerun()
@@ -250,68 +193,41 @@ def afficher_enseignants():
                                 st.rerun()
 
                     if st.session_state.get(f"editing_prof_{prof.id}", False):
-                        st.markdown(f"**Modification de l'enseignant : {prof.nom} {prof.prenom}**")
-                        
+                        st.markdown(f"**Modification : {prof.nom} {prof.prenom}**")
                         col_edit1, col_edit2 = st.columns(2)
                         with col_edit1:
                             new_nom = st.text_input("Nom", value=prof.nom, key=f"edit_nom_{prof.id}")
-                            new_email = st.text_input("Adresse Email", value=getattr(prof, "email", "") or "", key=f"edit_email_{prof.id}")
+                            new_email = st.text_input("Email", value=getattr(prof, "email", "") or "", key=f"edit_email_{prof.id}")
                         with col_edit2:
                             new_prenom = st.text_input("Prénom", value=prof.prenom, key=f"edit_prenom_{prof.id}")
                             new_tel = st.text_input("Téléphone", value=prof.telephone or "", key=f"edit_tel_{prof.id}")
 
                         classes_str_actuelle = getattr(prof, "classes_attribuees", getattr(prof, "classes", "")) or ""
                         matieres_str_actuelle = getattr(prof, "matieres_attribuees", getattr(prof, "matieres", "")) or ""
-
                         current_classes = [c.strip() for c in classes_str_actuelle.split(",") if c.strip()]
                         current_matieres = [m.strip().title() for m in matieres_str_actuelle.split(",") if m.strip()]
-                        
+
                         opt_classes = sorted(list(set(noms_classes + current_classes)))
-                        
-                        new_classes = st.multiselect(
-                            "Classes tenues", options=opt_classes, default=[c for c in current_classes if c in opt_classes], key=f"edit_cls_{prof.id}"
-                        )
-                        
+                        new_classes = st.multiselect("Classes tenues", options=opt_classes, default=[c for c in current_classes if c in opt_classes], key=f"edit_cls_{prof.id}")
+
                         dyn_mats = get_matieres_dynamiques(new_classes, classes_cycle, ecole_active_id, cycle_en_cours, db)
                         opt_matieres = sorted(list(set(dyn_mats + current_matieres)))
-
-                        new_matieres = st.multiselect(
-                            "Matières dispensées", options=opt_matieres, default=[m for m in current_matieres if m in opt_matieres], key=f"edit_mats_{prof.id}"
-                        )
-
-                        st.markdown("**Informations Salariales**")
-                        col_edit_sal1, col_edit_sal2 = st.columns(2)
-                        with col_edit_sal1:
-                            current_taux = float(getattr(prof, "taux_horaire", 1500.0) or 1500.0)
-                            new_taux_horaire = st.number_input("Taux Horaire (FCFA)", value=current_taux, step=500.0, key=f"edit_taux_{prof.id}")
-                        with col_edit_sal2:
-                            current_salaire = float(getattr(prof, "salaire_base", 0.0) or 0.0)
-                            new_salaire_base = st.number_input("Salaire de base (FCFA)", value=current_salaire, step=1000.0, key=f"edit_sal_{prof.id}")
+                        new_matieres = st.multiselect("Matières dispensées", options=opt_matieres, default=[m for m in current_matieres if m in opt_matieres], key=f"edit_mats_{prof.id}")
 
                         col_btn1, col_btn2 = st.columns(2)
                         with col_btn1:
-                            submit_edit = st.button("💾 Enregistrer les modifications", type="primary", key=f"save_edit_{prof.id}")
+                            submit_edit = st.button("💾 Enregistrer", type="primary", key=f"save_edit_{prof.id}")
                         with col_btn2:
                             cancel_edit = st.button("Annuler", key=f"cancel_edit_{prof.id}")
 
                         if submit_edit:
-                            ancienne_val = f"Classes: {classes_str_actuelle} | Matières: {matieres_str_actuelle}"
-                            
-                            str_classes_new = ", ".join(new_classes) if new_classes else "Aucune"
-                            str_matieres_new = ", ".join(new_matieres) if new_matieres else "Aucune"
-                            nouvelle_val = f"Classes: {str_classes_new} | Matières: {str_matieres_new}"
-
                             prof.nom = new_nom.upper()
                             prof.prenom = new_prenom
                             prof.telephone = new_tel
                             if hasattr(prof, "email"):
                                 prof.email = new_email
-                            
-                            if hasattr(prof, "taux_horaire"):
-                                prof.taux_horaire = new_taux_horaire
-                            if hasattr(prof, "salaire_base"):
-                                prof.salaire_base = new_salaire_base
-
+                            str_classes_new = ", ".join(new_classes) if new_classes else "Aucune"
+                            str_matieres_new = ", ".join(new_matieres) if new_matieres else "Aucune"
                             if hasattr(prof, "classes_attribuees"):
                                 prof.classes_attribuees = str_classes_new
                             if hasattr(prof, "classes"):
@@ -320,165 +236,81 @@ def afficher_enseignants():
                                 prof.matieres_attribuees = str_matieres_new
                             if hasattr(prof, "matieres"):
                                 prof.matieres = str_matieres_new
-
                             db.commit()
-
-                            log_action_erp(
-                                module="Enseignants",
-                                action=f"Modification des affectations de {new_nom.upper()} {new_prenom}",
-                                statut="Critique",
-                                valeur_avant=ancienne_val,
-                                valeur_apres=nouvelle_val,
-                            )
-
-                            st.success("Profil enseignant mis à jour et tracé avec succès !")
+                            st.success("Mis à jour avec succès !")
                             st.session_state[f"editing_prof_{prof.id}"] = False
                             st.rerun()
-                            
+
                         if cancel_edit:
                             st.session_state[f"editing_prof_{prof.id}"] = False
                             st.rerun()
-                        
-                    st.markdown("<hr style='margin: 0.2rem 0; border-color: rgba(255,255,255,0.05);'>", unsafe_allow_html=True)
 
         with tab_ajout:
-            st.markdown(f"### Enregistrement d'un Nouvel Enseignant — **{school_name} ({cycle_en_cours})**")
-
-            if "nouveau_prof" in st.session_state:
-                info = st.session_state["nouveau_prof"]
-                st.success(f"✅ Compte utilisateur créé avec succès pour **{info['nom_prof']}** !")
-                
-                if info["telephone"]:
-                    lien_wa = generer_lien_whatsapp_prof(
-                        info["telephone"], info["nom_prof"], info["username"], info["password"]
-                    )
-                    st.link_button("📱 Envoyer les identifiants au Professeur via WhatsApp", url=lien_wa, type="primary", use_container_width=True)
-                else:
-                    st.warning("⚠️ Aucun numéro de téléphone renseigné. Vous devez transmettre ces identifiants manuellement :")
-                    st.info(f"**Utilisateur** : {info['username']} | **Mot de passe** : {info['password']}")
-                
-                if st.button("➕ Inscrire un autre enseignant"):
-                    del st.session_state["nouveau_prof"]
-                    st.rerun()
-                
-                st.markdown("---")
-
+            st.markdown(f"### Enregistrement — **{school_name} ({cycle_en_cours})**")
             if not classes_cycle:
-                st.warning(f"⚠️ Veuillez d'abord configurer des classes pour le cycle **{cycle_en_cours}**.")
+                st.warning(f"⚠️ Veuillez configurer des classes pour le cycle **{cycle_en_cours}**.")
             else:
                 with st.form("form_ajout_enseignant", clear_on_submit=False):
                     col_a1, col_a2 = st.columns(2)
                     with col_a1:
-                        nom_prof = st.text_input("Nom de l'enseignant *", key="add_nom")
-                        email_prof = st.text_input("Adresse Email", key="add_email")
+                        nom_prof = st.text_input("Nom *", key="add_nom")
+                        email_prof = st.text_input("Email", key="add_email")
                     with col_a2:
-                        prenom_prof = st.text_input("Prénom de l'enseignant *", key="add_prenom")
-                        tel_prof = st.text_input("Numéro de Téléphone (Format WhatsApp)", key="add_tel")
+                        prenom_prof = st.text_input("Prénom *", key="add_prenom")
+                        tel_prof = st.text_input("Téléphone (WhatsApp)", key="add_tel")
 
-                    st.markdown("#### Affectations Pédagogiques")
-                    classes_attribuees = st.multiselect(
-                        "Classes tenues par l'enseignant", noms_classes, key="add_classes"
-                    )
-                    
+                    classes_attribuees = st.multiselect("Classes", noms_classes, key="add_classes")
                     dyn_mats_add = get_matieres_dynamiques(classes_attribuees, classes_cycle, ecole_active_id, cycle_en_cours, db)
+                    matieres_attribuees = st.multiselect("Matières", dyn_mats_add, key="add_matieres")
 
-                    matieres_attribuees = st.multiselect(
-                        "Matières dispensées", dyn_mats_add, key="add_matieres"
-                    )
-
-                    st.markdown("#### Informations Salariales")
-                    col_sal1, col_sal2 = st.columns(2)
-                    with col_sal1:
-                        taux_horaire = st.number_input("Taux Horaire (FCFA / heure)", min_value=0.0, step=500.0, value=1500.0, key="add_taux")
-                    with col_sal2:
-                        salaire_base = st.number_input("Salaire de base (si permanent) (FCFA)", min_value=0.0, step=1000.0, key="add_sal")
-
-                    submitted_prof = st.form_submit_button("💾 Enregistrer & Créer le compte", type="primary")
-                    
+                    submitted_prof = st.form_submit_button("💾 Enregistrer", type="primary")
                     if submitted_prof:
                         if not nom_prof.strip() or not prenom_prof.strip():
-                            st.error("⚠️ Le nom et le prénom de l'enseignant sont obligatoires.")
+                            st.error("⚠️ Nom et prénom obligatoires.")
                         else:
-                            doublon_existant = (
-                                db.query(Enseignant)
-                                .filter(
-                                    Enseignant.school_id == ecole_active_id,
-                                    Enseignant.nom == nom_prof.strip().upper(),
-                                    Enseignant.prenom == prenom_prof.strip(),
+                            try:
+                                nouvel_enseignant = Enseignant(
+                                    school_id=ecole_active_id,
+                                    nom=nom_prof.strip().upper(),
+                                    prenom=prenom_prof.strip(),
+                                    telephone=tel_prof.strip() if tel_prof else None
                                 )
-                                .first()
-                            )
-                            if doublon_existant:
-                                st.error(
-                                    f"⚠️ Un enseignant nommé **{nom_prof.upper()} {prenom_prof}** est déjà enregistré dans cet établissement."
-                                )
-                            else:
                                 str_classes = ", ".join(classes_attribuees) if classes_attribuees else "Aucune"
                                 str_matieres = ", ".join(matieres_attribuees) if matieres_attribuees else "Aucune"
+                                if hasattr(nouvel_enseignant, "classes_attribuees"):
+                                    nouvel_enseignant.classes_attribuees = str_classes
+                                if hasattr(nouvel_enseignant, "classes"):
+                                    nouvel_enseignant.classes = str_classes
+                                if hasattr(nouvel_enseignant, "matieres_attribuees"):
+                                    nouvel_enseignant.matieres_attribuees = str_matieres
+                                if hasattr(nouvel_enseignant, "matieres"):
+                                    nouvel_enseignant.matieres = str_matieres
 
-                                try:
-                                    nouvel_enseignant = Enseignant(
-                                        school_id=ecole_active_id,
-                                        nom=nom_prof.strip().upper(),
-                                        prenom=prenom_prof.strip(),
-                                        telephone=tel_prof.strip() if tel_prof else None,
-                                        taux_horaire=taux_horaire,
-                                        salaire_base=salaire_base
-                                    )
+                                db.add(nouvel_enseignant)
+                                db.flush()
 
-                                    if hasattr(nouvel_enseignant, "email"):
-                                        nouvel_enseignant.email = email_prof.strip() if email_prof else None
-                                    if hasattr(nouvel_enseignant, "classes_attribuees"):
-                                        nouvel_enseignant.classes_attribuees = str_classes
-                                    if hasattr(nouvel_enseignant, "classes"):
-                                        nouvel_enseignant.classes = str_classes
-                                    if hasattr(nouvel_enseignant, "matieres_attribuees"):
-                                        nouvel_enseignant.matieres_attribuees = str_matieres
-                                    if hasattr(nouvel_enseignant, "matieres"):
-                                        nouvel_enseignant.matieres = str_matieres
+                                password_genere = ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(8))
+                                username_prof = f"prof_{nom_prof.strip().lower().replace(' ', '')}{random.randint(10, 99)}"
 
-                                    db.add(nouvel_enseignant)
-                                    db.flush()
+                                nouveau_user_prof = User(
+                                    username=username_prof,
+                                    password=generate_password_hash(password_genere),
+                                    role="enseignant",
+                                    school_id=ecole_active_id
+                                )
+                                if hasattr(nouveau_user_prof, "enseignant_id"):
+                                    nouveau_user_prof.enseignant_id = nouvel_enseignant.id
 
-                                    caracteres = string.ascii_letters + string.digits
-                                    password_genere = ''.join(random.choice(caracteres) for i in range(8))
-                                    username_prof = f"prof_{nom_prof.strip().lower().replace(' ', '')}{random.randint(10, 99)}"
-
-                                    nouveau_user_prof = User(
-                                        username=username_prof,
-                                        password=generate_password_hash(password_genere),
-                                        role="enseignant",
-                                        school_id=ecole_active_id
-                                    )
-                                    if hasattr(nouveau_user_prof, "enseignant_id"):
-                                        nouveau_user_prof.enseignant_id = nouvel_enseignant.id
-                                        
-                                    db.add(nouveau_user_prof)
-                                    db.commit()
-
-                                    log_action_erp(
-                                        module="Enseignants",
-                                        action=f"Enregistrement de l'enseignant {nom_prof.strip().upper()} {prenom_prof.strip()} + Création Compte",
-                                        statut="Succès",
-                                        valeur_avant="Inexistant",
-                                        valeur_apres=f"Affecté à {len(classes_attribuees)} classe(s)",
-                                    )
-                                    
-                                    st.session_state["nouveau_prof"] = {
-                                        "telephone": tel_prof.strip(),
-                                        "nom_prof": f"{nom_prof.strip().upper()} {prenom_prof.strip()}",
-                                        "username": username_prof,
-                                        "password": password_genere
-                                    }
-                                    st.rerun()
-
-                                except Exception as e:
-                                    db.rollback()
-                                    st.error(f"Erreur technique lors de la création de l'enseignant : {e}")
-
+                                db.add(nouveau_user_prof)
+                                db.commit()
+                                st.success("✅ Enseignant enregistré avec succès !")
+                                st.rerun()
+                            except Exception as e:
+                                db.rollback()
+                                st.error(f"Erreur : {e}")
     finally:
         db.close()
 
-
 afficher_gestion_enseignants = afficher_enseignants
 afficher_enseignants = afficher_enseignants
+afficher_espace_enseignant = afficher_enseignants
