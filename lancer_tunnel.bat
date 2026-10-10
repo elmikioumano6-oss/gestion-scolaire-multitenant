@@ -25,9 +25,10 @@ if %errorlevel% neq 0 (
 echo.
 echo [1/2] Lancement du tunnel SSH persistant vers le serveur distant...
 :: -C active la compression du trafic pour accélérer les requêtes de la base de données
-:: -o ServerAliveInterval=60 envoie un signal toutes les 60s pour empêcher la coupure par inactivité
-:: -o ServerAliveCountMax=3 relance si le serveur ne répond plus
-start cmd /k "title Tunnel SSH PostgreSQL & ssh -C -N -o ServerAliveInterval=60 -o ServerAliveCountMax=3 -L 5432:localhost:5432 root@72.62.147.14"
+:: -o ServerAliveInterval=15 envoie un signal toutes les 15s pour empêcher la coupure par inactivité
+:: -o ServerAliveCountMax=5 nombre d'essais avant de considérer la connexion perdue
+:: -o TCPKeepAlive=yes maintient la couche TCP active
+start cmd /k "title Tunnel SSH PostgreSQL & ssh -C -N -o ServerAliveInterval=15 -o ServerAliveCountMax=5 -o TCPKeepAlive=yes -L 5432:localhost:5432 root@72.62.147.14"
 
 echo [2/2] Attente de 3 secondes pour l'etablissement du tunnel...
 timeout /t 3 /nobreak > nul

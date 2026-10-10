@@ -41,10 +41,8 @@ def normaliser_chaine(texte):
 
 
 def afficher_supervision_cahier():
-    # --- Injection CSS pour un design Premium & Impression ---
     st.markdown("""
     <style>
-        /* Design Premium (Écran) */
         .audit-card {
             background: linear-gradient(135deg, #141e30 0%, #243b55 100%);
             border-radius: 12px;
@@ -54,7 +52,7 @@ def afficher_supervision_cahier():
             margin-bottom: 25px;
             display: flex;
             align-items: center;
-            border-left: 5px solid #d4af37; /* Liseré doré officiel */
+            border-left: 5px solid #d4af37;
         }
         .audit-card h2 { margin: 0; color: #ffffff; font-weight: 600; font-size: 1.8rem; padding-bottom: 5px; }
         .audit-card p { margin: 0; opacity: 0.9; font-size: 1rem; color: #e2e8f0; }
@@ -65,24 +63,18 @@ def afficher_supervision_cahier():
             padding: 15px 20px;
             margin-bottom: 20px;
         }
-        
-        /* Design Impression */
         @media print {
             body { background-color: white !important; color: black !important; }
             .stButton, .stSelectbox, sidebar, header, footer, [data-testid="stSidebar"], .filter-box { display: none !important; }
             .printable-area { width: 100% !important; padding: 10px !important; margin: 0 !important; }
             .audit-card { background: white !important; color: black !important; border: 2px solid black; border-left: none; box-shadow: none; }
             .audit-card h2, .audit-card p { color: black !important; }
-            .print-footer { position: fixed; bottom: 0; left: 0; right: 0; text-align: center; font-size: 8pt; border-top: 1px solid #ccc; padding-top: 8px; color: #333; background-color: white; }
         }
     </style>
     """, unsafe_allow_html=True)
 
     st.markdown("## 📋 Contrôle d'Inspection Pédagogique & Registre Officiel")
-    st.markdown(
-        "Portail officiel d'audit aux normes internationales (SIA) pour la"
-        " direction, le censeur et les inspecteurs."
-    )
+    st.markdown("Portail officiel d'audit aux normes internationales (SIA) pour la direction, le censeur et les inspecteurs.")
     st.markdown("---")
 
     school_id = st.session_state.get("school_id")
@@ -103,38 +95,19 @@ def afficher_supervision_cahier():
 
         resolved_school_id = school_id if school_id else target_school_id
 
-        ecole_courante = (
-            db.query(School).filter(School.id == resolved_school_id).first()
-        )
-        school_name = (
-            ecole_courante.nom
-            if ecole_courante
-            else st.session_state.get("school_name", "Établissement")
-        )
-        school_devise = (
-            ecole_courante.devise
-            if ecole_courante
-            else "Excellence - Persévérance - Réussite"
-        )
-        school_adresse = (
-            ecole_courante.adresse
-            if ecole_courante and ecole_courante.adresse
-            else "Niamey - Niger"
-        )
+        ecole_courante = db.query(School).filter(School.id == resolved_school_id).first()
+        school_name = ecole_courante.nom if ecole_courante else st.session_state.get("school_name", "Établissement")
+        school_devise = ecole_courante.devise if ecole_courante else "Excellence - Persévérance - Réussite"
+        school_adresse = ecole_courante.adresse if ecole_courante and ecole_courante.adresse else "Niamey - Niger"
 
-        annee_active = (
-            db.query(AnneeScolaire)
-            .filter(
-                AnneeScolaire.school_id == resolved_school_id,
-                AnneeScolaire.active == True,
-            )
-            .first()
-        )
+        annee_active = db.query(AnneeScolaire).filter(
+            AnneeScolaire.school_id == resolved_school_id,
+            AnneeScolaire.active == True,
+        ).first()
         libelle_annee = annee_active.libelle if annee_active else "2026-2027"
 
         st.markdown('<div class="printable-area">', unsafe_allow_html=True)
         
-        # --- 1. Carte Audit (Header Officiel) ---
         st.markdown(f"""
             <div class="audit-card">
                 <div style="font-size: 3.5rem; margin-right: 25px;">🏛️</div>
@@ -145,80 +118,43 @@ def afficher_supervision_cahier():
             </div>
         """, unsafe_allow_html=True)
 
-        classes_cycle = (
-            db.query(Classe)
-            .filter(
-                Classe.cycle == cycle_en_cours,
-                Classe.school_id == resolved_school_id,
-            )
-            .all()
-        )
+        classes_cycle = db.query(Classe).filter(
+            Classe.school_id == resolved_school_id,
+        ).all()
 
         if not classes_cycle:
-            st.warning(
-                f"⚠️ Aucune classe enregistrée pour le cycle **{cycle_en_cours}**."
-            )
+            st.warning(f"⚠️ Aucune classe enregistrée pour cet établissement.")
             st.markdown("</div>", unsafe_allow_html=True)
             return
 
-        # --- 2. Panneau de Filtres ---
         st.markdown('<div class="filter-box">', unsafe_allow_html=True)
         col_f1, col_f2 = st.columns(2)
         with col_f1:
-            noms_classes = [
-                c.libelle or getattr(c, "nom", f"Classe {c.id}")
-                for c in classes_cycle
-            ]
-            classe_suivie = st.selectbox(
-                "Sélectionner la classe à inspecter",
-                noms_classes,
-                key="sup_classe_select",
-            )
+            noms_classes = [c.libelle or getattr(c, "nom", f"Classe {c.id}") for c in classes_cycle]
+            classe_suivie = st.selectbox("Sélectionner la classe à inspecter", noms_classes, key="sup_classe_select")
         with col_f2:
-            periode_inspection = st.selectbox(
-                "Période d'évaluation / Semestre",
-                [
-                    "Année complète",
-                    "Semestre 1",
-                    "Semestre 2",
-                ],
-                key="sup_periode_select",
-            )
+            periode_inspection = st.selectbox("Période d'évaluation / Semestre", ["Année complète", "Semestre 1", "Semestre 2"], key="sup_periode_select")
         st.markdown('</div>', unsafe_allow_html=True)
 
-        classe_obj = next(
-            (
-                c
-                for c in classes_cycle
-                if (c.libelle or getattr(c, "nom", f"Classe {c.id}"))
-                == classe_suivie
-            ),
-            None,
-        )
+        classe_obj = next((c for c in classes_cycle if (c.libelle or getattr(c, "nom", f"Classe {c.id}")) == classe_suivie), None)
         
         if not classe_obj:
             st.warning("⚠️ Classe sélectionnée invalide.")
             st.markdown("</div>", unsafe_allow_html=True)
             return
 
-        # --- RÉCUPÉRATION STRICTE DES MATIÈRES DE LA CLASSE SÉLECTIONNÉE ---
         matieres_query = db.query(Matiere).filter(
             Matiere.classe_id == classe_obj.id,
             Matiere.school_id == resolved_school_id,
         )
         if hasattr(Matiere, "deleted_at"):
             matieres_query = matieres_query.filter(Matiere.deleted_at.is_(None))
-        
         matieres_classe = matieres_query.all()
 
-        all_programmes = db.query(Programme).filter(
-            Programme.school_id == resolved_school_id
-        ).all()
+        all_programmes = db.query(Programme).filter(Programme.school_id == resolved_school_id).all()
 
         if not matieres_classe:
-            st.info(
-                f"Aucune matière configurée pour la classe de **{classe_suivie}**."
-            )
+            st.info(f"Aucune matière configurée pour la classe de **{classe_suivie}**.")
             st.markdown("</div>", unsafe_allow_html=True)
             return
 
@@ -232,17 +168,19 @@ def afficher_supervision_cahier():
         data_suivi = []
         is_college = cycle_en_cours.lower() in ["collège", "college"]
         
-        # Variables pour les KPIs globaux
         total_heures_prevues_globale = 0.0
         total_heures_realisees_globale = 0.0
+
+        # Récupération de TOUTES les entrées du cahier de texte de l'établissement
+        toutes_entrees_ecole = db.query(CahierTexte).filter(
+            CahierTexte.school_id == resolved_school_id,
+        ).all()
 
         for mat in matieres_classe:
             mat_lib = mat.libelle if hasattr(mat, "libelle") and mat.libelle else getattr(mat, "nom", "Matière")
             norm_key = normaliser_chaine(mat_lib)
 
             heures_prevues = 0.0
-            
-            # Application de la même logique croisée stricte
             if not is_college:
                 prog_obj = None
                 for p in all_programmes:
@@ -251,23 +189,18 @@ def afficher_supervision_cahier():
                     if p_nom == norm_key and (libelle_classe_norm in texte_ligne):
                         prog_obj = p
                         break
-                
                 if not prog_obj:
                     for p in all_programmes:
                         p_nom = normaliser_chaine(getattr(p, 'nom_matiere', getattr(p, 'matiere', '')))
                         if p_nom == norm_key:
                             prog_obj = p
                             break
-
                 heures_prevues = float(prog_obj.volume_horaire) if prog_obj and prog_obj.volume_horaire else float(getattr(mat, "volume_horaire", 0) or 0)
             else:
                 prog_classe = next(
-                    (p for p in all_programmes 
-                     if normaliser_chaine(getattr(p, 'nom_matiere', '')) == norm_key 
-                     and (not niveau_cible or normaliser_chaine(niveau_cible) in normaliser_chaine(getattr(p, 'code_matiere', '')))),
+                    (p for p in all_programmes if normaliser_chaine(getattr(p, 'nom_matiere', '')) == norm_key and (not niveau_cible or normaliser_chaine(niveau_cible) in normaliser_chaine(getattr(p, 'code_matiere', '')))),
                     None
                 )
-
                 if prog_classe and prog_classe.volume_horaire and prog_classe.volume_horaire > 0:
                     heures_prevues = prog_classe.volume_horaire
                 else:
@@ -289,76 +222,50 @@ def afficher_supervision_cahier():
             else:
                 heures_prevues_periode = heures_prevues
 
-            # --- FILTRE DES SÉANCES STRICTEMENT POUR CETTE CLASSE ET CETTE MATIÈRE ---
-            entrees_query = db.query(CahierTexte).filter(
-                CahierTexte.school_id == resolved_school_id,
-                CahierTexte.classe_id == classe_obj.id,
-                CahierTexte.matiere_id == mat.id,
-            )
+            # CORRECTION SANS ERREUR D'ATTRIBUT : Utilisation sécurisée de l'auteur et des liaisons
+            entrees_cahier = []
+            for e in toutes_entrees_ecole:
+                e_classe_id = getattr(e, 'classe_id', None)
+                appartient_classe = (e_classe_id == classe_obj.id)
+                if not appartient_classe and e_classe_id:
+                    cls_entree = db.query(Classe).filter(Classe.id == e_classe_id).first()
+                    if cls_entree and normaliser_chaine(cls_entree.libelle) == libelle_classe_norm:
+                        appartient_classe = True
 
-            entrees_cahier = entrees_query.all()
+                if appartient_classe:
+                    e_mat_id = getattr(e, 'matiere_id', None)
+                    matiere_entree = db.query(Matiere).filter(Matiere.id == e_mat_id).first() if e_mat_id else None
+                    nom_matiere_entree = normaliser_chaine(getattr(matiere_entree, 'libelle', None) or getattr(matiere_entree, 'nom', '')) if matiere_entree else ""
+                    texte_entree = normaliser_chaine(f"{getattr(e, 'titre', '')} {getattr(e, 'contenu', '')}")
 
-            entrees_filtrees = []
-            for e in entrees_cahier:
-                date_seance = getattr(e, "date_seance", None) or getattr(e, "date", None)
-                if date_seance:
-                    if isinstance(date_seance, str):
-                        try:
-                            date_obj = datetime.strptime(date_seance[:10], "%Y-%m-%d")
-                        except Exception:
-                            date_obj = None
-                    else:
-                        date_obj = date_seance
-
-                    if date_obj and periode_inspection != "Année complète":
-                        mois = date_obj.month
-                        is_s1 = mois in [9, 10, 11, 12, 1, 2]
-                        if periode_inspection == "Semestre 1" and is_s1:
-                            entrees_filtrees.append(e)
-                        elif periode_inspection == "Semestre 2" and not is_s1:
-                            entrees_filtrees.append(e)
-                    else:
-                        entrees_filtrees.append(e)
-                else:
-                    entrees_filtrees.append(e)
+                    if (e_mat_id == mat.id) or (nom_matiere_entree == norm_key) or (norm_key in texte_entree) or (e_mat_id is None):
+                        entrees_cahier.append(e)
 
             heures_realisees = 0.0
-            for e in entrees_filtrees:
-                duree_str = getattr(e, "duree_seance", "1 heure")
-                try:
-                    val_duree = float(duree_str.split()[0])
-                except Exception:
-                    val_duree = 1.0
-                heures_realisees += val_duree
-                
-            # Ajout aux KPIs globaux
+            for e in entrees_cahier:
+                duree_val = float(getattr(e, 'duree', 0.0) or 0.0)
+                if duree_val > 0:
+                    heures_realisees += duree_val
+                else:
+                    d_str = str(getattr(e, "duree_seance", "1 heure"))
+                    try:
+                        chiffre = float("".join(filter(str.isdigit, d_str)) or 1)
+                        heures_realisees += chiffre
+                    except Exception:
+                        heures_realisees += 1.0
+
             total_heures_prevues_globale += heures_prevues_periode
             total_heures_realisees_globale += heures_realisees
 
-            progression_pct = (
-                round((heures_realisees / heures_prevues_periode) * 100, 1)
-                if heures_prevues_periode > 0
-                else 0.0
-            )
+            progression_pct = round((heures_realisees / heures_prevues_periode) * 100, 1) if heures_prevues_periode > 0 else 0.0
             if progression_pct > 100.0:
                 progression_pct = 100.0
 
-            if entrees_filtrees:
-                dernier_cours = entrees_filtrees[-1]
+            if entrees_cahier:
+                dernier_cours = entrees_cahier[-1]
                 contenu_cours = getattr(dernier_cours, "contenu", "") or ""
-                dernier_chapitre = (
-                    contenu_cours[:60] + "..."
-                    if len(contenu_cours) > 60
-                    else (contenu_cours if contenu_cours else "N/D")
-                )
-                enseignant_ref = (
-                    getattr(
-                        getattr(dernier_cours, "enseignant_user", None),
-                        "username",
-                        getattr(dernier_cours, "auteur_saisie", "Corps professoral"),
-                    )
-                    or "Corps professoral"
-                )
+                dernier_chapitre = contenu_cours[:60] + "..." if len(contenu_cours) > 60 else (contenu_cours if contenu_cours else "N/D")
+                enseignant_ref = getattr(dernier_cours, "auteur_saisie", "Corps professoral") or "Corps professoral"
             else:
                 dernier_chapitre = "Aucun cours enregistré"
                 enseignant_ref = "Non assigné"
@@ -384,7 +291,6 @@ def afficher_supervision_cahier():
                 "Appréciation Inspection": appreciation,
             })
             
-        # --- 3. Affichage des KPIs Dynamiques avant le tableau ---
         taux_global_classe = (total_heures_realisees_globale / total_heures_prevues_globale * 100) if total_heures_prevues_globale > 0 else 0.0
         
         st.markdown("#### 📊 Synthèse Globale de la Classe")
@@ -394,7 +300,6 @@ def afficher_supervision_cahier():
         col_k3.metric("Taux d'Exécution Moyen", f"{taux_global_classe:.1f} %")
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # Boutons d'action
         col_btn1, col_btn2 = st.columns([1, 1])
         with col_btn1:
             components.html(
@@ -421,6 +326,5 @@ def afficher_supervision_cahier():
         st.markdown("</div>", unsafe_allow_html=True)
     finally:
         db.close()
-
 
 afficher_supervision_cahier = afficher_supervision_cahier

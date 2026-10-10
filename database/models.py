@@ -395,3 +395,4 @@ class Depense(Base):
     categorie = Column(String(100), nullable=False)
     date_depense = Column(DateTime, default=datetime.now)
     auteur = Column(String(100), nullable=True)
+    reference_piece = Column(String(100), nullable=True)

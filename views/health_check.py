@@ -15,10 +15,22 @@ def afficher_health_check():
             db.execute(text("SELECT 1"))
             st.success("✅ Connexion à la base de données PostgreSQL distante établie avec succès.")
 
-            # Comptage des entités pour vérifier l'isolation multi-tenant
-            nb_ecoles = db.query(School).count()
-            nb_utilisateurs = db.query(User).count()
-            nb_eleves = db.query(Eleve).count()
+            # Comptage des entités actives et non supprimées (avec jointure pour les utilisateurs et élèves)
+            nb_ecoles = db.query(School).filter(School.actif == True, School.deleted_at.is_(None)).count()
+            
+            nb_utilisateurs = (
+                db.query(User)
+                .join(School, User.school_id == School.id)
+                .filter(School.actif == True, School.deleted_at.is_(None))
+                .count()
+            )
+            
+            nb_eleves = (
+                db.query(Eleve)
+                .join(School, Eleve.school_id == School.id)
+                .filter(School.actif == True, School.deleted_at.is_(None))
+                .count()
+            )
 
             col1, col2, col3 = st.columns(3)
             col1.metric("Établissements", nb_ecoles)

@@ -90,18 +90,8 @@ def afficher_depenses():
                         mois_concerne = st.selectbox(
                             "Mois de référence (Paie)",
                             [
-                                "Janvier",
-                                "Février",
-                                "Mars",
-                                "Avril",
-                                "Mai",
-                                "Juin",
-                                "Juillet",
-                                "Août",
-                                "Septembre",
-                                "Octobre",
-                                "Novembre",
-                                "Décembre",
+                                "Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
+                                "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"
                             ],
                             index=datetime.now().month - 1,
                         )
@@ -128,7 +118,7 @@ def afficher_depenses():
                     if submitted_acompte:
                         ref_clean = ref_piece.strip()
                         libelle_final = f"Acompte sur salaire - {beneficiaire_acompte} (Mois : {mois_concerne})"
-                        categorie_final = "Acomptes Salaires"
+                        categorie_final = "Salaires Fixes & Personnel"
 
                         if not beneficiaire_acompte.strip() or montant_acompte <= 0:
                             st.error("⚠️ Veuillez renseigner le nom du bénéficiaire et un montant supérieur à zéro.")
@@ -153,7 +143,6 @@ def afficher_depenses():
                                     montant=montant_acompte,
                                     categorie=categorie_final,
                                     reference_piece=ref_clean,
-                                    mode_paiement=mode_paiement,
                                     date_depense=datetime.combine(
                                         date_depense, datetime.now().time()
                                     ),
@@ -171,7 +160,105 @@ def afficher_depenses():
                                 st.success(f"✅ Acompte de {formater_fcfa(montant_acompte)} FCFA enregistré avec succès pour **{beneficiaire_acompte}** sous la référence **{ref_clean}** !")
                                 st.rerun()
 
-            # --- CAS 2 : SALAIRE VACATION ---
+            # --- CAS 2 : SALAIRE FIXE (PERMANENT / ADMIN) ---
+            elif type_saisie == "Salaire Fixe (Permanent / Admin)":
+                with st.form("form_add_salaire_fixe"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        beneficiaire = st.text_input("Nom et Prénom du Bénéficiaire *")
+                        fonction_poste = st.selectbox(
+                            "Fonction / Poste",
+                            [
+                                "Directeur",
+                                "Proviseur",
+                                "Censeur",
+                                "Surveillant Général",
+                                "Enseignant Permanent",
+                                "Secrétaire / Économe",
+                                "Personnel d'appui / Gardien",
+                            ],
+                        )
+                        montant_fixe = st.number_input(
+                            "Salaire Net Mensuel (FCFA) *",
+                            min_value=0.0,
+                            step=5000.0,
+                            value=0.0,
+                        )
+                    with col2:
+                        mois_concerne = st.selectbox(
+                            "Mois de paie",
+                            [
+                                "Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
+                                "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"
+                            ],
+                            index=8, # Septembre par défaut
+                        )
+                        ref_piece = st.text_input(
+                            "N° de Bon de Caisse / Référence de paie *",
+                            placeholder="Ex: SAL-FIX-SEP-001",
+                        )
+                        mode_paiement = st.selectbox(
+                            "Mode de décaissement",
+                            [
+                                "Espèces (Caisse)",
+                                "Virement Bancaire",
+                                "Mobile Money (Orange/Moov)",
+                            ],
+                        )
+                        date_depense = st.date_input(
+                            "Date du versement", value=datetime.now()
+                        )
+
+                    submitted_fixe = st.form_submit_button(
+                        "💾 Valider et Enregistrer le Salaire Fixe", type="primary"
+                    )
+                    if submitted_fixe:
+                        ref_clean = ref_piece.strip()
+                        libelle_final = f"Salaire Fixe [{fonction_poste}] - {beneficiaire} (Mois : {mois_concerne})"
+                        montant_final = montant_fixe
+                        categorie_final = "Salaires Fixes & Personnel"
+
+                        if not beneficiaire.strip() or montant_final <= 0:
+                            st.error("⚠️ Veuillez renseigner le nom du bénéficiaire et un montant supérieur à zéro.")
+                        elif not ref_clean:
+                            st.error("⚠️ Le numéro de bon de caisse ou la référence est obligatoire.")
+                        else:
+                            doublon_piece = (
+                                db.query(Depense)
+                                .filter(
+                                    Depense.school_id == target_school_id,
+                                    Depense.reference_piece == ref_clean,
+                                )
+                                .first()
+                            )
+                            if doublon_piece:
+                                st.error(f"⚠️ La référence '{ref_clean}' existe déjà dans le système.")
+                            else:
+                                nouvelle_depense = Depense(
+                                    school_id=target_school_id,
+                                    cycle=cycle_en_cours,
+                                    libelle=libelle_final,
+                                    montant=montant_final,
+                                    categorie=categorie_final,
+                                    reference_piece=ref_clean,
+                                    date_depense=datetime.combine(
+                                        date_depense, datetime.now().time()
+                                    ),
+                                    auteur=username_connecte,
+                                )
+                                db.add(nouvelle_depense)
+                                log_action_erp(
+                                    module="Gestion des Dépenses & Salaires",
+                                    action=f"Décaissement [{categorie_final}] : {libelle_final} ({formater_fcfa(montant_final)} FCFA) - Réf: {ref_clean}",
+                                    statut="Critique",
+                                    valeur_avant="0 FCFA",
+                                    valeur_apres=f"{formater_fcfa(montant_final)} FCFA",
+                                )
+                                db.commit()
+                                st.success(f"✅ Salaire fixe de {formater_fcfa(montant_final)} FCFA enregistré avec succès pour **{beneficiaire}** sous la référence **{ref_clean}** !")
+                                st.rerun()
+
+            # --- CAS 3 : SALAIRE VACATION (HORAIRE) ---
             elif type_saisie == "Salaire Vacation (Horaire)":
                 col1, col2 = st.columns(2)
                 with col1:
@@ -280,7 +367,7 @@ def afficher_depenses():
                         ref_clean = ref_piece.strip()
                         libelle_final = f"Salaire Vacation ({cycle_vacation}) - {enseignant_concerne} ({nombre_heures}h @ {formater_fcfa(taux_horaire)}F)"
                         montant_final = montant_calcule
-                        categorie_final = "Salaires & Vacations"
+                        categorie_final = "Salaires Fixes & Personnel"
 
                         if montant_final <= 0:
                             st.error(
@@ -313,7 +400,6 @@ def afficher_depenses():
                                     montant=montant_final,
                                     categorie=categorie_final,
                                     reference_piece=ref_clean,
-                                    mode_paiement=mode_paiement,
                                     date_depense=datetime.combine(
                                         date_depense, datetime.now().time()
                                     ),
@@ -342,123 +428,49 @@ def afficher_depenses():
                                 )
                                 st.rerun()
 
-            # --- CAS 3 : SALAIRE FIXE OU DÉPENSE CLASSIQUE ---
+            # --- CAS 4 : DÉPENSE OPÉRATIONNELLE CLASSIQUE ---
             else:
                 with st.form("form_add_depense_classique"):
                     col1, col2 = st.columns(2)
-                    if type_saisie == "Salaire Fixe (Permanent / Admin)":
-                        with col1:
-                            beneficiaire = st.text_input(
-                                "Nom et Prénom du Bénéficiaire *"
-                            )
-                            fonction_poste = st.selectbox(
-                                "Fonction / Poste",
-                                [
-                                    "Directeur",
-                                    "Proviseur",
-                                    "Censeur",
-                                    "Surveillant Général",
-                                    "Enseignant Permanent",
-                                    "Secrétaire / Économe",
-                                    "Personnel d'appui / Gardien",
-                                ],
-                            )
-                            montant_fixe = st.number_input(
-                                "Salaire Net Mensuel (FCFA) *",
-                                min_value=0.0,
-                                step=5000.0,
-                                value=0.0,
-                            )
-                        with col2:
-                            mois_concerne = st.selectbox(
-                                "Mois de paie",
-                                [
-                                    "Janvier",
-                                    "Février",
-                                    "Mars",
-                                    "Avril",
-                                    "Mai",
-                                    "Juin",
-                                    "Juillet",
-                                    "Août",
-                                    "Septembre",
-                                    "Octobre",
-                                    "Novembre",
-                                    "Décembre",
-                                ],
-                            )
-                            ref_piece = st.text_input(
-                                "N° de Bon de Caisse / Référence de paie *",
-                                placeholder="Ex: SAL-FIXE-OCT-001",
-                            )
-                            mode_paiement = st.selectbox(
-                                "Mode de décaissement",
-                                [
-                                    "Espèces (Caisse)",
-                                    "Virement Bancaire",
-                                    "Mobile Money (Orange/Moov)",
-                                ],
-                            )
-                            date_depense = st.date_input(
-                                "Date du versement", value=datetime.now()
-                            )
-
-                        libelle_final = f"Salaire Fixe [{fonction_poste}] - {beneficiaire} (Mois : {mois_concerne})"
-                        montant_final = montant_fixe
-                        categorie_final = "Salaires Fixes & Personnel"
-
-                    else:
-                        with col1:
-                            libelle_depense = st.text_input(
-                                "Libellé / Motif de la dépense *",
-                                placeholder=(
-                                    "Ex: Achat de fournitures pédagogiques"
-                                ),
-                            )
-                            montant = st.number_input(
-                                "Montant (FCFA) *",
-                                min_value=0.0,
-                                step=1000.0,
-                                value=0.0,
-                            )
-                            categorie = st.selectbox(
-                                "Catégorie",
-                                [
-                                    "Fournitures scolaires",
-                                    "Maintenance & Réparations",
-                                    "Charges administratives",
-                                    "Énergie & Eau",
-                                    "Divers",
-                                ],
-                            )
-                        with col2:
-                            ref_piece = st.text_input(
-                                "N° de Pièce Justificative / Facture *",
-                                placeholder="Ex: BC-2026-001",
-                            )
-                            mode_paiement = st.selectbox(
-                                "Mode de décaissement",
-                                [
-                                    "Espèces",
-                                    "Chèque",
-                                    "Virement Bancaire",
-                                    "Mobile Money (Orange/Moov)",
-                                ],
-                            )
-                            date_depense = st.date_input(
-                                "Date de la dépense", value=datetime.now()
-                            )
-
-                        libelle_final = (
-                            libelle_depense.strip()
-                            if "libelle_depense" in locals()
-                            else ""
+                    with col1:
+                        libelle_depense = st.text_input(
+                            "Libellé / Motif de la dépense *",
+                            placeholder=(
+                                "Ex: Achat de fournitures pédagogiques"
+                            ),
                         )
-                        montant_final = (
-                            montant if "montant" in locals() else 0.0
+                        montant = st.number_input(
+                            "Montant (FCFA) *",
+                            min_value=0.0,
+                            step=1000.0,
+                            value=0.0,
                         )
-                        categorie_final = (
-                            categorie if "categorie" in locals() else "Divers"
+                        categorie = st.selectbox(
+                            "Catégorie",
+                            [
+                                "Fournitures scolaires",
+                                "Maintenance & Réparations",
+                                "Charges administratives",
+                                "Énergie & Eau",
+                                "Divers",
+                            ],
+                        )
+                    with col2:
+                        ref_piece = st.text_input(
+                            "N° de Pièce Justificative / Facture *",
+                            placeholder="Ex: BC-2026-001",
+                        )
+                        mode_paiement = st.selectbox(
+                            "Mode de décaissement",
+                            [
+                                "Espèces",
+                                "Chèque",
+                                "Virement Bancaire",
+                                "Mobile Money (Orange/Moov)",
+                            ],
+                        )
+                        date_depense = st.date_input(
+                            "Date de la dépense", value=datetime.now()
                         )
 
                     submitted = st.form_submit_button(
@@ -466,6 +478,10 @@ def afficher_depenses():
                     )
                     if submitted:
                         ref_clean = ref_piece.strip()
+                        libelle_final = libelle_depense.strip() if libelle_depense else ""
+                        montant_final = montant if montant else 0.0
+                        categorie_final = categorie if categorie else "Divers"
+
                         if not libelle_final or montant_final <= 0:
                             st.error(
                                 "⚠️ Veuillez renseigner des informations valides"
@@ -498,7 +514,6 @@ def afficher_depenses():
                                     montant=montant_final,
                                     categorie=categorie_final,
                                     reference_piece=ref_clean,
-                                    mode_paiement=mode_paiement,
                                     date_depense=datetime.combine(
                                         date_depense, datetime.now().time()
                                     ),
@@ -595,9 +610,6 @@ def afficher_depenses():
                                         montant=-montant_d,
                                         categorie=d.categorie,
                                         reference_piece=f"AVOIR-{ref_orig}",
-                                        mode_paiement=(
-                                            "Régularisation Comptable"
-                                        ),
                                         date_depense=datetime.utcnow(),
                                         auteur=username_connecte,
                                     )

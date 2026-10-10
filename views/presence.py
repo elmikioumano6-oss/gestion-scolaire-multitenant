@@ -194,13 +194,16 @@ def afficher_presence():
             "surveillant",
         ]
 
-        # 📋 LISTES DÉROULANTES OFFICIELLES
+        # 📋 LISTES DÉROULANTES OFFICIELLES (NORME INTERNATIONALE)
         liste_statuts_assiduite = [
             "Présent",
             "Absent non justifié",
             "Absent justifié",
             "Retard < 15 min",
             "Retard > 15 min",
+            "Puni",
+            "Exclu",
+            "Dispensé",
         ]
 
         liste_motifs = [
@@ -210,6 +213,7 @@ def afficher_presence():
             "Problème de transport",
             "Retard indépendant de la volonté",
             "Rendez-vous médical",
+            "Sanction disciplinaire",
             "Autre motif valable",
         ]
 

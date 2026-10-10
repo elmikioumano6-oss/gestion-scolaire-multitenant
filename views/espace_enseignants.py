@@ -8,11 +8,13 @@ from database.models import (
     CahierTexte,
     Classe,
     Eleve,
+    Enseignant,
     Matiere,
     Note,
     Programme,
     Presence,
     School,
+    User,
 )
 
 SYNONYMES_MATIERES = {
@@ -34,19 +36,6 @@ SYNONYMES_MATIERES = {
     "conduite": "conduite",
 }
 
-BAREME_OFFICIEL_COLLEGE = {
-    "francais": 140.0,
-    "anglais": 140.0,
-    "histoire geographie": 70.0,
-    "mathematiques": 175.0,
-    "physique chimie": 105.0,
-    "science de la vie et de la terre": 105.0,
-    "economie familiale et sociale": 35.0,
-    "eps": 70.0,
-    "education civique et morale": 35.0,
-    "conduite": 0.0,
-}
-
 
 def normaliser_chaine(texte):
     if not texte or pd.isna(texte):
@@ -57,63 +46,45 @@ def normaliser_chaine(texte):
     return SYNONYMES_MATIERES.get(nettoye, nettoye)
 
 
-def get_matieres_dynamiques_espace_prof(selected_classes_labels, classes_cycle, ecole_active_id, cycle_en_cours, db):
-    """Récupère et filtre les matières de manière robuste et dynamique pour l'Espace Enseignants."""
-    m_brutes = []
-    
-    # 1. Si une classe spécifique est sélectionnée, on filtre par classe_id
-    if selected_classes_labels:
-        sel_ids = [c.id for c in classes_cycle if c.libelle in selected_classes_labels]
-        if sel_ids:
-            try:
-                mat_q = db.query(Matiere).filter(
-                    Matiere.school_id == ecole_active_id, 
-                    Matiere.classe_id.in_(sel_ids)
-                )
-                if hasattr(Matiere, "deleted_at"):
-                    mat_q = mat_q.filter(Matiere.deleted_at.is_(None))
-                m_brutes = mat_q.all()
-            except Exception:
-                m_brutes = []
+def get_matieres_classe_strict(classe_obj, ecole_active_id, db, enseignant_obj=None):
+    if not classe_obj:
+        return []
+    try:
+        matieres_autorisees = []
+        if enseignant_obj and hasattr(enseignant_obj, "matieres_attribuees") and enseignant_obj.matieres_attribuees:
+            matieres_autorisees = [m.strip().title() for m in enseignant_obj.matieres_attribuees.split(",") if m.strip()]
 
-    # 2. Si aucune classe n'est sélectionnée, filtre large par cycle (insensible à la casse)
-    if not m_brutes and cycle_en_cours:
-        try:
-            mat_q_cycle = db.query(Matiere).filter(
-                Matiere.school_id == ecole_active_id
-            )
-            if hasattr(Matiere, "cycle"):
-                mat_q_cycle = mat_q_cycle.filter(Matiere.cycle.ilike(f"%{cycle_en_cours}%"))
-                
+        mat_q = db.query(Matiere).filter(
+            Matiere.school_id == ecole_active_id,
+            Matiere.classe_id == classe_obj.id
+        )
+        if hasattr(Matiere, "deleted_at"):
+            mat_q = mat_q.filter(Matiere.deleted_at.is_(None))
+        matieres_brutes = mat_q.all()
+        
+        if not matieres_brutes:
+            mat_all_q = db.query(Matiere).filter(Matiere.school_id == ecole_active_id)
             if hasattr(Matiere, "deleted_at"):
-                mat_q_cycle = mat_q_cycle.filter(Matiere.deleted_at.is_(None))
-            m_brutes = mat_q_cycle.all()
-        except Exception:
-            m_brutes = []
+                mat_all_q = mat_all_q.filter(Matiere.deleted_at.is_(None))
+            matieres_brutes = mat_all_q.all()
 
-    # 3. Fallback ultime : toutes les matières de l'école
-    if not m_brutes:
-        try:
-            mat_q_all = db.query(Matiere).filter(Matiere.school_id == ecole_active_id)
-            if hasattr(Matiere, "deleted_at"):
-                mat_q_all = mat_q_all.filter(Matiere.deleted_at.is_(None))
-            m_brutes = mat_q_all.all()
-        except Exception:
-            m_brutes = []
+        noms = []
+        for m in matieres_brutes:
+            nom_m = m.libelle if hasattr(m, "libelle") and m.libelle else getattr(m, "nom", "Matière")
+            if nom_m:
+                titre_m = nom_m.title()
+                if not matieres_autorisees or any(m_auth.lower() in titre_m.lower() or titre_m.lower() in m_auth.lower() for m_auth in matieres_autorisees):
+                    noms.append(titre_m)
 
-    # Déduplication par nom normalisé
-    m_dict = {}
-    for m in m_brutes:
-        n_brut = m.libelle if hasattr(m, "libelle") and m.libelle else getattr(m, "nom", "Matière")
-        n_key = normaliser_chaine(n_brut)
-        if n_key and n_key not in m_dict:
-            m_dict[n_key] = m
-            
-    return sorted([(m.libelle if hasattr(m, 'libelle') and m.libelle else getattr(m, 'nom', 'Matière')).title() for m in m_dict.values()])
+        if not noms and matieres_autorisees:
+            noms = matieres_autorisees
+
+        return sorted(list(set(noms))) if noms else ["Matière Générale"]
+    except Exception:
+        return ["Matière Générale"]
 
 
 def afficher_espace_enseignants():
-    # --- Injection CSS pour un design Premium ---
     st.markdown("""
         <style>
         .teacher-card {
@@ -154,17 +125,14 @@ def afficher_espace_enseignants():
     """, unsafe_allow_html=True)
 
     st.markdown("## 👨‍🏫 Espace Pédagogique Enseignant")
-    st.markdown(
-        "Plateforme unifiée pour l'appel, la saisie des notes, le cahier de texte "
-        "et le suivi des charges horaires."
-    )
+    st.markdown("Plateforme unifiée pour l'appel, la saisie des notes, le cahier de texte et le suivi des charges horaires.")
     st.markdown("---")
 
     school_id = st.session_state.get("school_id")
     is_super_admin = st.session_state.get("is_super_admin", False)
     user_role = str(st.session_state.get("role", "enseignant")).lower()
     username = st.session_state.get("username", "enseignant")
-    cycle_en_cours = st.session_state.get("cycle_actif", "Collège")
+    cycle_en_cours = st.session_state.get("cycle_actif", "Collège / Lycée")
 
     if not school_id and not is_super_admin:
         st.warning("⚠️ Veuillez vous connecter pour accéder à cette section.")
@@ -178,100 +146,75 @@ def afficher_espace_enseignants():
             target_school_id = ecole_defaut.id if ecole_defaut else 1
 
         ecole_active_id = school_id if school_id else target_school_id
+        ecole_courante = db.query(School).filter(School.id == ecole_active_id).first()
+        school_name = ecole_courante.nom if ecole_courante else st.session_state.get("school_name", "Établissement")
 
-        ecole_courante = (
-            db.query(School).filter(School.id == ecole_active_id).first()
-        )
-        school_name = (
-            ecole_courante.nom
-            if ecole_courante
-            else st.session_state.get("school_name", "Établissement")
-        )
+        user_obj = db.query(User).filter(User.username == username).first() if username else None
+        enseignant_obj = None
+        if user_obj and hasattr(user_obj, "enseignant_id") and user_obj.enseignant_id:
+            enseignant_obj = db.query(Enseignant).filter(Enseignant.id == user_obj.enseignant_id).first()
 
-        classes_query = db.query(Classe).filter(
-            Classe.cycle == cycle_en_cours, Classe.school_id == ecole_active_id
-        )
+        classes_query = db.query(Classe).filter(Classe.school_id == ecole_active_id)
         if hasattr(Classe, "deleted_at"):
             classes_query = classes_query.filter(Classe.deleted_at.is_(None))
-        toutes_classes_cycle = classes_query.all()
+        toutes_classes_ecole = classes_query.all()
 
-        if not toutes_classes_cycle:
-            st.warning(
-                f"⚠️ Veuillez vous assurer que des classes sont configurées pour le cycle **{cycle_en_cours}** dans l'établissement **{school_name}**."
-            )
+        if not toutes_classes_ecole:
+            st.warning(f"⚠️ Veuillez vous assurer que des classes sont configurées dans l'établissement **{school_name}**.")
             return
 
-        affectations_prof = st.session_state.get("teacher_assignments", {})
-        if (
-            user_role in ["directeur", "admin", "administrateur", "super_admin", "censeur"]
-            or not affectations_prof.get(username)
-        ):
-            classes_disponibles = toutes_classes_cycle
+        if user_role in ["directeur", "admin", "administrateur", "super_admin", "censeur"] or not enseignant_obj:
+            classes_disponibles = toutes_classes_ecole
         else:
-            classes_assignées_noms = (
-                affectations_prof.get(username, {}).get("classes", [])
-            )
-            classes_disponibles = [
-                c for c in toutes_classes_cycle if c.libelle in classes_assignées_noms
-            ]
+            classes_str = getattr(enseignant_obj, "classes_attribuees", "") or getattr(enseignant_obj, "classes", "") or ""
+            classes_prof = [c.strip().lower() for c in classes_str.split(",") if c.strip()]
+            if classes_prof:
+                classes_disponibles = [c for c in toutes_classes_ecole if c.libelle and c.libelle.strip().lower() in classes_prof]
+            else:
+                classes_disponibles = []
+
             if not classes_disponibles:
-                classes_disponibles = toutes_classes_cycle
+                st.warning("⚠️ Aucune classe ne vous est actuellement attribuée. Veuillez contacter l'administration.")
+                return
 
         noms_classes = sorted(list(set(c.libelle for c in classes_disponibles if c.libelle)))
 
-        # --- 1. Carte Enseignant Élégante ---
         st.markdown(f"""
             <div class="teacher-card">
                 <div style="font-size: 3.5rem; margin-right: 25px;">👨‍🏫</div>
                 <div>
                     <h2>Bienvenue, Prof. {username.capitalize()}</h2>
-                    <p>Établissement : <b>{school_name}</b> &nbsp;|&nbsp; Cycle : {cycle_en_cours}</p>
+                    <p>Établissement : <b>{school_name}</b> &nbsp;|&nbsp; Accès : <b>Collège / Lycée (Multi-cycles)</b></p>
                 </div>
             </div>
         """, unsafe_allow_html=True)
 
-        # --- 2. Zone de Contexte (Sélection Classe & Matière dynamique) ---
         st.markdown('<div class="context-box">', unsafe_allow_html=True)
-        st.markdown("#### 🎯 Paramètres de la séance")
+        st.markdown("#### 🎯 Paramètres de la séance (Basculement dynamique Collège / Lycée)")
         col1, col2 = st.columns(2)
         with col1:
-            classe_enseignant = st.selectbox(
-                "Vos classes assignées", noms_classes, key="ens_classe_select"
-            )
+            classe_enseignant = st.selectbox("Vos classes assignées (Collège & Lycée)", noms_classes, key="ens_classe_select")
 
-        classe_obj = next(
-            (c for c in classes_disponibles if c.libelle == classe_enseignant), None
-        )
-
-        # --- LOGIQUE DE RÉCUPÉRATION DYNAMIQUE DES MATIÈRES ---
-        noms_matieres = get_matieres_dynamiques_espace_prof([classe_enseignant], toutes_classes_cycle, ecole_active_id, cycle_en_cours, db)
+        classe_obj = next((c for c in classes_disponibles if c.libelle == classe_enseignant), None)
+        noms_matieres = get_matieres_classe_strict(classe_obj, ecole_active_id, db, enseignant_obj)
 
         with col2:
-            matiere_enseignant = st.selectbox(
-                "Vos matières dispensées", noms_matieres if noms_matieres else ["Aucune matière trouvée"], key="ens_matiere_select"
-            )
+            matiere_enseignant = st.selectbox("Vos matières dispensées", noms_matieres if noms_matieres else ["Aucune matière trouvée"], key="ens_matiere_select")
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # Récupération de l'objet matière correspondant pour les insertions
         matieres_brutes_db = db.query(Matiere).filter(Matiere.school_id == ecole_active_id).all()
         matiere_obj = next(
-            (
-                m for m in matieres_brutes_db
-                if (m.libelle if hasattr(m, 'libelle') and m.libelle else getattr(m, 'nom', '')).title() == matiere_enseignant
-            ),
+            (m for m in matieres_brutes_db if (m.libelle if hasattr(m, 'libelle') and m.libelle else getattr(m, 'nom', '')).title() == matiere_enseignant),
             None,
         )
 
         eleves = []
         if classe_obj:
-            eleves_query = db.query(Eleve).filter(
-                Eleve.classe_id == classe_obj.id, Eleve.school_id == ecole_active_id
-            )
+            eleves_query = db.query(Eleve).filter(Eleve.classe_id == classe_obj.id, Eleve.school_id == ecole_active_id)
             if hasattr(Eleve, "deleted_at"):
                 eleves_query = eleves_query.filter(Eleve.deleted_at.is_(None))
             eleves = eleves_query.order_by(Eleve.nom).all()
 
-        # --- 3. Navigation par Onglets ---
         tab_cahier, tab_notes, tab_appel, tab_charge = st.tabs([
             "📖 Cahier de Texte",
             "📝 Saisie des Notes",
@@ -279,50 +222,23 @@ def afficher_espace_enseignants():
             "📊 Horaires & Reste à faire",
         ])
 
-        # ONGLET 1: CAHIER DE TEXTE
         with tab_cahier:
             st.markdown(f"<h4 class='tab-title'>📖 Remplir le Cahier de Texte — {classe_enseignant} ({matiere_enseignant})</h4>", unsafe_allow_html=True)
             with st.form("form_ens_cahier_texte_avance"):
                 col_c1, col_c2 = st.columns(2)
                 with col_c1:
-                    date_seance = st.date_input(
-                        "Date de la séance",
-                        value=datetime.now().date(),
-                        key="ens_date_cours",
-                    )
+                    date_seance = st.date_input("Date de la séance", value=datetime.now().date(), key="ens_date_cours")
                 with col_c2:
-                    duree_seance = st.selectbox(
-                        "Durée de la séance",
-                        ["1 heure", "2 heures", "3 heures", "4 heures"],
-                        key="ens_duree_seance",
-                    )
+                    duree_seance = st.selectbox("Durée de la séance", ["1 heure", "2 heures", "3 heures", "4 heures"], key="ens_duree_seance")
 
-                titre_seance = st.text_input(
-                    "Titre du cours ou du chapitre *",
-                    placeholder="Ex: Chapitre 3 - Les équations du premier degré",
-                    key="ens_titre_cours",
-                )
-                contenu_seance = st.text_area(
-                    "Contenu réalisé / Résumé de la leçon *",
-                    placeholder="Détaillez les notions et le contenu dispensé...",
-                    key="ens_contenu_cours",
-                )
+                titre_seance = st.text_input("Titre du cours ou du chapitre *", placeholder="Ex: Chapitre 3 - Les équations du premier degré", key="ens_titre_cours")
+                contenu_seance = st.text_area("Contenu réalisé / Résumé de la leçon *", placeholder="Détaillez les notions et le contenu dispensé...", key="ens_contenu_cours")
                 
                 with st.expander("➕ Ajouter des remarques ou exercices (Optionnel)"):
-                    difficultees = st.text_area(
-                        "Difficultés rencontrées / Remarques",
-                        placeholder="Observations pédagogiques particulières...",
-                        key="ens_difficultees",
-                    )
-                    mesures_correctives = st.text_area(
-                        "Mesures correctives / Travail à faire",
-                        placeholder="Exercices assignés pour la prochaine séance...",
-                        key="ens_mesures",
-                    )
+                    difficultees = st.text_area("Difficultés rencontrées / Remarques", placeholder="Observations pédagogiques particulières...", key="ens_difficultees")
+                    mesures_correctives = st.text_area("Mesures correctives / Travail à faire", placeholder="Exercices assignés pour la prochaine séance...", key="ens_mesures")
 
-                submitted_cahier = st.form_submit_button(
-                    "📤 Enregistrer & Transmettre à l'Inspection", type="primary"
-                )
+                submitted_cahier = st.form_submit_button("📤 Enregistrer & Transmettre à l'Inspection", type="primary")
                 
                 if submitted_cahier:
                     if not titre_seance.strip() or not contenu_seance.strip():
@@ -332,7 +248,7 @@ def afficher_espace_enseignants():
                     else:
                         nouvelle_entree = CahierTexte(
                             school_id=ecole_active_id,
-                            cycle=cycle_en_cours,
+                            cycle=getattr(classe_obj, 'cycle', 'Collège / Lycée'),
                             classe_id=classe_obj.id,
                             matiere_id=matiere_obj.id,
                             user_id=st.session_state.get("user_id"),
@@ -350,7 +266,6 @@ def afficher_espace_enseignants():
                         db.commit()
                         st.success("✅ Entrée du cahier de texte enregistrée et transmise au registre de l'établissement avec succès !")
 
-        # ONGLET 2: NOTES
         with tab_notes:
             st.markdown(f"<h4 class='tab-title'>📝 Grille d'Évaluation — {classe_enseignant} ({matiere_enseignant})</h4>", unsafe_allow_html=True)
             if not eleves:
@@ -364,17 +279,9 @@ def afficher_espace_enseignants():
             else:
                 col_n1, col_n2 = st.columns(2)
                 with col_n1:
-                    type_evaluation = st.selectbox(
-                        "Type d'évaluation",
-                        ["Interro 1", "Interro 2", "Devoir 1", "Devoir 2", "Compo"],
-                        key="ens_type_eval",
-                    )
+                    type_evaluation = st.selectbox("Type d'évaluation", ["Interro 1", "Interro 2", "Devoir 1", "Devoir 2", "Compo"], key="ens_type_eval")
                 with col_n2:
-                    semestre = st.selectbox(
-                        "Période Académique",
-                        ["Semestre 1", "Semestre 2", "Trimestre 1", "Trimestre 2", "Trimestre 3"],
-                        key="ens_semestre_notes",
-                    )
+                    semestre = st.selectbox("Période Académique", ["Semestre 1", "Semestre 2", "Trimestre 1", "Trimestre 2", "Trimestre 3"], key="ens_semestre_notes")
 
                 with st.form("form_ens_notes_saisie"):
                     saisie_temp = {}
@@ -388,10 +295,7 @@ def afficher_espace_enseignants():
                             key=f"ens_note_{e.id}",
                         )
 
-                    submitted_notes = st.form_submit_button(
-                        "💾 Synchroniser les notes avec l'administration",
-                        type="primary",
-                    )
+                    submitted_notes = st.form_submit_button("💾 Synchroniser les notes avec l'administration", type="primary")
                     if submitted_notes:
                         for eleve_id, valeur_note in saisie_temp.items():
                             note_obj = Note(
@@ -406,9 +310,8 @@ def afficher_espace_enseignants():
                         db.commit()
                         st.success("✅ Notes synchronisées avec succès !")
 
-        # ONGLET 3: APPEL
         with tab_appel:
-            st.markdown(f"<h4 class='tab-title'>📋 Contrôle de Présence — {classe_enseignant}</h4>", unsafe_allow_html=True)
+            st.markdown(f"<h4 class='tab-title'>📋 Contrôle de Présence & Discipline — {classe_enseignant}</h4>", unsafe_allow_html=True)
             if not eleves:
                 st.markdown(f"""
                     <div class="empty-state">
@@ -418,49 +321,57 @@ def afficher_espace_enseignants():
                     </div>
                 """, unsafe_allow_html=True)
             else:
-                date_appel = st.date_input(
-                    "Date de l'appel", value=datetime.now().date(), key="ens_date_appel"
-                )
+                date_appel = st.date_input("Date de l'appel", value=datetime.now().date(), key="ens_date_appel")
+                
                 data_appel = []
                 for e in eleves:
                     data_appel.append({
                         "eleve_id": e.id,
                         "Matricule": getattr(e, "matricule", "N/A"),
                         "Nom & Prénom": f"{e.nom} {e.prenom}",
-                        "Présent(e)": True,
-                        "Retard (min)": 0,
-                        "Motif d'absence": "—",
+                        "Statut": "Présent",
+                        "Précisions / Motif": "—",
                     })
                 df_appel = pd.DataFrame(data_appel)
+                
                 edited_appel = st.data_editor(
                     df_appel,
                     use_container_width=True,
-                    key=f"ens_appel_editor_{classe_enseignant}",
+                    column_config={
+                        "Statut": st.column_config.SelectboxColumn(
+                            "Statut",
+                            help="Sélectionner le statut de l'élève",
+                            options=["Présent", "Absent", "Retard", "Puni", "Exclu"],
+                            required=True,
+                        ),
+                        "Précisions / Motif": st.column_config.TextColumn(
+                            "Précisions / Motif",
+                            help="Durée du retard, motif d'absence, etc.",
+                        ),
+                    },
+                    key=f"ens_appel_editor_{classe_enseignant}"
                 )
 
                 if st.button("📤 Valider et transmettre l'appel à la vie scolaire", type="primary"):
                     for index, row in edited_appel.iterrows():
-                        motif_str = str(row["Motif d'absence"])
-                        statut_presence = (
-                            "Présent"
-                            if row["Présent(e)"]
-                            else f"Absent (Motif: {motif_str})"
-                        )
-                        if row["Retard (min)"] > 0:
-                            statut_presence = f"Retard ({row['Retard (min)']} min)"
+                        statut_choisi = str(row["Statut"])
+                        precision_str = str(row["Précisions / Motif"])
+                        
+                        statut_final = statut_choisi
+                        if precision_str and precision_str != "—":
+                            statut_final = f"{statut_choisi} ({precision_str})"
 
                         presence_obj = Presence(
                             school_id=ecole_active_id,
                             eleve_id=int(row["eleve_id"]),
                             date=date_appel,
-                            statut=statut_presence,
-                            motif=motif_str if not row["Présent(e)"] else None,
+                            statut=statut_final,
+                            motif=precision_str if precision_str != "—" else None,
                         )
                         db.add(presence_obj)
                     db.commit()
-                    st.success("✅ Feuille d'appel validée avec succès !")
+                    st.success("✅ Feuille d'appel et de discipline validée et transmise avec succès !")
 
-        # ONGLET 4: HORAIRES
         with tab_charge:
             st.markdown(f"<h4 class='tab-title'>📊 Progression et Heures — {matiere_enseignant} ({classe_enseignant})</h4>", unsafe_allow_html=True)
 
@@ -470,60 +381,39 @@ def afficher_espace_enseignants():
                 mat_norm = normaliser_chaine(mat_lib)
 
                 volume_prevu = 0.0
-
-                if cycle_en_cours.lower() in ["collège", "college"]:
-                    for attr_v in ["volume_horaire", "volume", "heures", "masse_horaire", "duree", "volume_hebdo"]:
-                        val = getattr(matiere_obj, attr_v, None)
-                        if val is not None:
-                            try:
-                                v_f = float(val)
-                                if v_f > 0:
-                                    volume_prevu = v_f
-                                    break
-                            except Exception:
-                                pass
-                    
-                    if volume_prevu == 0.0:
-                        for p in programmes_ecole:
-                            p_nom = normaliser_chaine(getattr(p, 'nom_matiere', getattr(p, 'matiere', '')))
-                            if p_nom == mat_norm and p.volume_horaire:
-                                volume_prevu = float(p.volume_horaire)
+                for attr_v in ["volume_horaire", "volume", "heures", "masse_horaire", "duree", "volume_hebdo"]:
+                    val = getattr(matiere_obj, attr_v, None)
+                    if val is not None:
+                        try:
+                            v_f = float(val)
+                            if v_f > 0:
+                                volume_prevu = v_f
                                 break
-                    
-                    if volume_prevu == 0.0 and mat_norm in BAREME_OFFICIEL_COLLEGE:
-                        volume_prevu = BAREME_OFFICIEL_COLLEGE[mat_norm]
-                else:
-                    prog_obj = None
-                    classe_norm = normaliser_chaine(classe_enseignant)
-                    
+                        except Exception:
+                            pass
+                
+                if volume_prevu == 0.0:
                     for p in programmes_ecole:
                         p_nom = normaliser_chaine(getattr(p, 'nom_matiere', getattr(p, 'matiere', '')))
-                        texte_ligne = normaliser_chaine(f"{getattr(p, 'classe', '')} {getattr(p, 'code_matiere', '')} {getattr(p, 'matiere', '')} {getattr(p, 'nom_matiere', '')}")
-                        if p_nom == mat_norm and (classe_norm in texte_ligne):
-                            prog_obj = p
-                            break
-                    
-                    if not prog_obj:
-                        for p in programmes_ecole:
-                            p_nom = normaliser_chaine(getattr(p, 'nom_matiere', getattr(p, 'matiere', '')))
-                            if p_nom == mat_norm:
-                                prog_obj = p
+                        if p_nom == mat_norm and p.volume_horaire:
+                            try:
+                                volume_prevu = float(p.volume_horaire)
                                 break
-
-                    volume_prevu = float(prog_obj.volume_horaire) if prog_obj and prog_obj.volume_horaire else float(getattr(matiere_obj, "volume_horaire", 0) or 0)
+                            except Exception:
+                                pass
 
                 volume_total_prevu = volume_prevu
-
-                toutes_entrees = (
-                    db.query(CahierTexte)
-                    .filter(
-                        CahierTexte.school_id == ecole_active_id,
-                        CahierTexte.classe_id == classe_obj.id,
-                    )
-                    .all()
-                )
-
-                seances_mat = [e for e in toutes_entrees if getattr(e, 'matiere_id', None) == matiere_obj.id or normaliser_chaine(getattr(e, 'matiere', getattr(e, 'discipline', ''))) == mat_norm]
+                tances_entrees = db.query(CahierTexte).filter(CahierTexte.school_id == ecole_active_id, CahierTexte.classe_id == classe_obj.id).all()
+                
+                # CORRECTION ROBUSTE : Association élargie par ID, correspondance normalisée ou présence du nom de la matière
+                seances_mat = [
+                    e for e in tances_entrees 
+                    if (getattr(e, 'matiere_id', None) == matiere_obj.id) or 
+                       (normaliser_chaine(getattr(e, 'matiere', getattr(e, 'discipline', ''))) == mat_norm) or
+                       (mat_norm in normaliser_chaine(getattr(e, 'matiere', getattr(e, 'discipline', '')))) or
+                       (mat_norm in normaliser_chaine(getattr(e, 'titre', ''))) or
+                       (mat_norm in normaliser_chaine(getattr(e, 'contenu', '')))
+                ]
 
                 volume_dispense = 0.0
                 for seance in seances_mat:
@@ -539,11 +429,7 @@ def afficher_espace_enseignants():
                             volume_dispense += 1.0
 
                 reste_a_recouvrer = max(0.0, volume_total_prevu - volume_dispense)
-                progression_pct = min(
-                    100, int((volume_dispense / volume_total_prevu) * 100)
-                    if volume_total_prevu > 0
-                    else 0
-                )
+                progression_pct = min(100, int((volume_dispense / volume_total_prevu) * 100) if volume_total_prevu > 0 else 0)
 
                 col_h1, col_h2, col_h3 = st.columns(3)
                 with col_h1:
@@ -553,10 +439,7 @@ def afficher_espace_enseignants():
                 with col_h3:
                     st.metric("Reste à Faire", f"{reste_a_recouvrer:g}h")
 
-                st.progress(
-                    max(0.0, min(1.0, progression_pct / 100.0)),
-                    text=f"Progression globale du programme : {progression_pct}%",
-                )
+                st.progress(max(0.0, min(1.0, progression_pct / 100.0)), text=f"Progression globale du programme : {progression_pct}%")
             else:
                 st.info("Veuillez sélectionner une classe et une matière valides.")
 
@@ -564,6 +447,5 @@ def afficher_espace_enseignants():
         db.close()
 
 
-# Alias pour assurer la rétrocompatibilité complète avec app.py
 afficher_enseignants = afficher_espace_enseignants
 afficher_espace_enseignant = afficher_espace_enseignants
