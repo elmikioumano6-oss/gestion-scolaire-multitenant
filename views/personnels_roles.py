@@ -1,24 +1,20 @@
 from datetime import datetime
-import bcrypt
 from database.audit import log_action_erp
 from database.db_config import SessionLocal
-from database.models import ActivityLog, School, User
+from database.models import ActivityLog, Eleve, School, User
 import pandas as pd
 import streamlit as st
 
 
 def afficher_personnels():
-    st.subheader("👥 Personnels et Rôles (RBAC & Habilitations)")
+    st.subheader("👥 Gestion du Personnel & RH")
     st.markdown(
-        "Gestion centralisée des comptes, des habilitations et des niveaux d'accès"
-        " du personnel par cycle et par établissement avec isolation multi-tenant"
-        " stricte."
+        "Annuaire, suivi administratif et gestion des éléments salariaux du personnel."
     )
     st.markdown("---")
 
     school_id = st.session_state.get("school_id")
     is_super_admin = st.session_state.get("is_super_admin", False)
-    username_connecte = st.session_state.get("username", "admin")
 
     db = SessionLocal()
     try:
@@ -48,237 +44,131 @@ def afficher_personnels():
 
     db = SessionLocal()
     try:
-        tab_comptes, tab_nouveau = st.tabs([
-            "🔐 Gestion des Accès Actifs",
-            "➕ Enrôler un Nouvel Utilisateur",
+        tab_annuaire, tab_ajout = st.tabs([
+            "📋 Annuaire & Paie du Personnel",
+            "➕ Enregistrer un Agent",
         ])
 
-        with tab_comptes:
+        with tab_annuaire:
             st.markdown(
-                f"### Gestion des accès en cours — **{school_name}"
-                f" ({cycle_en_cours})**"
+                f"### Liste du personnel — **{school_name} ({cycle_en_cours})**"
             )
 
-            # Récupération sécurisée des utilisateurs en base de données pour l'école active
             users_query = db.query(User).filter(
                 User.school_id == ecole_active_id, User.role != "super_admin"
             )
             if hasattr(User, "deleted_at"):
                 users_query = users_query.filter(User.deleted_at.is_(None))
-            utilisateurs = users_query.all()
+            personnel_list = users_query.all()
 
-            if not utilisateurs:
-                st.info(
-                    "Aucun utilisateur persistant en base pour cet établissement."
-                )
-                comptes_actifs = [
-                    {
-                        "Nom / Identifiant": "admin_rahmat",
-                        "Rôle": "directeur",
-                        "Dernière activité": str(datetime.utcnow()),
-                    },
-                ]
-                df_rbac = pd.DataFrame(comptes_actifs)
-                st.dataframe(df_rbac, use_container_width=True)
+            if not personnel_list:
+                st.info("Aucun membre du personnel enregistré pour cet établissement.")
             else:
-                cols = st.columns([2, 2, 2, 2])
-                cols[0].markdown("**Nom / Identifiant**")
-                cols[1].markdown("**Rôle Actuel**")
-                cols[2].markdown("**Dernière Activité**")
-                cols[3].markdown("**Actions / Modification de Rôle**")
+                cols = st.columns([2, 1.5, 2, 2, 1.2])
+                cols[0].markdown("**Nom / Agent**")
+                cols[1].markdown("**Poste**")
+                cols[2].markdown("**Salaire de Base (FCFA)**")
+                cols[3].markdown("**Primes Fixes (FCFA)**")
+                cols[4].markdown("**Actions**")
                 st.markdown("---")
 
-                roles_possibles = [
-                    "fondateur",
-                    "directeur",
-                    "proviseur",
-                    "censeur",
-                    "enseignant",
-                    "parent",
-                    "comptable",
-                    "econome",
-                    "surveillant",
-                    "secretaire",
-                    "inspecteur",
-                    "planton",
-                    "jardinier",
-                    "gardien",
-                ]
-
-                for u in utilisateurs:
-                    c = st.columns([2, 2, 2, 2])
-                    c[0].write(f"👤 **{getattr(u, 'username', 'N/A')}**")
-                    c[1].markdown(f"`{getattr(u, 'role', 'enseignant')}`")
-                    c[2].write(
-                        str(getattr(u, "derniere_activite", "Jamais connecté"))[:19]
-                    )
-
+                for p in personnel_list:
+                    c = st.columns([2, 1.5, 2, 2, 1.2])
+                    c[0].write(f"👤 **{getattr(p, 'username', 'N/A')}**")
+                    c[1].markdown(f"`{getattr(p, 'role', 'enseignant')}`")
+                    
+                    with c[2]:
+                        nouveau_salaire = st.number_input(
+                            "Salaire",
+                            min_value=0.0,
+                            value=float(getattr(p, "salaire_base", 0.0) or 0.0),
+                            step=5000.0,
+                            key=f"sal_{p.id}",
+                            label_visibility="collapsed"
+                        )
                     with c[3]:
-                        current_role = getattr(u, "role", "enseignant")
-                        idx_role = (
-                            roles_possibles.index(current_role)
-                            if current_role in roles_possibles
-                            else 4  # Index par défaut si le rôle n'est pas dans la liste
+                        nouvelles_primes = st.number_input(
+                            "Primes",
+                            min_value=0.0,
+                            value=float(getattr(p, "primes_fixes", 0.0) or 0.0),
+                            step=1000.0,
+                            key=f"prime_{p.id}",
+                            label_visibility="collapsed"
                         )
 
-                        nouveau_role = st.selectbox(
-                            "Modifier rôle",
-                            roles_possibles,
-                            index=idx_role,
-                            key=f"role_select_{u.id}",
-                            label_visibility="collapsed",
-                        )
-                        if nouveau_role != current_role:
-                            if st.button("💾 Mettre à jour", key=f"btn_update_role_{u.id}"):
-                                u.role = nouveau_role
+                    with c[4]:
+                        col_btn1, col_btn2 = st.columns(2)
+                        with col_btn1:
+                            if st.button("💾", key=f"btn_save_rh_{p.id}", help="Enregistrer les modifications"):
+                                p.salaire_base = nouveau_salaire
+                                p.primes_fixes = nouvelles_primes
                                 db.commit()
-
-                                log_action_erp(
-                                    module="Personnels et Rôles",
-                                    action=(
-                                        f"Modification du rôle de l'utilisateur {u.username}"
-                                        f" de {current_role} à {nouveau_role}"
-                                    ),
-                                    statut="Critique",
-                                    valeur_avant=current_role,
-                                    valeur_apres=nouveau_role,
-                                )
-
-                                st.success(
-                                    f"Rôle de **{u.username}** mis à jour avec succès !"
-                                )
+                                st.success(f"Mis à jour !")
                                 st.rerun()
+                        with col_btn2:
+                            if st.button("🗑️", key=f"btn_del_{p.id}", help="Supprimer cet agent"):
+                                try:
+                                    # Dissociation propre des élèves rattachés pour éviter la violation de clé étrangère
+                                    eleves_lies = db.query(Eleve).filter(Eleve.parent_id == p.id).all()
+                                    for eleve in eleves_lies:
+                                        eleve.parent_id = None
+                                    
+                                    db.delete(p)
+                                    db.commit()
+                                    st.success(f"Supprimé !")
+                                    st.rerun()
+                                except Exception as e:
+                                    db.rollback()
+                                    st.error(f"Erreur de suppression : {e}")
 
-                    st.markdown(
-                        "<hr style='margin: 0.2rem 0; border-color:"
-                        " rgba(255,255,255,0.05);'>",
-                        unsafe_allow_html=True,
-                    )
+                    st.markdown("<hr style='margin: 0.2rem 0; border-color: rgba(255,255,255,0.05);'>", unsafe_allow_html=True)
 
-        with tab_nouveau:
-            st.markdown(
-                f"### Enrôlement d'un Nouvel Utilisateur ERP — **{school_name} ({cycle_en_cours})**"
-            )
-            with st.form("form_enrolement_utilisateur_rbac"):
-                col_u1, col_u2 = st.columns(2)
-                with col_u1:
-                    identifiant = st.text_input(
-                        "Nom d'utilisateur / Identifiant de connexion *"
-                    )
-                    mot_de_passe = st.text_input(
-                        "Mot de passe temporaire *", type="password"
-                    )
-                with col_u2:
-                    role_attribue = st.selectbox(
-                        "Rôle RBAC dans l'établissement",
+        with tab_ajout:
+            st.markdown(f"### Enregistrement d'un nouvel agent — **{school_name}**")
+            with st.form("form_ajout_agent_rh"):
+                col_r1, col_r2 = st.columns(2)
+                with col_r1:
+                    nom_agent = st.text_input("Nom complet / Identifiant de l'agent *")
+                    poste_agent = st.selectbox(
+                        "Fonction / Poste",
                         [
-                            "fondateur",
-                            "directeur",
-                            "proviseur",
-                            "censeur",
-                            "enseignant",
-                            "parent",
-                            "comptable",
-                            "econome",
-                            "surveillant",
-                            "secretaire",
-                            "inspecteur",
-                            "planton",
-                            "jardinier",
-                            "gardien",
-                        ],
+                            "directeur", "proviseur", "censeur", "enseignant",
+                            "comptable", "econome", "surveillant", "secretaire",
+                            "planton", "jardinier", "gardien"
+                        ]
                     )
-                    email_user = st.text_input("Adresse Email professionnelle")
-                
-                # --- Informations Salariales ---
-                st.markdown("##### Informations Salariales")
-                col_sal1, col_sal2 = st.columns(2)
-                with col_sal1:
-                    salaire_base = st.number_input("Salaire de base (FCFA)", min_value=0.0, step=1000.0)
-                with col_sal2:
-                    primes_fixes = st.number_input("Primes fixes / Avantages (FCFA)", min_value=0.0, step=500.0)
-                # --------------------------------------------
+                with col_r2:
+                    salaire_init = st.number_input("Salaire de base (FCFA)", min_value=0.0, step=5000.0)
+                    primes_init = st.number_input("Primes fixes (FCFA)", min_value=0.0, step=1000.0)
 
-                submitted_user = st.form_submit_button(
-                    "🔐 Créer le compte utilisateur", type="primary"
-                )
-                if submitted_user:
-                    if not identifiant.strip() or not mot_de_passe.strip():
-                        st.error(
-                            "⚠️ L'identifiant et le mot de passe sont obligatoires pour"
-                            " créer un compte."
-                        )
+                submitted_agent = st.form_submit_button("➕ Ajouter l'agent au personnel", type="primary")
+                if submitted_agent:
+                    if not nom_agent.strip():
+                        st.error("⚠️ Le nom ou l'identifiant de l'agent est obligatoire.")
                     else:
-                        doublon = (
-                            db.query(User)
-                            .filter(
-                                User.username == identifiant.strip(),
-                                User.school_id == ecole_active_id,
-                            )
-                            .first()
-                        )
+                        doublon = db.query(User).filter(
+                            User.username == nom_agent.strip(),
+                            User.school_id == ecole_active_id
+                        ).first()
                         if doublon:
-                            st.error(
-                                f"⚠️ L'identifiant **{identifiant.strip()}** existe déjà dans"
-                                " cet établissement."
-                            )
+                            st.error(f"⚠️ Un agent nommé **{nom_agent.strip()}** existe déjà.")
                         else:
-                            hashed_pwd = bcrypt.hashpw(
-                                mot_de_passe.strip().encode("utf-8"), bcrypt.gensalt()
-                            ).decode("utf-8")
-
-                            nouvel_utilisateur = User(
+                            nouvel_agent = User(
                                 school_id=ecole_active_id,
-                                username=identifiant.strip(),
-                                password=hashed_pwd,
-                                role=role_attribue,
-                                salaire_base=salaire_base,
-                                primes_fixes=primes_fixes
+                                username=nom_agent.strip(),
+                                password="",
+                                role=poste_agent,
+                                salaire_base=salaire_init,
+                                primes_fixes=primes_init
                             )
-                            if hasattr(nouvel_utilisateur, "email"):
-                                nouvel_utilisateur.email = (
-                                    email_user.strip() if email_user else None
-                                )
-
-                            db.add(nouvel_utilisateur)
+                            db.add(nouvel_agent)
                             db.commit()
-
-                            log_action_erp(
-                                module="Personnels et Rôles",
-                                action=(
-                                    f"Création du compte utilisateur {identifiant.strip()}"
-                                    f" ({role_attribue})"
-                                ),
-                                statut="Succès",
-                                valeur_avant="Inexistant",
-                                valeur_apres=role_attribue,
-                            )
-
-                            st.success(
-                                f"✅ Le compte de **{identifiant.strip()}** a été créé avec"
-                                f" le rôle **{role_attribue}** avec succès !"
-                            )
+                            st.success(f"✅ Agent **{nom_agent.strip()}** ajouté avec succès !")
                             st.rerun()
-
-        # Journalisation standard de la consultation du module
-        target_school_id = school_id or 1
-        db.add(
-            ActivityLog(
-                school_id=target_school_id,
-                timestamp=datetime.utcnow(),
-                username=st.session_state.get("username", "admin"),
-                action="Consultation du module Personnels et Rôles (RBAC)",
-                module="Personnels et rôles",
-                statut="Succès",
-            )
-        )
-        db.commit()
 
     finally:
         db.close()
 
-
-# Alias de compatibilité exhaustive pour garantir l'appel par le routeur app.py
+# Alias de compatibilité
 afficher_personnels_et_roles = afficher_personnels
 afficher_personnels_roles = afficher_personnels
-afficher_personnels = afficher_personnels

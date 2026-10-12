@@ -169,7 +169,7 @@ def main():
             st.error("Erreur de chargement. Veuillez rafraîchir la page.")
         return
 
-    # --- 2. GARDIEN DE SÉCURITÉ (GATEKEEPER AVANCÉ - TRANSACTION PROPRE) ---
+    # --- 2. GARDIEN DE SÉCURITÉ ---
     nom_utilisateur = st.session_state.get("username")
     role_utilisateur = str(st.session_state.get("role", "")).lower()
     is_super_admin = st.session_state.get("is_super_admin", False)
@@ -187,7 +187,6 @@ def main():
             st.session_state.clear()
             st.rerun()
 
-        # Synchronisation du school_id si nécessaire
         if current_user.school_id and not st.session_state.get("school_id"):
             st.session_state["school_id"] = current_user.school_id
             school_obj = db_sec.query(School).filter(School.id == current_user.school_id).first()
@@ -195,7 +194,6 @@ def main():
                 st.session_state["school_name"] = school_obj.nom
                 st.session_state["school_code"] = school_obj.code
 
-        # --- VÉRIFICATION ÉTABLISSEMENT ---
         if current_user.school_id and not is_super_admin:
             ecole_verif = db_sec.query(School).filter(School.id == current_user.school_id).first()
             if ecole_verif and not getattr(ecole_verif, "actif", True):
@@ -203,7 +201,6 @@ def main():
                 st.error(f"⛔ L'établissement '{ecole_verif.nom}' a été suspendu.")
                 st.stop()
 
-        # --- SECURITE : FORÇAGE MOT DE PASSE (OWASP) ---
         if not is_super_admin and getattr(current_user, "changer_mdp_requis", False):
             st.markdown('<style>[data-testid="stSidebar"] { display: none !important; }</style>', unsafe_allow_html=True)
             st.markdown("<br><h2 style='text-align: center; color: #C5A059;'>🔒 Sécurité Obligatoire</h2>", unsafe_allow_html=True)
@@ -228,7 +225,6 @@ def main():
                                 current_user.password = hashed.decode("utf-8")
                                 current_user.changer_mdp_requis = False
                                 db_sec.commit()
-                                logger.info(f"Mot de passe mis à jour pour {nom_utilisateur}")
                                 st.success("✅ Succès ! Chargement...")
                                 st.rerun()
                             except Exception as ex:
@@ -236,7 +232,6 @@ def main():
                                 st.error(f"Erreur : {ex}")
             return
 
-        # Mise à jour de l'activité avec validation de transaction propre
         current_user.derniere_activite = datetime.now(timezone.utc)
         db_sec.commit()
 
@@ -257,7 +252,6 @@ def main():
             logo_file = None
             fichiers_racine = os.listdir(".")
 
-            # 1. Recherche par correspondance du code ou nom de l'école dans les fichiers de la racine
             mots_cles = [school_code, school_name]
             mots_cles_propres = [re.sub(r'[^a-z0-9]', '', m.lower()) for m in mots_cles if m]
 
@@ -268,13 +262,11 @@ def main():
                         logo_file = fichier
                         break
 
-            # 2. Recherche automatique par ID de l'établissement (ex: logo_15.png)
             if not logo_file and school_id:
                 candidate = f"logo_{school_id}.png"
                 if os.path.exists(candidate):
                     logo_file = candidate
 
-            # 3. Repli ultime sur le logo global par défaut
             if not logo_file and os.path.exists("Logo Gestion Scolaire Pro.png"):
                 logo_file = "Logo Gestion Scolaire Pro.png"
 
@@ -340,8 +332,8 @@ def main():
         elif role_utilisateur == "enseignant":
             st.markdown("#### 👨‍🏫 Portail Enseignant")
             st.info(f"Connecté : **{nom_utilisateur}**")
-            options_menu = ["Espace Enseignants", "Cahier de Texte", "Saisie des notes"]
-            icons_menu = ["person-video3", "journal-text", "pencil-square"]
+            options_menu = ["Espace Enseignants"]
+            icons_menu = ["person-video3"]
             menu_key_val = "menu_enseignant"
 
         elif role_utilisateur == "parent":
