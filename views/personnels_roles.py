@@ -54,15 +54,19 @@ def afficher_personnels():
                 f"### Liste du personnel — **{school_name} ({cycle_en_cours})**"
             )
 
+            # Filtrage strict : Exclusion des enseignants pour les séparer du module Enseignants
             users_query = db.query(User).filter(
-                User.school_id == ecole_active_id, User.role != "super_admin"
+                User.school_id == ecole_active_id,
+                User.role != "super_admin",
+                User.role != "enseignant",
+                User.enseignant_id.is_(None)
             )
             if hasattr(User, "deleted_at"):
                 users_query = users_query.filter(User.deleted_at.is_(None))
             personnel_list = users_query.all()
 
             if not personnel_list:
-                st.info("Aucun membre du personnel enregistré pour cet établissement.")
+                st.info("Aucun membre du personnel administratif enregistré pour cet établissement.")
             else:
                 cols = st.columns([2, 1.5, 2, 2, 1.2])
                 cols[0].markdown("**Nom / Agent**")
@@ -75,7 +79,7 @@ def afficher_personnels():
                 for p in personnel_list:
                     c = st.columns([2, 1.5, 2, 2, 1.2])
                     c[0].write(f"👤 **{getattr(p, 'username', 'N/A')}**")
-                    c[1].markdown(f"`{getattr(p, 'role', 'enseignant')}`")
+                    c[1].markdown(f"`{getattr(p, 'role', 'agent')}`")
                     
                     with c[2]:
                         nouveau_salaire = st.number_input(
@@ -108,7 +112,6 @@ def afficher_personnels():
                         with col_btn2:
                             if st.button("🗑️", key=f"btn_del_{p.id}", help="Supprimer cet agent"):
                                 try:
-                                    # Dissociation propre des élèves rattachés pour éviter la violation de clé étrangère
                                     eleves_lies = db.query(Eleve).filter(Eleve.parent_id == p.id).all()
                                     for eleve in eleves_lies:
                                         eleve.parent_id = None
@@ -132,7 +135,7 @@ def afficher_personnels():
                     poste_agent = st.selectbox(
                         "Fonction / Poste",
                         [
-                            "directeur", "proviseur", "censeur", "enseignant",
+                            "directeur", "proviseur", "censeur",
                             "comptable", "econome", "surveillant", "secretaire",
                             "planton", "jardinier", "gardien"
                         ]
