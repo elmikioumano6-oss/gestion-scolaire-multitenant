@@ -1,11 +1,7 @@
 from datetime import datetime
-import urllib.parse
-import string
-import random
 import unicodedata
 import pandas as pd
 import streamlit as st
-from werkzeug.security import generate_password_hash
 from database.audit import log_action_erp
 from database.db_config import SessionLocal
 from database.models import Classe, Enseignant, Matiere, School, User
@@ -82,19 +78,6 @@ def get_matieres_dynamiques(selected_classes_labels, classes_cycle, ecole_active
             m_dict[n_key] = m
             
     return sorted([(m.libelle if hasattr(m, 'libelle') and m.libelle else getattr(m, 'nom', 'Matière')).title() for m in m_dict.values()])
-
-def generer_lien_whatsapp_prof(telephone, nom_prof, username, password_clair):
-    telephone_propre = str(telephone).replace(" ", "").replace("+", "")
-    message = (
-        f"Bonjour M./Mme {nom_prof}, 👋\n\n"
-        f"Votre compte enseignant a été créé avec succès au sein de notre établissement.\n\n"
-        f"Voici vos identifiants pour accéder à votre Espace Pédagogique :\n\n"
-        f"👤 *Utilisateur* : {username}\n"
-        f"🔑 *Mot de passe* : {password_clair}\n\n"
-        f"Cordialement,\n*L'Administration*"
-    )
-    texte_encode = urllib.parse.quote(message)
-    return f"https://wa.me/{telephone_propre}?text={texte_encode}"
 
 def afficher_enseignants():
     st.subheader("👥 Gestion du Corps Professoral & Enseignants")
@@ -275,8 +258,12 @@ def afficher_enseignants():
                                     prenom=prenom_prof.strip(),
                                     telephone=tel_prof.strip() if tel_prof else None
                                 )
+                                if hasattr(nouvel_enseignant, "email"):
+                                    nouvel_enseignant.email = email_prof.strip() if email_prof else None
+
                                 str_classes = ", ".join(classes_attribuees) if classes_attribuees else "Aucune"
                                 str_matieres = ", ".join(matieres_attribuees) if matieres_attribuees else "Aucune"
+                                
                                 if hasattr(nouvel_enseignant, "classes_attribuees"):
                                     nouvel_enseignant.classes_attribuees = str_classes
                                 if hasattr(nouvel_enseignant, "classes"):
@@ -287,24 +274,8 @@ def afficher_enseignants():
                                     nouvel_enseignant.matieres = str_matieres
 
                                 db.add(nouvel_enseignant)
-                                db.flush()
-
-                                password_genere = ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(8))
-                                username_prof = f"prof_{nom_prof.strip().lower().replace(' ', '')}{random.randint(10, 99)}"
-
-                                nouveau_user_prof = User(
-                                    username=username_prof,
-                                    password=generate_password_hash(password_genere),
-                                    role="enseignant",
-                                    school_id=ecole_active_id
-                                )
-                                if hasattr(nouveau_user_prof, "enseignant_id"):
-                                    nouveau_user_prof.enseignant_id = nouvel_enseignant.id
-
-                                db.add(nouveau_user_prof)
                                 db.commit()
-                                st.success("✅ Enseignant enregistré avec succès !")
-                                st.rerun()
+                                st.success("✅ Enseignant enregistré avec succès ! Vous pouvez maintenant lui créer un accès sécurisé depuis le module 'Gestion Comptes'.")
                             except Exception as e:
                                 db.rollback()
                                 st.error(f"Erreur : {e}")
