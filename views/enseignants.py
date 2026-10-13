@@ -107,7 +107,7 @@ def afficher_enseignants():
 
     db = SessionLocal()
     try:
-        classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours, Classe.school_id == ecole_active_id)
+        classes_query = db.query(Classe).filter(Classe.school_id == ecole_active_id)
         if hasattr(Classe, "deleted_at"):
             classes_query = classes_query.filter(Classe.deleted_at.is_(None))
         classes_cycle = classes_query.all()
@@ -116,22 +116,14 @@ def afficher_enseignants():
         tab_liste, tab_ajout = st.tabs(["📋 Liste des Enseignants", "➕ Enregistrer un Enseignant"])
 
         with tab_liste:
-            st.markdown(f"### Enseignants Actifs — **{school_name} ({cycle_en_cours})**")
+            st.markdown(f"### Enseignants Actifs — **{school_name}**")
             ens_query = db.query(Enseignant).filter(Enseignant.school_id == ecole_active_id)
             if hasattr(Enseignant, "deleted_at"):
                 ens_query = ens_query.filter(Enseignant.deleted_at.is_(None))
-            tous_enseignants = ens_query.all()
-
-            noms_classes_cycle = {c.libelle for c in classes_cycle}
-            enseignants = []
-            for prof in tous_enseignants:
-                classes_str = getattr(prof, "classes_attribuees", "") or getattr(prof, "classes", "") or ""
-                classes_prof = [c.strip() for c in classes_str.split(",") if c.strip()]
-                if not classes_prof or any(cls in noms_classes_cycle for cls in classes_prof):
-                    enseignants.append(prof)
+            enseignants = ens_query.all()
 
             if not enseignants:
-                st.info(f"Aucun enseignant actif enregistré sous le cycle **{cycle_en_cours}**.")
+                st.info("Aucun enseignant actif enregistré pour cet établissement.")
             else:
                 cols = st.columns([1.5, 1.5, 2, 2, 2])
                 cols[0].markdown("**Nom & Prénom**")
@@ -229,9 +221,9 @@ def afficher_enseignants():
                             st.rerun()
 
         with tab_ajout:
-            st.markdown(f"### Enregistrement — **{school_name} ({cycle_en_cours})**")
+            st.markdown(f"### Enregistrement — **{school_name}**")
             if not classes_cycle:
-                st.warning(f"⚠️ Veuillez configurer des classes pour le cycle **{cycle_en_cours}**.")
+                st.warning("⚠️ Veuillez configurer des classes pour l'établissement.")
             else:
                 with st.form("form_ajout_enseignant", clear_on_submit=False):
                     col_a1, col_a2 = st.columns(2)
