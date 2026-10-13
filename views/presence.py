@@ -1,6 +1,5 @@
 from datetime import datetime
 import io
-from database.queries import get_classes_cached
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
@@ -14,7 +13,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 
 def afficher_presence():
-    # --- STYLE CSS DÉDIÉ POUR L'IMPRESSION SUR PAGE A4 ---
+    # --- STYLE CSS DESIGN ERP HAUT DE GAMME ---
     st.markdown(
         """
     <style>
@@ -51,14 +50,19 @@ def afficher_presence():
 
     st.subheader("📋 Gestion de l'Assiduité & Registre des Présences")
     st.markdown(
-        "Suivi des présences en temps réel, saisie par les enseignants et tableau"
-        " de bord de contrôle pour le Censeur."
+        "Suivi des présences en temps réel, contrôle de la discipline et tableau "
+        "de bord de régularisation pour la Censure."
     )
     st.markdown("---")
 
     school_id = st.session_state.get("school_id")
     is_super_admin = st.session_state.get("is_super_admin", False)
-    role_utilisateur = str(st.session_state.get("role", "")).lower()
+    
+    query_params = st.query_params if hasattr(st, "query_params") else {}
+    role_url = str(query_params.get("role", "")).lower()
+    role_session = str(st.session_state.get("role", "")).lower()
+    role_utilisateur = role_url if role_url else role_session
+
     username = st.session_state.get("username", "admin")
     cycle_en_cours = st.session_state.get("cycle_actif", "Collège")
 
@@ -74,36 +78,17 @@ def afficher_presence():
             target_school_id = ecole_defaut.id if ecole_defaut else 1
 
         if school_id:
-            ecole_courante = (
-                db.query(School).filter(School.id == school_id).first()
-            )
-            school_name = (
-                ecole_courante.nom
-                if ecole_courante
-                else st.session_state.get("school_name", "Établissement")
-            )
-            school_devise = (
-                ecole_courante.devise
-                if ecole_courante
-                else "Excellence - Persévérance - Réussite"
-            )
-            school_adresse = (
-                ecole_courante.adresse
-                if ecole_courante and ecole_courante.adresse
-                else "Niamey - Niger"
-            )
-            school_contacts = (
-                ecole_courante.contacts
-                if ecole_courante and ecole_courante.contacts
-                else "N/D"
-            )
+            ecole_courante = db.query(School).filter(School.id == school_id).first()
+            school_name = ecole_courante.nom if ecole_courante else st.session_state.get("school_name", "Établissement")
+            school_devise = ecole_courante.devise if ecole_courante else "Excellence - Persévérance - Réussite"
+            school_adresse = ecole_courante.adresse if ecole_courante and ecole_courante.adresse else "Niamey - Niger"
+            school_contacts = ecole_courante.contacts if ecole_courante and ecole_courante.contacts else "N/D"
         else:
             school_name = st.session_state.get("school_name", "Établissement")
             school_devise = "Excellence - Persévérance - Réussite"
             school_adresse = "Niamey - Niger"
             school_contacts = "N/D"
 
-        # Récupération de l'année scolaire active
         annee_active = (
             db.query(AnneeScolaire)
             .filter(
@@ -114,62 +99,34 @@ def afficher_presence():
         )
         libelle_annee = annee_active.libelle if annee_active else str(datetime.now().year)
 
-        # Isolation des classes par cycle et par école
         classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours)
         if not is_super_admin and school_id:
             classes_query = classes_query.filter(Classe.school_id == school_id)
         else:
-            classes_query = classes_query.filter(
-                Classe.school_id == target_school_id
-            )
+            classes_query = classes_query.filter(Classe.school_id == target_school_id)
         classes_cycle = classes_query.all()
 
-        # --- ZONE IMPRIMABLE ---
         st.markdown('<div class="printable-area">', unsafe_allow_html=True)
-
-        st.markdown(
-            f"### Suivi d'Assiduité ({libelle_annee}) — **{school_name} ({cycle_en_cours})**"
-        )
+        st.markdown(f"### Suivi d'Assiduité ({libelle_annee}) — **{school_name} ({cycle_en_cours})**")
 
         if not classes_cycle:
-            st.warning(
-                f"⚠️ Aucune classe configurée pour le cycle **{cycle_en_cours}**."
-            )
+            st.warning(f"⚠️ Aucune classe configurée pour le cycle **{cycle_en_cours}**.")
             st.markdown("</div>", unsafe_allow_html=True)
             return
 
         noms_classes = [
-            (
-                c.libelle
-                if hasattr(c, "libelle") and c.libelle
-                else getattr(c, "nom", "")
-            )
+            (c.libelle if hasattr(c, "libelle") and c.libelle else getattr(c, "nom", ""))
             for c in classes_cycle
         ]
 
         col_sel1, col_sel2 = st.columns(2)
         with col_sel1:
-            classe_choisie = st.selectbox(
-                "Sélectionner la classe", noms_classes, key="presence_classe_select"
-            )
+            classe_choisie = st.selectbox("Sélectionner la classe", noms_classes, key="presence_classe_select")
         with col_sel2:
-            date_appel = st.date_input(
-                "Date concernée",
-                value=datetime.now().date(),
-                key="presence_date_select",
-            )
+            date_appel = st.date_input("Date concernée", value=datetime.now().date(), key="presence_date_select")
 
         classe_obj = next(
-            (
-                c
-                for c in classes_cycle
-                if (
-                    c.libelle
-                    if hasattr(c, "libelle")
-                    else getattr(c, "nom", "")
-                )
-                == classe_choisie
-            ),
+            (c for c in classes_cycle if (c.libelle if hasattr(c, "libelle") else getattr(c, "nom", "")) == classe_choisie),
             None,
         )
         if not classe_obj:
@@ -186,18 +143,13 @@ def afficher_presence():
             st.markdown("</div>", unsafe_allow_html=True)
             return
 
-        # --- ROUTAGE DES INTERFACES SELON LE RÔLE ---
-        is_censeur_or_admin = role_utilisateur in [
-            "censeur",
-            "directeur",
-            "super_admin",
-            "surveillant",
-            "admin",
-            "fondateur",
-            "proviseur",
-        ]
+        is_censeur_or_admin = (
+            role_utilisateur in ["censeur", "directeur", "super_admin", "surveillant", "admin", "fondateur", "proviseur"]
+            or is_super_admin
+            or "directeur" in role_utilisateur
+            or "admin" in role_utilisateur
+        )
 
-        # 📋 LISTES DÉROULANTES OFFICIELLES (NORME INTERNATIONALE)
         liste_statuts_assiduite = [
             "Présent",
             "Absent non justifié",
@@ -233,144 +185,116 @@ def afficher_presence():
         dict_existantes = {p.eleve_id: p for p in existantes}
 
         if is_censeur_or_admin:
-            # ==========================================
-            # ESPACE CENSEUR / ADMINISTRATION
-            # ==========================================
-            st.info(
-                f"📐 Espace Censeur / Direction — Tableau de contrôle et de régularisation"
-                f" pour la classe de **{classe_choisie}** au"
-                f" {date_appel.strftime('%d/%m/%Y')} ({len(eleves)} élèves)."
+            st.markdown(
+                f"""
+                <div style="background: linear-gradient(135deg, rgba(33, 150, 243, 0.12) 0%, rgba(33, 150, 243, 0.03) 100%); padding: 15px 20px; border-radius: 10px; border-left: 5px solid #2196F3; margin-bottom: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+                    📐 <b style="color: #4da6ff;">Espace Censeur / Direction</b> — Tableau de contrôle et de régularisation pour la classe de <b>{classe_choisie}</b> au <b>{date_appel.strftime('%d/%m/%Y')}</b> (<span style="color: #4da6ff; font-weight: bold;">{len(eleves)} élèves</span> enregistrés).
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
 
             if not existantes:
                 st.warning(
-                    "⚠️ Aucun appel n'a encore été transmis par le professeur pour"
-                    " cette date. La liste complète des élèves s'affiche ci-dessous"
-                    " pour un contrôle ou une saisie administrative par exception."
+                    "⚠️ Aucun appel n'a encore été transmis par le professeur pour cette date. "
+                    "Vous pouvez procéder ci-dessous au contrôle ou à la régularisation administrative de l'ensemble de la classe."
                 )
 
-            data_suivi_censeur = []
-            for e in eleves:
-                p_ex = dict_existantes.get(e.id)
-                statut_defaut = p_ex.statut if p_ex else "Présent"
-                motif_defaut = p_ex.motif if p_ex and p_ex.motif in liste_motifs else "Aucun"
+            with st.form(key=f"form_censeur_{classe_choisie}_{date_appel}"):
+                saisie_censeur = []
+                
+                hc1, hc2, hc3, hc4 = st.columns([1.5, 3.2, 3.0, 3.3])
+                hc1.markdown("<p style='color: #94a3b8; font-weight: 600; font-size: 0.85rem; text-transform: uppercase;'>Matricule</p>", unsafe_allow_html=True)
+                hc2.markdown("<p style='color: #94a3b8; font-weight: 600; font-size: 0.85rem; text-transform: uppercase;'>Nom & Prénom</p>", unsafe_allow_html=True)
+                hc3.markdown("<p style='color: #94a3b8; font-weight: 600; font-size: 0.85rem; text-transform: uppercase;'>Statut administratif</p>", unsafe_allow_html=True)
+                hc4.markdown("<p style='color: #94a3b8; font-weight: 600; font-size: 0.85rem; text-transform: uppercase;'>Motif / Visa de la Censure</p>", unsafe_allow_html=True)
+                st.markdown("<hr style='margin: 5px 0 15px 0; border-color: rgba(255,255,255,0.1);'>", unsafe_allow_html=True)
 
-                data_suivi_censeur.append({
-                    "eleve_id": e.id,
-                    "Matricule": e.matricule,
-                    "Nom & Prénom": f"{e.nom} {e.prenom}",
-                    "Statut": statut_defaut,
-                    "Motif / Remarque": motif_defaut,
-                })
+                for e in eleves:
+                    p_ex = dict_existantes.get(e.id)
+                    statut_val = p_ex.statut if p_ex and p_ex.statut in liste_statuts_assiduite else "Présent"
+                    motif_val = p_ex.motif if p_ex and p_ex.motif in liste_motifs else "Aucun"
 
-            df_suivi = pd.DataFrame(data_suivi_censeur)
-
-            edited_df_censeur = st.data_editor(
-                df_suivi,
-                column_config={
-                    "eleve_id": None,
-                    "Matricule": st.column_config.TextColumn(
-                        "Matricule", disabled=True
-                    ),
-                    "Nom & Prénom": st.column_config.TextColumn(
-                        "Nom & Prénom", disabled=True
-                    ),
-                    "Statut": st.column_config.SelectboxColumn(
-                        "Statut administratif",
+                    rc1, rc2, rc3, rc4 = st.columns([1.5, 3.2, 3.0, 3.3])
+                    rc1.markdown(f"<div style='padding-top: 8px;'><span style='background-color: rgba(77, 166, 255, 0.1); color: #4da6ff; padding: 4px 8px; border-radius: 4px; font-weight: 600; font-size: 0.9rem;'>{e.matricule or 'N/A'}</span></div>", unsafe_allow_html=True)
+                    rc2.markdown(f"<div style='padding-top: 8px; font-weight: 500; font-size: 0.95rem;'>{e.nom} {e.prenom}</div>", unsafe_allow_html=True)
+                    
+                    choix_statut = rc3.selectbox(
+                        f"Statut_{e.id}",
                         options=liste_statuts_assiduite,
-                        required=True,
-                    ),
-                    "Motif / Remarque": st.column_config.SelectboxColumn(
-                        "Motif / Visa de la Censure",
+                        index=liste_statuts_assiduite.index(statut_val) if statut_val in liste_statuts_assiduite else 0,
+                        label_visibility="collapsed",
+                        key=f"statut_c_{e.id}"
+                    )
+                    choix_motif = rc4.selectbox(
+                        f"Motif_{e.id}",
                         options=liste_motifs,
-                        required=True,
-                    ),
-                },
-                hide_index=True,
-                use_container_width=True,
-                key=f"editor_censeur_{classe_choisie}_{date_appel}",
-            )
+                        index=liste_motifs.index(motif_val) if motif_val in liste_motifs else 0,
+                        label_visibility="collapsed",
+                        key=f"motif_c_{e.id}"
+                    )
 
-            # --- BOUTONS D'ACTIONS ---
-            col_exp1, col_exp2, col_exp3, col_exp4 = st.columns([2, 1.2, 1.2, 2])
+                    saisie_censeur.append({
+                        "eleve_id": e.id,
+                        "Matricule": e.matricule or "N/A",
+                        "Nom & Prénom": f"{e.nom} {e.prenom}",
+                        "Statut administratif": choix_statut,
+                        "Motif / Visa de la Censure": choix_motif,
+                    })
 
-            with col_exp1:
-                if st.button(
-                    "🛡️ Enregistrer les modifications de la Censure", type="primary"
-                ):
-                    eleve_ids = [
-                        row["eleve_id"] for _, row in edited_df_censeur.iterrows()
-                    ]
-                    db.query(Presence).filter(
-                        Presence.school_id == target_school_id,
-                        Presence.date == date_appel,
-                        Presence.eleve_id.in_(eleve_ids),
-                    ).delete(synchronize_session=False)
+                st.markdown("<hr style='margin: 20px 0 15px 0; border-color: rgba(255,255,255,0.1);'>", unsafe_allow_html=True)
+                submitted_censure = st.form_submit_button("🛡️ Enregistrer les modifications de la Censure", type="primary")
 
-                    for _, row in edited_df_censeur.iterrows():
-                        nouvelle_presence = Presence(
+                if submitted_censure:
+                    local_db = SessionLocal()
+                    try:
+                        eleve_ids = [item["eleve_id"] for item in saisie_censeur]
+                        local_db.query(Presence).filter(
+                            Presence.school_id == target_school_id,
+                            Presence.date == date_appel,
+                            Presence.eleve_id.in_(eleve_ids),
+                        ).delete(synchronize_session=False)
+
+                        for item in saisie_censeur:
+                            nouvelle_presence = Presence(
+                                school_id=target_school_id,
+                                eleve_id=item["eleve_id"],
+                                date=date_appel,
+                                statut=item["Statut administratif"],
+                                motif=item["Motif / Visa de la Censure"] if item["Motif / Visa de la Censure"] != "Aucun" else None,
+                            )
+                            local_db.add(nouvelle_presence)
+
+                        nouveau_log = ActivityLog(
                             school_id=target_school_id,
-                            eleve_id=row["eleve_id"],
-                            date=date_appel,
-                            statut=row["Statut"],
-                            motif=(
-                                row["Motif / Remarque"].strip()
-                                if row["Motif / Remarque"]
-                                and row["Motif / Remarque"] != "Aucun"
-                                else None
-                            ),
+                            timestamp=datetime.now(),
+                            username=username,
+                            action=f"Validation censure — Classe {classe_choisie} ({date_appel.strftime('%d/%m/%Y')}) par {username}",
+                            module="Présence",
+                            statut="Succès",
                         )
-                        db.add(nouvelle_presence)
+                        local_db.add(nouveau_log)
+                        local_db.commit()
+                        st.success(f"✅ Registre officiel de la classe **{classe_choisie}** mis à jour et archivé avec succès !")
+                        st.rerun()
+                    except Exception as err:
+                        local_db.rollback()
+                        st.error(f"Erreur de base de données : {err}")
+                    finally:
+                        local_db.close()
 
-                    nouveau_log = ActivityLog(
-                        school_id=target_school_id,
-                        timestamp=datetime.now(),
-                        username=username,
-                        action=(
-                            f"Validation/Régularisation censure — Classe {classe_choisie}"
-                            f" ({date_appel.strftime('%d/%m/%Y')}) par {username}"
-                        ),
-                        module="Présence",
-                        statut="Succès",
-                    )
-                    db.add(nouveau_log)
-                    db.commit()
-
-                    st.success(
-                        f"✅ Registre officiel de la classe **{classe_choisie}** mis à jour"
-                        " et archivé avec succès !"
-                    )
-                    st.rerun()
+            df_suivi = pd.DataFrame(saisie_censeur)
+            st.markdown("<br>", unsafe_allow_html=True)
+            col_exp2, col_exp3, col_exp4 = st.columns([1.2, 1.2, 2])
 
             with col_exp2:
                 pdf_buffer = io.BytesIO()
-                doc = SimpleDocTemplate(
-                    pdf_buffer,
-                    pagesize=landscape(A4),
-                    rightMargin=30,
-                    leftMargin=30,
-                    topMargin=30,
-                    bottomMargin=50,
-                )
-
+                doc = SimpleDocTemplate(pdf_buffer, pagesize=landscape(A4), rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=50)
                 elements = []
                 styles = getSampleStyleSheet()
-
-                title_style = ParagraphStyle(
-                    "TitleStyle",
-                    parent=styles["Heading1"],
-                    fontSize=14,
-                    textColor=colors.HexColor("#1e3a8a"),
-                    alignment=1,
-                    spaceAfter=15,
-                )
-
-                elements.append(
-                    Paragraph(
-                        f"REGISTRE DE PRÉSENCE ({libelle_annee}) — CLASSE : {classe_choisie} ({school_name}) — Date : {date_appel.strftime('%d/%m/%Y')}",
-                        title_style,
-                    )
-                )
+                title_style = ParagraphStyle("TitleStyle", parent=styles["Heading1"], fontSize=14, textColor=colors.HexColor("#1e3a8a"), alignment=1, spaceAfter=15)
+                
+                elements.append(Paragraph(f"REGISTRE DE PRÉSENCE ({libelle_annee}) — CLASSE : {classe_choisie} ({school_name}) — Date : {date_appel.strftime('%d/%m/%Y')}", title_style))
                 elements.append(Spacer(1, 10))
 
                 df_pdf = df_suivi.drop(columns=["eleve_id"]) if "eleve_id" in df_suivi.columns else df_suivi
@@ -380,187 +304,111 @@ def afficher_presence():
 
                 col_widths = [780 / len(df_pdf.columns)] * len(df_pdf.columns)
                 t = Table(table_data, colWidths=col_widths)
-                t.setStyle(
-                    TableStyle([
-                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a8a")),
-                        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                        ("FONTSIZE", (0, 0), (-1, 0), 9),
-                        ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
-                        ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#f8fafc")),
-                        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
-                        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-                        ("FONTSIZE", (0, 1), (-1, -1), 9),
-                        ("BOTTOMPADDING", (0, 1), (-1, -1), 6),
-                        ("TOPPADDING", (0, 1), (-1, -1), 6),
-                    ])
-                )
+                t.setStyle(TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a8a")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, 0), 9),
+                    ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#f8fafc")),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+                    ("FONTSIZE", (0, 1), (-1, -1), 9),
+                ]))
                 elements.append(t)
 
                 def add_footer(canvas, doc_obj):
                     canvas.saveState()
-                    footer_y = 22
                     footer_text = f"<b>{school_name}</b> | Adresse : {school_adresse} | Contacts : {school_contacts} | Devise : <i>{school_devise}</i>"
-                    footer_style = ParagraphStyle(
-                        "FooterStyle",
-                        parent=styles["Normal"],
-                        fontSize=8,
-                        textColor=colors.HexColor("#475569"),
-                        alignment=1,
-                    )
+                    footer_style = ParagraphStyle("FooterStyle", parent=styles["Normal"], fontSize=8, textColor=colors.HexColor("#475569"), alignment=1)
                     p = Paragraph(footer_text, footer_style)
-                    p.wrap(doc_obj.pagesize[0] - 60, footer_y)
-                    p.drawOn(canvas, 30, footer_y)
+                    p.wrap(doc_obj.pagesize[0] - 60, 22)
+                    p.drawOn(canvas, 30, 22)
                     canvas.restoreState()
 
                 doc.build(elements, onFirstPage=add_footer)
-                pdf_data = pdf_buffer.getvalue()
-
-                st.download_button(
-                    label="📥 PDF",
-                    data=pdf_data,
-                    file_name=f"Registre_Presence_{classe_choisie}_{date_appel.strftime('%Y%m%d')}.pdf",
-                    mime="application/pdf",
-                )
+                st.download_button("📥 Télécharger PDF", data=pdf_buffer.getvalue(), file_name=f"Registre_Presence_{classe_choisie}.pdf", mime="application/pdf")
 
             with col_exp3:
-                components.html(
-                    """
-                    <button onclick="parent.window.print()" style="
-                        background-color: #2563eb;
-                        color: white;
-                        border: none;
-                        padding: 0.45rem 1rem;
-                        font-size: 0.85rem;
-                        font-weight: 500;
-                        border-radius: 6px;
-                        cursor: pointer;
-                        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-                        font-family: sans-serif;
-                    ">🖨️ Imprimer</button>
-                    """,
-                    height=40,
-                )
+                components.html('<button onclick="parent.window.print()" style="background-color: #2563eb; color: white; border: none; padding: 0.5rem 1rem; font-size: 0.9rem; border-radius: 6px; cursor: pointer; font-family: sans-serif;">🖨️ Imprimer</button>', height=45)
 
             with col_exp4:
                 csv_data = df_suivi.drop(columns=["eleve_id"]).to_csv(index=False).encode("utf-8")
-                st.download_button(
-                    label="📥 CSV",
-                    data=csv_data,
-                    file_name=(
-                        f"appel_{classe_choisie}_{date_appel.strftime('%Y%m%d')}.csv"
-                    ),
-                    mime="text/csv",
-                )
+                st.download_button("📥 Télécharger CSV", data=csv_data, file_name=f"appel_{classe_choisie}.csv", mime="text/csv")
 
         else:
-            # ==========================================
-            # ESPACE ENSEIGNANT
-            # ==========================================
-            st.info(
-                f"👨‍🏫 Espace Enseignant — Feuille d'appel active pour la classe de"
-                f" **{classe_choisie}** ({len(eleves)} élèves)."
-            )
+            st.info(f"👨‍🏫 Espace Enseignant — Feuille d'appel active pour la classe de **{classe_choisie}** ({len(eleves)} élèves).")
 
-            data_appel = []
-            for e in eleves:
-                p_ex = dict_existantes.get(e.id)
-                statut_defaut = p_ex.statut if p_ex else "Présent"
-                motif_defaut = p_ex.motif if p_ex and p_ex.motif in liste_motifs else "Aucun"
+            with st.form(key=f"form_ens_{classe_choisie}_{date_appel}"):
+                saisie_ens = []
+                hc1, hc2, hc3, hc4 = st.columns([1.5, 3.2, 3.0, 3.3])
+                hc1.markdown("<p style='color: #94a3b8; font-weight: 600; font-size: 0.85rem; text-transform: uppercase;'>Matricule</p>", unsafe_allow_html=True)
+                hc2.markdown("<p style='color: #94a3b8; font-weight: 600; font-size: 0.85rem; text-transform: uppercase;'>Nom & Prénom</p>", unsafe_allow_html=True)
+                hc3.markdown("<p style='color: #94a3b8; font-weight: 600; font-size: 0.85rem; text-transform: uppercase;'>Statut</p>", unsafe_allow_html=True)
+                hc4.markdown("<p style='color: #94a3b8; font-weight: 600; font-size: 0.85rem; text-transform: uppercase;'>Précisions / Motif</p>", unsafe_allow_html=True)
+                st.markdown("<hr style='margin: 5px 0 15px 0; border-color: rgba(255,255,255,0.1);'>", unsafe_allow_html=True)
 
-                data_appel.append({
-                    "eleve_id": e.id,
-                    "Matricule": e.matricule,
-                    "Nom & Prénom": f"{e.nom} {e.prenom}",
-                    "Statut": statut_defaut,
-                    "Motif": motif_defaut,
-                })
+                for e in eleves:
+                    p_ex = dict_existantes.get(e.id)
+                    statut_val = p_ex.statut if p_ex and p_ex.statut in liste_statuts_assiduite else "Présent"
+                    motif_val = p_ex.motif if p_ex and p_ex.motif in liste_motifs else "Aucun"
 
-            df_appel = pd.DataFrame(data_appel)
-
-            edited_df = st.data_editor(
-                df_appel,
-                column_config={
-                    "eleve_id": None,
-                    "Matricule": st.column_config.TextColumn(
-                        "Matricule", disabled=True
-                    ),
-                    "Nom & Prénom": st.column_config.TextColumn(
-                        "Nom & Prénom", disabled=True
-                    ),
-                    "Statut": st.column_config.SelectboxColumn(
-                        "Statut",
+                    rc1, rc2, rc3, rc4 = st.columns([1.5, 3.2, 3.0, 3.3])
+                    rc1.markdown(f"<div style='padding-top: 8px;'><span style='background-color: rgba(77, 166, 255, 0.1); color: #4da6ff; padding: 4px 8px; border-radius: 4px; font-weight: 600; font-size: 0.9rem;'>{e.matricule or 'N/A'}</span></div>", unsafe_allow_html=True)
+                    rc2.markdown(f"<div style='padding-top: 8px; font-weight: 500; font-size: 0.95rem;'>{e.nom} {e.prenom}</div>", unsafe_allow_html=True)
+                    
+                    choix_statut = rc3.selectbox(
+                        f"Statut_e_{e.id}",
                         options=liste_statuts_assiduite,
-                        required=True,
-                    ),
-                    "Motif": st.column_config.SelectboxColumn(
-                        "Précisions / Motif (si absent ou retard)",
+                        index=liste_statuts_assiduite.index(statut_val) if statut_val in liste_statuts_assiduite else 0,
+                        label_visibility="collapsed",
+                        key=f"statut_e_{e.id}"
+                    )
+                    choix_motif = rc4.selectbox(
+                        f"Motif_e_{e.id}",
                         options=liste_motifs,
-                        required=True,
-                    ),
-                },
-                hide_index=True,
-                use_container_width=True,
-                key=f"editor_presence_{classe_choisie}_{date_appel}",
-            )
-
-            col_ens1, col_ens2 = st.columns(2)
-            with col_ens1:
-                if st.button(
-                    "💾 Transmettre l'appel à la Censure", type="primary"
-                ):
-                    eleve_ids = [row["eleve_id"] for _, row in edited_df.iterrows()]
-                    db.query(Presence).filter(
-                        Presence.school_id == target_school_id,
-                        Presence.date == date_appel,
-                        Presence.eleve_id.in_(eleve_ids),
-                    ).delete(synchronize_session=False)
-
-                    for _, row in edited_df.iterrows():
-                        nouvelle_presence = Presence(
-                            school_id=target_school_id,
-                            eleve_id=row["eleve_id"],
-                            date=date_appel,
-                            statut=row["Statut"],
-                            motif=row["Motif"].strip() if row["Motif"] and row["Motif"] != "Aucun" else None,
-                        )
-                        db.add(nouvelle_presence)
-
-                    nouveau_log = ActivityLog(
-                        school_id=target_school_id,
-                        timestamp=datetime.now(),
-                        username=username,
-                        action=(
-                            f"Saisie appel de classe - {classe_choisie}"
-                            f" ({date_appel.strftime('%d/%m/%Y')}) par le professeur"
-                            f" {username}"
-                        ),
-                        module="Présence",
-                        statut="Succès",
+                        index=liste_motifs.index(motif_val) if motif_val in liste_motifs else 0,
+                        label_visibility="collapsed",
+                        key=f"motif_e_{e.id}"
                     )
-                    db.add(nouveau_log)
-                    db.commit()
 
-                    st.success(
-                        f"✅ Feuille d'appel transmise avec succès pour la classe"
-                        f" **{classe_choisie}** !"
-                    )
-                    st.rerun()
+                    saisie_ens.append({
+                        "eleve_id": e.id,
+                        "Statut": choix_statut,
+                        "Motif": choix_motif,
+                    })
 
-            with col_ens2:
-                csv_data_ens = df_appel.drop(columns=["eleve_id"]).to_csv(index=False).encode("utf-8")
-                st.download_button(
-                    label="📥 Télécharger la feuille (CSV)",
-                    data=csv_data_ens,
-                    file_name=(
-                        f"appel_{classe_choisie}_{date_appel.strftime('%Y%m%d')}.csv"
-                    ),
-                    mime="text/csv",
-                )
+                st.markdown("<hr style='margin: 20px 0 15px 0; border-color: rgba(255,255,255,0.1);'>", unsafe_allow_html=True)
+                submitted_ens = st.form_submit_button("💾 Transmettre l'appel à la Censure", type="primary")
 
-        # --- PIED DE PAGE INSTITUTIONNEL ---
+                if submitted_ens:
+                    local_db = SessionLocal()
+                    try:
+                        eleve_ids = [item["eleve_id"] for item in saisie_ens]
+                        local_db.query(Presence).filter(
+                            Presence.school_id == target_school_id,
+                            Presence.date == date_appel,
+                            Presence.eleve_id.in_(eleve_ids),
+                        ).delete(synchronize_session=False)
+
+                        for item in saisie_ens:
+                            nouvelle_presence = Presence(
+                                school_id=target_school_id,
+                                eleve_id=item["eleve_id"],
+                                date=date_appel,
+                                statut=item["Statut"],
+                                motif=item["Motif"] if item["Motif"] != "Aucun" else None,
+                            )
+                            local_db.add(nouvelle_presence)
+                        local_db.commit()
+                        st.success("✅ Feuille d'appel transmise avec succès !")
+                        st.rerun()
+                    except Exception as err:
+                        local_db.rollback()
+                        st.error(f"Erreur de base de données : {err}")
+                    finally:
+                        local_db.close()
+
         st.markdown(
             f"""
             <div class="print-footer" style="margin-top: 40px; padding: 15px; border-top: 1px solid rgba(255,255,255,0.1); text-align: center; color: #94a3b8; font-size: 0.85rem;">
@@ -574,7 +422,5 @@ def afficher_presence():
     finally:
         db.close()
 
-
-# Alias de compatibilité
 afficher_gestion_presence = afficher_presence
 afficher_presence = afficher_presence
