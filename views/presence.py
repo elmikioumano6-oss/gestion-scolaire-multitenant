@@ -192,6 +192,9 @@ def afficher_presence():
             "directeur",
             "super_admin",
             "surveillant",
+            "admin",
+            "fondateur",
+            "proviseur",
         ]
 
         # 📋 LISTES DÉROULANTES OFFICIELLES (NORME INTERNATIONALE)

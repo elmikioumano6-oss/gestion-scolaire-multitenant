@@ -149,19 +149,26 @@ def afficher_enseignants():
                             st.session_state[f"deleting_prof_{prof.id}"] = True
 
                     if st.session_state.get(f"deleting_prof_{prof.id}", False):
-                        st.warning(f"Voulez-vous vraiment archiver **{prof.nom} {prof.prenom}** ?")
+                        st.warning(f"Voulez-vous vraiment archiver ou supprimer **{prof.nom} {prof.prenom}** ?")
                         col_conf1, col_conf2 = st.columns(2)
                         with col_conf1:
                             if st.button("Confirmer", key=f"confirm_del_prof_{prof.id}", type="primary"):
-                                if hasattr(prof, "deleted_at"):
-                                    prof.deleted_at = datetime.now()
+                                try:
+                                    compte_lie = db.query(User).filter(User.enseignant_id == prof.id).first()
+                                    if compte_lie:
+                                        db.delete(compte_lie)
+
+                                    if hasattr(prof, "deleted_at"):
+                                        prof.deleted_at = datetime.now()
+                                    else:
+                                        db.delete(prof)
                                     db.commit()
-                                else:
-                                    db.delete(prof)
-                                    db.commit()
-                                st.success("Enseignant traité avec succès !")
-                                st.session_state[f"deleting_prof_{prof.id}"] = False
-                                st.rerun()
+                                    st.success("Enseignant et son compte associé traités avec succès !")
+                                    st.session_state[f"deleting_prof_{prof.id}"] = False
+                                    st.rerun()
+                                except Exception as err:
+                                    db.rollback()
+                                    st.error(f"Erreur lors de la suppression : {err}")
                         with col_conf2:
                             if st.button("Annuler", key=f"cancel_del_prof_{prof.id}"):
                                 st.session_state[f"deleting_prof_{prof.id}"] = False
