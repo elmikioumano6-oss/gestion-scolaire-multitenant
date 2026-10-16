@@ -54,11 +54,12 @@ def afficher_personnels():
                 f"### Liste du personnel — **{school_name} ({cycle_en_cours})**"
             )
 
-            # Filtrage strict : Exclusion des enseignants pour les séparer du module Enseignants
+            # Filtrage strict : Exclusion des enseignants, super_admin et des parents
             users_query = db.query(User).filter(
                 User.school_id == ecole_active_id,
                 User.role != "super_admin",
                 User.role != "enseignant",
+                User.role != "parent",
                 User.enseignant_id.is_(None)
             )
             if hasattr(User, "deleted_at"):
