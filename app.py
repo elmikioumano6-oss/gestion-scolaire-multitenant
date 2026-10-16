@@ -16,10 +16,8 @@ from streamlit_option_menu import option_menu
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# Chargement explicite des variables d'environnement de production
 load_dotenv(override=True)
 
-# Initialisation sécurisée du monitoring Sentry (Normes RGPD / SOC 2)
 sentry_dsn = os.getenv("SENTRY_DSN")
 send_pii = os.getenv("SENTRY_SEND_DEFAULT_PII", "false").lower() == "true"
 environment_mode = os.getenv("ENVIRONMENT", "production")
@@ -37,10 +35,8 @@ from database.db_config import SessionLocal, init_db
 from database.models import AnneeScolaire, School, User
 
 
-# --- 2. ROBUSTESSE : GESTIONNAIRE DE CONTEXTE DB ---
 @contextmanager
 def get_db_session():
-    """Gère l'ouverture et la fermeture sécurisée des connexions SQL."""
     db = SessionLocal()
     try:
         yield db
@@ -64,7 +60,6 @@ def get_libelle_annee_courante():
 
 
 def init_tenant_context():
-    """Détecte proprement le tenant par sous-domaine métier."""
     if st.session_state.get("authenticated") and st.session_state.get("school_id"):
         return
 
@@ -115,7 +110,6 @@ def main():
         initial_sidebar_state="expanded",
     )
 
-    # --- PWA : TRANSFORMATION EN APPLICATION MOBILE NATIVE ---
     st.markdown("""
         <meta name="apple-mobile-web-app-capable" content="yes">
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -124,7 +118,6 @@ def main():
         <meta name="theme-color" content="#111827">
     """, unsafe_allow_html=True)
 
-    # --- INJECTION CSS ---
     st.markdown(
         """
         <style>
@@ -138,7 +131,6 @@ def main():
         """, unsafe_allow_html=True
     )
 
-    # --- INITIALISATION ET MIGRATIONS ---
     if not st.session_state.get("db_initialized", False):
         t0 = time.time()
         init_db()
@@ -149,7 +141,6 @@ def main():
     init_tenant_context()
     logger.info(f"Contexte Tenant initialisé en {time.time() - t0:.2f} s")
 
-    # --- INITIALISATION DE L'ÉTAT DE SESSION ---
     st.session_state.setdefault("authenticated", False)
     st.session_state.setdefault("role", "login")
     st.session_state.setdefault("username", "")
@@ -157,7 +148,6 @@ def main():
     st.session_state.setdefault("school_name", "")
     st.session_state.setdefault("is_super_admin", False)
 
-    # --- 1. GESTION DE LA DÉCONNEXION ---
     if not st.session_state.get("authenticated") or not st.session_state.get("username"):
         st.query_params.clear()
         st.markdown('<style>[data-testid="stSidebar"] { display: none !important; }</style>', unsafe_allow_html=True)
@@ -169,7 +159,6 @@ def main():
             st.error("Erreur de chargement. Veuillez rafraîchir la page.")
         return
 
-    # --- 2. GARDIEN DE SÉCURITÉ ---
     nom_utilisateur = st.session_state.get("username")
     role_utilisateur = str(st.session_state.get("role", "")).lower()
     is_super_admin = st.session_state.get("is_super_admin", False)
@@ -180,10 +169,10 @@ def main():
 
     db_sec = SessionLocal()
     try:
-        current_user = db_sec.query(User).filter(User.username == nom_utilisateur).first()
+        current_user = db_sec.query(User).filter(User.username == nom_utilisateur).first() if nom_utilisateur else None
         
         if not current_user:
-            st.warning("⚠️ Session expirée ou utilisateur introuvable.")
+            st.warning("Session expirée ou utilisateur introuvable.")
             st.session_state.clear()
             st.rerun()
 
@@ -198,13 +187,13 @@ def main():
             ecole_verif = db_sec.query(School).filter(School.id == current_user.school_id).first()
             if ecole_verif and not getattr(ecole_verif, "actif", True):
                 st.session_state.clear()
-                st.error(f"⛔ L'établissement '{ecole_verif.nom}' a été suspendu.")
+                st.error(f"L'établissement '{ecole_verif.nom}' a été suspendu.")
                 st.stop()
 
         if not is_super_admin and getattr(current_user, "changer_mdp_requis", False):
             st.markdown('<style>[data-testid="stSidebar"] { display: none !important; }</style>', unsafe_allow_html=True)
-            st.markdown("<br><h2 style='text-align: center; color: #C5A059;'>🔒 Sécurité Obligatoire</h2>", unsafe_allow_html=True)
-            st.markdown("<p style='text-align: center;'>Veuillez définir votre nouveau mot de passe personnel.</p>", unsafe_allow_html=True)
+            st.markdown("<br><h2 style='text-align: center; color: #C5A059;'>Securite Obligatoire</h2>", unsafe_allow_html=True)
+            st.markdown("<p style='text-align: center;'>Veuillez definir votre nouveau mot de passe personnel.</p>", unsafe_allow_html=True)
 
             col_c1, col_c2, col_c3 = st.columns([1, 2, 1])
             with col_c2:
@@ -215,9 +204,9 @@ def main():
 
                     if submit_btn:
                         if not re.match(r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[A-Za-z\d@$!%*?&]{8,}$", nouveau_p):
-                            st.error("⚠️ Le mot de passe doit contenir au moins 8 caractères, une majuscule et un chiffre.")
+                            st.error("Le mot de passe doit contenir au moins 8 caracteres, une majuscule et un chiffre.")
                         elif nouveau_p != confirme_p:
-                            st.error("⚠️ Les mots de passe ne correspondent pas.")
+                            st.error("Les mots de passe ne correspondent pas.")
                         else:
                             try:
                                 salt = bcrypt.gensalt()
@@ -225,7 +214,7 @@ def main():
                                 current_user.password = hashed.decode("utf-8")
                                 current_user.changer_mdp_requis = False
                                 db_sec.commit()
-                                st.success("✅ Succès ! Chargement...")
+                                st.success("Succes ! Chargement...")
                                 st.rerun()
                             except Exception as ex:
                                 db_sec.rollback()
@@ -237,12 +226,11 @@ def main():
 
     except Exception as e:
         db_sec.rollback()
-        logger.error(f"Erreur critique dans le gardien de sécurité : {e}")
+        logger.error(f"Erreur critique dans le gardien de securite : {e}")
         raise e
     finally:
         db_sec.close()
 
-    # --- 3. BARRE LATÉRALE & NAVIGATION ---
     with st.sidebar:
         try:
             school_id = st.session_state.get("school_id")
@@ -281,12 +269,12 @@ def main():
 
         nom_affiche_ecole = st.session_state.get("school_name", "Gestion Scolaire Pro")
         st.markdown(
-            f"""
+            """
                 <div style="text-align: left; margin-top: -5px;">
-                    <h3 style="color: #C5A059; font-size: 1.1rem; font-weight: 700; margin-bottom: 0px;">{nom_affiche_ecole}</h3>
+                    <h3 style="color: #C5A059; font-size: 1.1rem; font-weight: 700; margin-bottom: 0px;">{}</h3>
                     <p style='color: #D4AF37; font-size: 0.8rem; font-style: italic; margin-top: 2px;'>Gestion Scolaire Pro</p>
                 </div>
-            """, unsafe_allow_html=True
+            """.format(nom_affiche_ecole), unsafe_allow_html=True
         )
 
         st.markdown("<hr style='margin: 0.5rem 0 0.8rem 0; border-color: rgba(197, 160, 89, 0.3);'>", unsafe_allow_html=True)
@@ -403,7 +391,6 @@ def main():
             st.success("Déconnexion réussie !")
             st.rerun()
 
-    # --- 4. DICTIONNAIRE DE ROUTAGE ---
     ROUTES = {
         "📊 Pilotage & BI": ("views.accueil", "afficher_accueil"),
         "🏢 Gestion des Tenants": ("views.super_admin", "afficher_super_admin"),
@@ -454,12 +441,10 @@ def main():
         "Backup": ("views.backup", "backup"),
     }
 
-    # --- 5. SÉCURITÉ DES RÔLES (RBAC STRICT) ---
     if menu_option not in options_menu:
         st.warning("⛔ Accès non autorisé à cette section.")
         st.stop()
 
-    # --- 6. EXÉCUTION DE LA VUE DYNAMIQUE ---
     t0 = time.time()
     if menu_option in ROUTES:
         module_path, nom_fonction = ROUTES[menu_option]

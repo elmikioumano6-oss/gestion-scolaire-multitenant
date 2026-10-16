@@ -323,54 +323,61 @@ def afficher_espace_enseignants():
             else:
                 date_appel = st.date_input("Date de l'appel", value=datetime.now().date(), key="ens_date_appel")
                 
-                data_appel = []
-                for e in eleves:
-                    data_appel.append({
-                        "eleve_id": e.id,
-                        "Matricule": getattr(e, "matricule", "N/A"),
-                        "Nom & Prénom": f"{e.nom} {e.prenom}",
-                        "Statut": "Présent",
-                        "Précisions / Motif": "—",
-                    })
-                df_appel = pd.DataFrame(data_appel)
-                
-                edited_appel = st.data_editor(
-                    df_appel,
-                    use_container_width=True,
-                    column_config={
-                        "Statut": st.column_config.SelectboxColumn(
-                            "Statut",
-                            help="Sélectionner le statut de l'élève",
-                            options=["Présent", "Absent", "Retard", "Puni", "Exclu"],
-                            required=True,
-                        ),
-                        "Précisions / Motif": st.column_config.TextColumn(
-                            "Précisions / Motif",
-                            help="Durée du retard, motif d'absence, etc.",
-                        ),
-                    },
-                    key=f"ens_appel_editor_{classe_enseignant}"
-                )
+                with st.form("form_feuille_appel_enseignant_pro"):
+                    presences_saisies = {}
+                    
+                    col_h1, col_h2, col_h3, col_h4 = st.columns([1, 2, 2, 2])
+                    with col_h1:
+                        st.markdown("**Matricule**")
+                    with col_h2:
+                        st.markdown("**Nom & Prénom**")
+                    with col_h3:
+                        st.markdown("**Statut**")
+                    with col_h4:
+                        st.markdown("**Précisions / Motif**")
+                    st.markdown("<hr style='margin: 0.2rem 0; border-color: rgba(255,255,255,0.1);'>", unsafe_allow_html=True)
 
-                if st.button("📤 Valider et transmettre l'appel à la vie scolaire", type="primary"):
-                    for index, row in edited_appel.iterrows():
-                        statut_choisi = str(row["Statut"])
-                        precision_str = str(row["Précisions / Motif"])
-                        
-                        statut_final = statut_choisi
-                        if precision_str and precision_str != "—":
-                            statut_final = f"{statut_choisi} ({precision_str})"
+                    for e in eleves:
+                        col_m, col_n, col_s, col_p = st.columns([1, 2, 2, 2])
+                        with col_m:
+                            st.markdown(f"**{getattr(e, 'matricule', 'N/A')}**")
+                        with col_n:
+                            st.markdown(f"{e.nom} {e.prenom}")
+                        with col_s:
+                            statut = st.selectbox(
+                                f"Statut {e.id}", 
+                                ["Présent", "Absent", "Retard", "Puni", "Exclu"], 
+                                key=f"ens_statut_{e.id}",
+                                label_visibility="collapsed"
+                            )
+                        with col_p:
+                            motif = st.text_input(
+                                f"Motif {e.id}",
+                                placeholder="—",
+                                key=f"ens_motif_{e.id}",
+                                label_visibility="collapsed"
+                            )
+                        presences_saisies[e.id] = (statut, motif)
+                        st.markdown("<hr style='margin: 0.1rem 0; border-color: rgba(255,255,255,0.03);'>", unsafe_allow_html=True)
 
-                        presence_obj = Presence(
-                            school_id=ecole_active_id,
-                            eleve_id=int(row["eleve_id"]),
-                            date=date_appel,
-                            statut=statut_final,
-                            motif=precision_str if precision_str != "—" else None,
-                        )
-                        db.add(presence_obj)
-                    db.commit()
-                    st.success("✅ Feuille d'appel et de discipline validée et transmise avec succès !")
+                    submit_appel = st.form_submit_button("📤 Valider et transmettre l'appel à la vie scolaire", type="primary", use_container_width=True)
+                    
+                    if submit_appel:
+                        for eleve_id, (statut_choisi, precision_str) in presences_saisies.items():
+                            statut_final = statut_choisi
+                            if precision_str and precision_str.strip() and precision_str != "—":
+                                statut_final = f"{statut_choisi} ({precision_str.strip()})"
+
+                            presence_obj = Presence(
+                                school_id=ecole_active_id,
+                                eleve_id=eleve_id,
+                                date=date_appel,
+                                statut=statut_final,
+                                motif=precision_str.strip() if precision_str and precision_str != "—" else None,
+                            )
+                            db.add(presence_obj)
+                        db.commit()
+                        st.success("✅ Feuille d'appel et de discipline validée et transmise avec succès !")
 
         with tab_charge:
             st.markdown(f"<h4 class='tab-title'>📊 Progression et Heures — {matiere_enseignant} ({classe_enseignant})</h4>", unsafe_allow_html=True)
