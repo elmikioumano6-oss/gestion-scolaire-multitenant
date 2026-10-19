@@ -40,7 +40,7 @@ def generer_lien_whatsapp_compte(telephone, username, password_clair, role):
         )
         
     texte_encode = urllib.parse.quote(message)
-    return f"https://api.whatsapp.com/send?phone={telephone_propre}&text={texte_encode}"
+    return f"https://wa.me/{telephone_propre}?text={texte_encode}"
 
 
 def generer_mdp_personnalise(nom, telephone):
@@ -236,10 +236,7 @@ def afficher_gestion_utilisateurs():
                                     lien_wa_ex = generer_lien_whatsapp_compte(tel_existant, u_cible.username, nouveau_mdp_temp, u_cible.role)
                                     st.success(f"Mot de passe reinitialise pour **{u_cible.username}** !")
                                     st.info(f"Nouveau MDP provisoire : `{nouveau_mdp_temp}`")
-                                    st.markdown(
-                                        '<a href="' + lien_wa_ex + '" target="_blank"><button style="background-color:#25D366; color:white; padding:10px 20px; border:none; border-radius:5px; font-weight:bold; cursor:pointer;">📲 Cliquer pour envoyer sur WhatsApp</button></a>',
-                                        unsafe_allow_html=True
-                                    )
+                                    st.link_button("📲 Cliquer pour envoyer sur WhatsApp", lien_wa_ex, type="primary")
                                 else:
                                     st.warning("Veuillez saisir un numero de telephone WhatsApp valide.")
                         except Exception as ex:
@@ -288,10 +285,7 @@ def afficher_gestion_utilisateurs():
                                 c_g1.write(f"👤 **{item['Utilisateur']}**")
                                 c_g2.write(f"📞 {item['Téléphone']}")
                                 with c_g3:
-                                    st.markdown(
-                                        '<a href="' + item["Lien"] + '" target="_blank"><button style="background-color:#25D366; color:white; padding:6px 12px; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">📲 Envoyer</button></a>',
-                                        unsafe_allow_html=True
-                                    )
+                                    st.link_button(f"📲 Envoyer ({item['Utilisateur']})", item['Lien'], key=f"btn_grp_{idx}", type="primary")
 
                 if is_school_admin or is_super_admin:
                     st.markdown("---")
@@ -326,10 +320,7 @@ def afficher_gestion_utilisateurs():
                 
                 if compte['telephone']:
                     lien_wa = generer_lien_whatsapp_compte(compte['telephone'], compte['username'], compte['password'], compte['role'])
-                    st.markdown(
-                        '<a href="' + lien_wa + '" target="_blank"><button style="background-color:#25D366; color:white; padding:10px 20px; border:none; border-radius:5px; font-weight:bold; cursor:pointer;">📲 Envoyer immédiatement les accès par WhatsApp</button></a>',
-                        unsafe_allow_html=True
-                    )
+                    st.link_button("📲 Envoyer immédiatement les accès par WhatsApp", lien_wa, type="primary")
                 else:
                     st.warning("Aucun numero de telephone n'a ete renseigne pour ce compte.")
                 
