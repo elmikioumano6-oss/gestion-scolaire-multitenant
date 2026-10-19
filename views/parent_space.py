@@ -66,7 +66,6 @@ def afficher_espace_parent():
         eleves_query = db.query(Eleve).filter(Eleve.deleted_at.is_(None))
 
         if user_role and user_role.lower() == "parent" and user_obj:
-            # Récupérer tous les élèves liés à ce parent (via parent_id ou eleve_id)
             eleves_query = eleves_query.filter(
                 (Eleve.parent_id == user_obj.id) | (Eleve.id == user_obj.eleve_id)
             )
@@ -102,7 +101,7 @@ def afficher_espace_parent():
 
             if eleve_obj:
                 classe = db.query(Classe).filter(Classe.id == eleve_obj.classe_id).first() if eleve_obj.classe_id else None
-                classe_nom = classe.libelle if classe and hasattr(classe, "libelle") and classe.libelle else getattr(classe, "nom", "Non assignée")
+                classe_nom = classe.libelle if (classe and hasattr(classe, "libelle") and classe.libelle) else getattr(classe, "nom", "Non assignée")
 
                 notes_list = db.query(Note).filter(Note.eleve_id == eleve_obj.id).all()
                 moy_str = "N/A"
@@ -164,4 +163,87 @@ def afficher_espace_parent():
                         data_notes = []
                         for n in notes_list:
                             mat = db.query(Matiere).filter(Matiere.id == n.matiere_id).first()
-                            mat_lib = mat.libelle if mat and hasattr(mat, "libelle") and mat
+                            mat_lib = mat.libelle if (mat and hasattr(mat, "libelle") and mat.libelle) else getattr(mat, "nom", "N/D")
+                            data_notes.append({
+                                "Matière": mat_lib,
+                                "Type": n.type_evaluation,
+                                "Note /20": float(n.valeur),
+                            })
+                        st.dataframe(pd.DataFrame(data_notes), use_container_width=True, hide_index=True)
+
+                with tab2:
+                    st.markdown("#### Synthèse du Bulletin de Notes")
+                    if not notes_list:
+                        st.info("Bulletin non disponible.")
+                    else:
+                        matieres_classe = db.query(Matiere).filter(Matiere.classe_id == eleve_obj.classe_id).all() if eleve_obj.classe_id else []
+                        dict_coeffs_par_nom = {}
+                        for m in matieres_classe:
+                            nom_m = (m.libelle or getattr(m, "nom", "")).strip().lower()
+                            if nom_m:
+                                dict_coeffs_par_nom[nom_m] = float(getattr(m, 'coefficient', 1.0) or 1.0)
+
+                        matieres_dict = {}
+                        for n in notes_list:
+                            mat = db.query(Matiere).filter(Matiere.id == n.matiere_id).first()
+                            nom_mat = (mat.libelle if (mat and hasattr(mat, "libelle") and mat.libelle) else getattr(mat, "nom", "Autre")) if mat else "Autre"
+                            nom_mat_lower = nom_mat.strip().lower()
+
+                            coef = dict_coeffs_par_nom.get(nom_mat_lower, float(getattr(mat, "coefficient", 1.0) or 1.0) if mat else 1.0)
+
+                            if nom_mat not in matieres_dict:
+                                matieres_dict[nom_mat] = {"notes": [], "coef": coef}
+                            matieres_dict[nom_mat]["notes"].append(float(n.valeur))
+
+                        bulletin_data = []
+                        total_points = 0.0
+                        total_coef = 0.0
+                        for mat_nom, info in matieres_dict.items():
+                            notes = info["notes"]
+                            coef = info["coef"]
+                            moy_mat = sum(notes) / len(notes)
+                            total_points += moy_mat * coef
+                            total_coef += coef
+                            bulletin_data.append({
+                                "Matière": mat_nom,
+                                "Coefficient": coef,
+                                "Moyenne Matière": round(moy_mat, 2),
+                            })
+
+                        st.dataframe(pd.DataFrame(bulletin_data), use_container_width=True, hide_index=True)
+                        if total_coef > 0:
+                            st.metric("Moyenne Générale Estimée", f"{total_points / total_coef:.2f} / 20")
+
+                with tab3:
+                    edt_list = db.query(EmploiDuTemps).filter(EmploiDuTemps.classe_id == eleve_obj.classe_id).all()
+                    if not edt_list:
+                        st.info("Aucun emploi du temps configuré.")
+                    else:
+                        edt_data = [{"Jour": ed.jour, "Heure": ed.heure, "Matière": ed.matiere} for ed in edt_list]
+                        st.dataframe(pd.DataFrame(edt_data), use_container_width=True, hide_index=True)
+
+                with tab4:
+                    if not presences_list:
+                        st.success("Assiduité exemplaire !")
+                    else:
+                        pres_data = [{"Date": p.date.strftime("%d/%m/%Y"), "Statut": p.statut} for p in presences_list]
+                        st.dataframe(pd.DataFrame(pres_data), use_container_width=True, hide_index=True)
+
+                with tab5:
+                    st.metric("Solde Restant", f"{solde_restant:,.0f} FCFA")
+
+                with tab6:
+                    with st.form("form_contact"):
+                        obj = st.text_input("Objet")
+                        msg = st.text_area("Message")
+                        if st.form_submit_button("Envoyer", type="primary"):
+                            if obj and msg:
+                                db.add(Message(school_id=school_id, expediteur=username, destinataire="Administration", objet=obj, contenu=msg, date_envoi=datetime.now()))
+                                db.commit()
+                                st.success("Message envoyé !")
+    finally:
+        db.close()
+
+
+afficher_espace_parent = afficher_espace_parent
+afficher_portail_parent = afficher_espace_parent
