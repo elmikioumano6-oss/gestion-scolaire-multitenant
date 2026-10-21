@@ -3,7 +3,6 @@ import time
 import importlib
 import inspect
 import bcrypt
-import sentry_sdk
 import logging
 import re
 from datetime import datetime, timezone
@@ -17,19 +16,6 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 load_dotenv(override=True)
-
-sentry_dsn = os.getenv("SENTRY_DSN")
-send_pii = os.getenv("SENTRY_SEND_DEFAULT_PII", "false").lower() == "true"
-environment_mode = os.getenv("ENVIRONMENT", "production")
-
-if sentry_dsn:
-    sentry_sdk.init(
-        dsn=sentry_dsn,
-        environment=environment_mode,
-        traces_sample_rate=0.2,
-        profiles_sample_rate=0.2,
-        send_default_pii=send_pii,
-    )
 
 from database.db_config import SessionLocal, init_db
 from database.models import AnneeScolaire, School, User
@@ -308,12 +294,12 @@ def main():
                 "Accueil", "Tableau de Bord", "Matières & Coeffs", "Classes & Tarifs", "Emploi du temps", 
                 "Planification des évaluations", "Cahier de Texte", "Supervision cahier", "Présence", 
                 "Conseil de classe", "Bulletins", "Alerte Performance", "Suivi des Programmes", 
-                "Enseignants", "Paramètres", "Messages", "Communication Groupée"
+                "Enseignants", "Paramètres", "Messages", "Communication Groupée", "Notifications"
             ]
             icons_menu = [
                 "house", "speedometer2", "book", "grid", "calendar-week", "clock", "journal-text", 
                 "eye", "check-circle", "award", "journal-richtext", "exclamation-triangle", 
-                "graph-up", "person-badge", "gear", "chat-dots", "megaphone"
+                "graph-up", "person-badge", "gear", "chat-dots", "megaphone", "bell"
             ]
             menu_key_val = "menu_censeur"
 
@@ -346,7 +332,7 @@ def main():
                 "Suivi des Programmes", "Enseignants", "Personnels et rôles", "Gestion Comptes",
                 "Import Programmes PDF", "Encaissement", "Stats Encaissements", "Tableau Finances",
                 "Soldes & Impayés", "Dépenses", "Fiches de Paie", "Rapports", "Paramètres", "Journal d'activité",
-                "Messages", "Communication Groupée", "Espace Parent", "Backup", "🩺 Santé & Diagnostic"
+                "Messages", "Communication Groupée", "Notifications", "Espace Parent", "Backup", "🩺 Santé & Diagnostic"
             ]
             icons_menu = [
                 "house", "speedometer2", "calendar", "calendar-x", "book", "grid", "person-plus", "file-excel", "card-text", 
@@ -354,7 +340,7 @@ def main():
                 "clipboard-check", "award", "journal-richtext", "exclamation-triangle", "person-video3",
                 "graph-up", "person-badge", "shield-lock", "people", "file-pdf", "cash-coin", "bar-chart-fill", 
                 "wallet2", "receipt", "file-earmark-text", "file-earmark-bar-graph", "file-earmark-bar-graph", 
-                "gear", "clock-history", "chat-dots", "megaphone", "house-heart", "database", "heart-pulse"
+                "gear", "clock-history", "chat-dots", "megaphone", "bell", "house-heart", "database", "heart-pulse"
             ]
             menu_key_val = "menu_principal_admin"
 
@@ -437,6 +423,7 @@ def main():
         "Journal d'activité": ("views.journal_activite", "afficher_journal_activite"),
         "Messages": ("views.messages", "afficher_messages"),
         "Communication Groupée": ("views.communication", "afficher_communication"),
+        "Notifications": ("views.centre_notifications", "afficher_centre_notifications"),
         "Espace Parent": ("views.parent_space", "afficher_espace_parent"),
         "Backup": ("views.backup", "backup"),
     }
