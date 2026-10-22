@@ -127,6 +127,8 @@ def afficher_eleves(niveau_actif="Collège"):
                                 db.commit()
 
                                 log_action_erp(
+                                    school_id=school_id,
+                                    username=username,
                                     module="Inscription Élèves",
                                     action=f"Archivage (Soft Delete) de l'élève {e.nom} {e.prenom} (Mat: {e.matricule})",
                                     statut="Critique",
@@ -203,6 +205,8 @@ def afficher_eleves(niveau_actif="Collège"):
 
                                     nouvelles_valeurs = f"Nom: {e.nom}, Prénom: {e.prenom}, Mat: {e.matricule}"
                                     log_action_erp(
+                                        school_id=school_id,
+                                        username=username,
                                         module="Inscription Élèves",
                                         action=f"Modification des informations de l'élève ID {e.id}",
                                         statut="Critique",
@@ -216,7 +220,7 @@ def afficher_eleves(niveau_actif="Collège"):
                             if canc_edit:
                                 st.session_state[f"editing_eleve_{e.id}"] = False
                                 st.rerun()
-                    st.markdown("<hr style='margin: 0.2rem 0; border-color: rgba(255,255,255,0.05);'>", unsafe_allow_html=True)
+                    st.markdown("---")
 
         # ==========================================
         # ONGLET 2 : INSCRIPTION, ACOMPTE & WHATSAPP
@@ -276,3 +280,91 @@ def afficher_eleves(niveau_actif="Collège"):
                     versement_inscription = st.number_input(
                         "Frais d'Inscription (Fixe)", min_value=0.0,
                         value=float(classe_obj_selectionnee.frais_inscription or 0.0) if classe_obj_selectionnee else 0.0, step=1000.0
+                    )
+                with col_v2:
+                    versement_scolarite = st.number_input(
+                        "Scolarité / Tranche 1", min_value=0.0, value=0.0, step=5000.0
+                    )
+                with col_v3:
+                    versement_autre = st.number_input(
+                        "Autres frais (Cantine/Transport/COGES)", min_value=0.0, value=0.0, step=5000.0
+                    )
+
+                types_red = ["Aucune", "Bourse scolaire", "Cas social", "Enfant d'enseignant", "Autre"]
+                type_red_choice = st.selectbox("Type de réduction", types_red)
+                montant_red_val = st.number_input("Montant de la réduction (FCFA)", min_value=0.0, value=0.0, step=5000.0)
+
+                submit_inscription = st.form_submit_button("💾 Enregistrer l'inscription et générer le compte parent", type="primary")
+
+                if submit_inscription:
+                    if not nom_e or not prenom_e or not matricule_e or not tuteur_e:
+                        st.error("Veuillez remplir tous les champs obligatoires (*).")
+                    else:
+                        existing = db.query(Eleve).filter(Eleve.matricule == matricule_e.strip(), Eleve.school_id == school_id).first()
+                        if existing:
+                            st.error(f"Un élève avec le matricule {matricule_e} existe déjà dans cet établissement.")
+                        else:
+                            username_parent = f"parent_{matricule_e.strip().lower()}"
+                            password_clair = "".join(random.choices(string.ascii_letters + string.digits, k=8))
+                            hashed_pw = generate_password_hash(password_clair)
+
+                            parent_user = User(
+                                school_id=school_id,
+                                username=username_parent,
+                                password=hashed_pw,
+                                role="parent",
+                                changer_mdp_requis=True
+                            )
+                            db.add(parent_user)
+                            db.flush()
+
+                            nouvel_eleve = Eleve(
+                                school_id=school_id,
+                                nom=nom_e.upper().strip(),
+                                prenom=prenom_e.strip(),
+                                matricule=matricule_e.strip(),
+                                sexe=sexe_e,
+                                classe_id=classe_obj_selectionnee.id,
+                                tuteur=tuteur_e.strip(),
+                                type_reduction=type_red_choice,
+                                montant_reduction=montant_red_val,
+                                parent_id=parent_user.id
+                            )
+                            db.add(nouvel_eleve)
+                            db.flush()
+
+                            total_paye = versement_inscription + versement_scolarite + versement_autre
+                            if total_paye > 0:
+                                ref_recu = f"REC-{datetime.now().strftime('%Y%m%d%H%M%S')}-{nouvel_eleve.id}"
+                                paiement = Paiement(
+                                    school_id=school_id,
+                                    reference_recu=ref_recu,
+                                    eleve_id=nouvel_eleve.id,
+                                    montant=total_paye,
+                                    mode_reglement="Espèces",
+                                    motif="Inscription et 1ère tranche",
+                                    nom_payeur=tuteur_e.strip(),
+                                    agent_caisse=username,
+                                    date_paiement=datetime.now()
+                                )
+                                db.add(paiement)
+
+                            db.commit()
+
+                            log_action_erp(
+                                school_id=school_id,
+                                username=username,
+                                module="Inscription Élèves",
+                                action=f"Inscription de l'élève {nouvel_eleve.nom} {nouvel_eleve.prenom} (Mat: {nouvel_eleve.matricule})",
+                                statut="Succès"
+                            )
+
+                            st.success("Élève inscrit avec succès et compte parent généré !")
+                            
+                            lien_wa = generer_lien_whatsapp(tuteur_e, "Parent", f"{nouvel_eleve.prenom} {nouvel_eleve.nom}", username_parent, password_clair)
+                            st.markdown(f"📱 [Envoyer les identifiants par WhatsApp]({lien_wa})", unsafe_allow_html=True)
+    except Exception as e:
+        db.rollback()
+        st.error(f"Erreur technique : {e}")
+    finally:
+        db.close()

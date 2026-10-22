@@ -2,7 +2,7 @@ from datetime import datetime
 import streamlit as st
 import streamlit.components.v1 as components
 from database.db_config import SessionLocal
-from database.models import CahierTexte, Enseignant, School, User, Classe, Matiere, Depense
+from database.models import CahierTexte, Enseignant, School, User, Classe, Matiere, Depense, HeureVacataireMois
 
 def format_fcfa(montant):
     """Formate un montant en FCFA avec un espace comme séparateur de milliers."""
@@ -19,7 +19,6 @@ def afficher_etat_paie_administration(mois, date_paie):
         ecole = db.query(School).filter(School.id == school_id).first() if school_id else db.query(School).first()
         nom_ecole = ecole.nom.upper() if ecole else "COMPLEXE SCOLAIRE PRIVE RAHMAT-FH"
         adresse_ecole = getattr(ecole, "adresse", "QUARTIER AEROPORT NIAMEY-NIGER").upper() if ecole else "QUARTIER AEROPORT NIAMEY-NIGER"
-        contacts_ecole = getattr(ecole, "contacts", "TEL : 99 79 71 63") if ecole else "TEL : 99 79 71 63"
 
         utilisateurs_query = db.query(User)
         if school_id:
@@ -134,7 +133,6 @@ def afficher_etat_paie_vacataires(mois, date_paie, cycle_filtre="Tous les cycles
         ecole = db.query(School).filter(School.id == school_id).first() if school_id else db.query(School).first()
         nom_ecole = ecole.nom.upper() if ecole else "COMPLEXE SCOLAIRE PRIVE RAHMAT-FH"
         adresse_ecole = getattr(ecole, "adresse", "QUARTIER AEROPORT NIAMEY-NIGER").upper() if ecole else "QUARTIER AEROPORT NIAMEY-NIGER"
-        contacts_ecole = getattr(ecole, "contacts", "TEL : 99 79 71 63") if ecole else "TEL : 99 79 71 63"
 
         enseignants_query = db.query(Enseignant)
         if school_id:
@@ -183,33 +181,116 @@ def afficher_etat_paie_vacataires(mois, date_paie, cycle_filtre="Tous les cycles
             st.warning(f"Aucun enseignant trouvé pour le filtre : {cycle_filtre}")
             return
 
-        st.markdown(f"### Saisie manuelle des heures — {cycle_filtre} ({mois})")
-        st.info("Modifiez ci-dessous les heures réalisées pour chaque enseignant du cycle sélectionné.")
+        # --- SYNCHRONISATION AUTOMATIQUE UNIVERSELLE ---
+        parties_mois = mois.split()
+        nom_mois = parties_mois[0].lower() if len(parties_mois) > 0 else "octobre"
+        annee_mois = int(parties_mois[1]) if len(parties_mois) > 1 else 2026
+        
+        mapping_mois = {
+            "septembre": 9, "octobre": 10, "novembre": 11, "decembre": 12,
+            "janvier": 1, "fevrier": 2, "mars": 3, "avril": 4,
+            "mai": 5, "juin": 6, "juillet": 7, "aout": 8
+        }
+        num_mois = mapping_mois.get(nom_mois, 10)
+
+        for ens in enseignants:
+            enreg_mois = db.query(HeureVacataireMois).filter(
+                HeureVacataireMois.enseignant_id == ens.id,
+                HeureVacataireMois.mois == mois
+            ).first()
+
+            if not enreg_mois:
+                heures_calculees = 0.0
+                try:
+                    mat_attr_str = str(getattr(ens, "matieres_attribuees", "") or getattr(ens, "matieres", "") or "").lower()
+                    
+                    cahier_entries = db.query(CahierTexte).filter(
+                        CahierTexte.school_id == school_id if school_id else True
+                    ).all()
+
+                    for entry in cahier_entries:
+                        if entry.date_cours and entry.date_cours.month == num_mois and entry.date_cours.year == annee_mois:
+                            mat_obj = db.query(Matiere).filter(Matiere.id == entry.matiere_id).first() if entry.matiere_id else None
+                            nom_mat_entry = str(getattr(mat_obj, "libelle", "") or getattr(mat_obj, "nom", "")).lower()
+                            
+                            auteur = str(getattr(entry, "auteur_saisie", "")).lower()
+                            nom_ens_complet = f"{getattr(ens, 'nom', '')} {getattr(ens, 'prenom', '')}".strip().lower()
+
+                            match_matiere = nom_mat_entry and any(m.strip() in mat_attr_str for m in nom_mat_entry.split(","))
+                            match_auteur = nom_ens_complet in auteur or (ens.email and ens.email.lower() in auteur)
+
+                            if match_matiere or match_auteur:
+                                duree_str = str(getattr(entry, "duree_seance", "1"))
+                                chiffres = "".join([c for c in duree_str if c.isdigit() or c == '.'])
+                                heures_calculees += float(chiffres) if chiffres else 1.0
+                except Exception:
+                    heures_calculees = 0.0
+
+                if heures_calculees <= 0:
+                    heures_calculees = float(getattr(ens, "heures_defaut", 0.0) or 0.0)
+
+                nouvel_enreg = HeureVacataireMois(
+                    school_id=school_id if school_id else 1,
+                    enseignant_id=ens.id,
+                    mois=mois,
+                    heures=heures_calculees
+                )
+                db.add(nouvel_enreg)
+                db.commit()
+
+        st.markdown(f"### Gestion des heures — {cycle_filtre} ({mois})")
+        st.info(f"Les heures ci-dessous sont synchronisées automatiquement avec le **Cahier de Texte** (peu importe l'auteur de la saisie). Vous pouvez les ajuster manuellement si besoin.")
 
         heures_saisies = {}
         
-        with st.form(key="form_saisie_heures"):
+        with st.form(key=f"form_saisie_heures_{mois}"):
             for ens in enseignants:
                 nom_ens = f"{getattr(ens, 'nom', '')} {getattr(ens, 'prenom', '')}".strip() or getattr(ens, "name", "Enseignant")
                 mat_attr_str = getattr(ens, "matieres_attribuees", None) or getattr(ens, "matieres", None) or getattr(ens, "matiere", None)
                 matiere_ens = str(mat_attr_str).strip() if mat_attr_str else "Matière non spécifiée"
                 
+                enreg_mois = db.query(HeureVacataireMois).filter(
+                    HeureVacataireMois.enseignant_id == ens.id,
+                    HeureVacataireMois.mois == mois
+                ).first()
+                valeur_actuelle = enreg_mois.heures if enreg_mois else 0.0
+
                 c1, c2, c3 = st.columns([3, 2, 2])
                 with c1:
                     st.text(f"Agent: {nom_ens}")
                 with c2:
                     st.text(f"Matière: {matiere_ens}")
                 with c3:
-                    heures_saisies[ens] = st.number_input(
+                    heures_saisies[ens.id] = st.number_input(
                         f"Heures {nom_ens}", 
                         min_value=0.0, 
                         max_value=300.0, 
-                        value=float(getattr(ens, "heures_defaut", 0.0) or 0.0),
+                        value=float(valeur_actuelle),
                         step=1.0,
                         label_visibility="collapsed"
                     )
             
-            st.form_submit_button("Mettre à jour l'État de Paie")
+            submitted = st.form_submit_button("💾 Enregistrer / Mettre à jour les heures", type="primary")
+            if submitted:
+                for ens_id, h_val in heures_saisies.items():
+                    enreg = db.query(HeureVacataireMois).filter(
+                        HeureVacataireMois.enseignant_id == ens_id,
+                        HeureVacataireMois.mois == mois
+                    ).first()
+                    
+                    if enreg:
+                        enreg.heures = h_val
+                    else:
+                        nouvel_enreg = HeureVacataireMois(
+                            school_id=school_id if school_id else 1,
+                            enseignant_id=ens_id,
+                            mois=mois,
+                            heures=h_val
+                        )
+                        db.add(nouvel_enreg)
+                db.commit()
+                st.success(f"✅ Heures mises à jour pour le mois de **{mois}** avec succès !")
+                st.rerun()
 
         lignes_html = ""
         total_heures_global = 0
@@ -218,7 +299,12 @@ def afficher_etat_paie_vacataires(mois, date_paie, cycle_filtre="Tous les cycles
 
         for ens in enseignants:
             nom_ens = f"{getattr(ens, 'nom', '')} {getattr(ens, 'prenom', '')}".strip() or getattr(ens, "name", "Enseignant")
-            heures_realisees = heures_saisies.get(ens, 0.0)
+            
+            enreg_mois = db.query(HeureVacataireMois).filter(
+                HeureVacataireMois.enseignant_id == ens.id,
+                HeureVacataireMois.mois == mois
+            ).first()
+            heures_realisees = enreg_mois.heures if enreg_mois else 0.0
             
             if heures_realisees <= 0:
                 continue
@@ -255,7 +341,7 @@ def afficher_etat_paie_vacataires(mois, date_paie, cycle_filtre="Tous les cycles
             })
 
         if not lignes_paie_data:
-            lignes_html = '<tr><td colspan="10" style="text-align: center; color: gray;">Aucune heure saisie pour ce cycle.</td></tr>'
+            lignes_html = '<tr><td colspan="10" style="text-align: center; color: gray;">Aucune heure enregistrée ou validée pour ce mois.</td></tr>'
         else:
             for i, row in enumerate(lignes_paie_data, 1):
                 total_heures_global += row["heures"]

@@ -115,6 +115,7 @@ class User(Base):
 
     salaire_base = Column(Float, default=0.0)
     primes_fixes = Column(Float, default=0.0)
+    acompte = Column(Float, default=0.0)
 
     derniere_activite = Column(DateTime, nullable=True)
     changer_mdp_requis = Column(Boolean, default=True)
@@ -124,7 +125,7 @@ class User(Base):
     eleve_id = Column(Integer, ForeignKey("eleves.id"), nullable=True, index=True)
 
     school = relationship("School", back_populates="users")
-    enseignant = relationship("Enseignant", foreign_keys=[enseignant_id])
+    enseignant = relationship("Enseignant", foreign_keys=[enseignant_id], back_populates="user_compte")
     eleve = relationship("Eleve", foreign_keys=[eleve_id])
     cahiers_texte = relationship("CahierTexte", back_populates="enseignant_user", cascade="all, delete-orphan")
 
@@ -195,6 +196,7 @@ class Note(Base):
     eleve_id = Column(Integer, ForeignKey("eleves.id"), index=True)
     matiere_id = Column(Integer, ForeignKey("matieres.id"), nullable=True, index=True)
     valeur = Column(Float)
+    sur = Column(Float, default=20.0)
     semestre = Column("trimestre", String, default="Trimestre 1")
     type_evaluation = Column(String)
 
@@ -217,12 +219,29 @@ class Enseignant(Base):
     statut = Column(String, default="Permanent")
     salaire_base = Column(Float, default=0.0)
     taux_horaire = Column(Float, default=0.0)
+    retenue = Column(Float, default=0.0)
+    acompte = Column(Float, default=0.0)
+    heures_defaut = Column(Float, default=0.0)
     
     volume_horaire = Column(Float, default=18.0)
     classes_attribuees = Column(String, nullable=True)
     matieres_attribuees = Column(String, nullable=True)
 
     school = relationship("School", back_populates="enseignants")
+    user_compte = relationship("User", back_populates="enseignant", cascade="all, delete-orphan")
+    heures_mois = relationship("HeureVacataireMois", back_populates="enseignant", cascade="all, delete-orphan")
+
+
+class HeureVacataireMois(Base):
+    __tablename__ = "heures_vacataires_mois"
+
+    id = Column(Integer, primary_key=True, index=True)
+    school_id = Column(Integer, ForeignKey("schools.id"), nullable=False, index=True)
+    enseignant_id = Column(Integer, ForeignKey("enseignants.id"), nullable=False, index=True)
+    mois = Column(String(50), nullable=False, index=True)  # Ex: "Octobre 2026"
+    heures = Column(Float, default=0.0)
+
+    enseignant = relationship("Enseignant", back_populates="heures_mois")
 
 
 class Affectation(Base):
