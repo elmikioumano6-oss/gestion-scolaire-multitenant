@@ -3,7 +3,7 @@ import unicodedata
 import pandas as pd
 import streamlit as st
 from database.db_config import SessionLocal
-from database.models import ActivityLog, CahierTexte, Classe, Matiere, School, User
+from database.models import ActivityLog, CahierTexte, Classe, Enseignant, Matiere, School, User
 
 SYNONYMES_MATIERES = {
     "sciences physiques": "physique chimie",
@@ -33,9 +33,7 @@ def normaliser_chaine(texte):
     return SYNONYMES_MATIERES.get(nettoye, nettoye)
 
 def get_matieres_dynamiques_cahier(selected_classes_labels, classes_cycle, ecole_active_id, cycle_en_cours, db):
-    """Récupère, normalise et filtre strictement les matières rattachées aux classes du cycle en cours."""
     m_brutes = []
-    
     if selected_classes_labels:
         sel_ids = [c.id for c in classes_cycle if c.libelle in selected_classes_labels]
         if sel_ids:
@@ -52,12 +50,9 @@ def get_matieres_dynamiques_cahier(selected_classes_labels, classes_cycle, ecole
 
     if not m_brutes and cycle_en_cours:
         try:
-            mat_q_cycle = db.query(Matiere).filter(
-                Matiere.school_id == ecole_active_id
-            )
+            mat_q_cycle = db.query(Matiere).filter(Matiere.school_id == ecole_active_id)
             if hasattr(Matiere, "cycle"):
                 mat_q_cycle = mat_q_cycle.filter(Matiere.cycle.ilike(f"%{cycle_en_cours}%"))
-                
             if hasattr(Matiere, "deleted_at"):
                 mat_q_cycle = mat_q_cycle.filter(Matiere.deleted_at.is_(None))
             m_brutes = mat_q_cycle.all()
@@ -75,24 +70,18 @@ def get_matieres_dynamiques_cahier(selected_classes_labels, classes_cycle, ecole
 
     m_dict = {}
     cycle_actuel_lower = str(cycle_en_cours).lower()
-    
     for m in m_brutes:
         n_brut = m.libelle if hasattr(m, "libelle") and m.libelle else getattr(m, "nom", "Matière")
         n_key = normaliser_chaine(n_brut)
-        
-        # Exclusion stricte de la philosophie pour le collège
         if "collège" in cycle_actuel_lower or "college" in cycle_actuel_lower:
             if "philosophie" in n_key or "philo" in n_key:
                 continue
-
         if n_key and n_key not in m_dict:
             libelle_propre = n_brut.strip().title()
             if "economie familiale" in n_key:
                 libelle_propre = "Économie Familiale Et Sociale"
             m_dict[n_key] = libelle_propre
-            
     return sorted(list(m_dict.values()))
-
 
 def afficher_cahier_texte():
     st.markdown("""
@@ -128,11 +117,7 @@ def afficher_cahier_texte():
             margin-bottom: 20px;
         }
         .empty-state h4 { color: #e2e8f0; margin-top: 10px; margin-bottom: 5px; }
-        .tab-title {
-            color: #4da6ff;
-            font-weight: 600;
-            margin-bottom: 15px;
-        }
+        .tab-title { color: #4da6ff; font-weight: 600; margin-bottom: 15px; }
         .entry-badge {
             display: inline-block;
             padding: 4px 8px;
@@ -153,10 +138,7 @@ def afficher_cahier_texte():
     """, unsafe_allow_html=True)
 
     st.markdown("## 📖 Cahier de Texte Numérique")
-    st.markdown(
-        "Suivi centralisé des cours dispensés, des contenus pédagogiques, des durées et des devoirs "
-        "avec isolation multi-tenant et persistance en base de données."
-    )
+    st.markdown("Suivi centralisé des cours dispensés, des contenus pédagogiques, des durées et des devoirs.")
     st.markdown("---")
 
     school_id = st.session_state.get("school_id")
@@ -190,6 +172,12 @@ def afficher_cahier_texte():
         user_obj = db.query(User).filter(User.username == username).first()
         user_id_val = user_obj.id if user_obj else None
 
+        enseignants_query = db.query(Enseignant).filter(Enseignant.school_id == target_school_id)
+        if hasattr(Enseignant, "deleted_at"):
+            enseignants_query = enseignants_query.filter(Enseignant.deleted_at.is_(None))
+        tous_enseignants = enseignants_query.all()
+        dict_ens_options = {f"{e.nom} {e.prenom}".strip(): e.id for e in tous_enseignants}
+
         classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours)
         if not is_super_admin and school_id:
             classes_query = classes_query.filter(Classe.school_id == school_id)
@@ -211,20 +199,13 @@ def afficher_cahier_texte():
             "✍️ Saisir un Cours / Devoir",
         ])
 
-        # ONGLET 1 : CONSULTATION
         with tab1:
             st.markdown(f"<h4 class='tab-title'>Entrées du Cahier de Texte — {cycle_en_cours}</h4>", unsafe_allow_html=True)
-            
             st.markdown('<div class="filter-box">', unsafe_allow_html=True)
-            classe_consult = st.selectbox(
-                "Sélectionner la classe à consulter",
-                noms_classes,
-                key="consult_cahier_classe",
-            )
+            classe_consult = st.selectbox("Sélectionner la classe à consulter", noms_classes, key="consult_cahier_classe")
             st.markdown('</div>', unsafe_allow_html=True)
 
             classe_obj = next((c for c in classes_cycle if c.libelle == classe_consult), None)
-
             if classe_obj:
                 entrees_db = (
                     db.query(CahierTexte)
@@ -248,23 +229,27 @@ def afficher_cahier_texte():
                     for e in entrees_db:
                         matiere_obj = db.query(Matiere).filter(Matiere.id == e.matiere_id).first()
                         nom_matiere = (matiere_obj.libelle if hasattr(matiere_obj, "libelle") and matiere_obj.libelle else getattr(matiere_obj, "nom", "Matière non spécifiée")) if matiere_obj else "Matière non spécifiée"
+                        
+                        nom_enseignant_affiche = e.auteur_saisie or "Administration"
+                        if hasattr(e, "enseignant_id") and e.enseignant_id:
+                            ens_lie = db.query(Enseignant).filter(Enseignant.id == e.enseignant_id).first()
+                            if ens_lie:
+                                nom_enseignant_affiche = f"{getattr(ens_lie, 'nom', '')} {getattr(ens_lie, 'prenom', '')}".strip()
+
                         date_str = e.date_cours.strftime("%d/%m/%Y") if e.date_cours else "N/D"
                         duree_val = getattr(e, "duree_seance", "1 heure")
                         titre = e.titre or 'Séance sans titre'
-                        auteur = e.auteur_saisie or "Administration"
                         visa_status = getattr(e, 'visa_inspecteur', None)
                         icon_visa = "✅" if visa_status else "⏳"
 
                         with st.expander(f"{icon_visa} {date_str} — {nom_matiere.title()} ({duree_val}) | {titre}"):
-                            st.markdown(f"<span class='entry-badge'>👨‍🏫 Enseignant(e) : {auteur}</span>", unsafe_allow_html=True)
+                            st.markdown(f"<span class='entry-badge'>👨‍🏫 Enseignant(e) : {nom_enseignant_affiche}</span>", unsafe_allow_html=True)
                             st.markdown(f"<span class='entry-badge'>🔖 ID : {e.id}</span>", unsafe_allow_html=True)
                             if visa_status:
                                 st.markdown(f"<span class='entry-badge' style='background-color: rgba(72,187,120,0.15); border-color: #48bb78; color: #48bb78;'>🛡️ {visa_status}</span>", unsafe_allow_html=True)
                             st.markdown("<hr style='margin: 10px 0; border-color: rgba(255,255,255,0.1);'>", unsafe_allow_html=True)
-                            
                             st.markdown("**📝 Contenu de la séance :**")
                             st.write(e.contenu)
-                            
                             if e.difficultees:
                                 st.markdown("**⚠️ Difficultés / Remarques :**")
                                 st.write(e.difficultees)
@@ -280,7 +265,6 @@ def afficher_cahier_texte():
                         list(options_suppr.keys()),
                         key="select_suppr_cahier",
                     )
-
                     if st.button("🗑️ Supprimer l'entrée sélectionnée", type="secondary"):
                         id_a_supprimer = options_suppr[entree_a_supprimer_label]
                         entree_obj = db.query(CahierTexte).filter(CahierTexte.id == id_a_supprimer).first()
@@ -300,74 +284,109 @@ def afficher_cahier_texte():
                             st.rerun()
                     st.markdown('</div>', unsafe_allow_html=True)
 
-        # ONGLET 2 : SAISIE
         with tab2:
             if role_utilisateur == "enseignant":
                 st.markdown(f"<h4 class='tab-title'>Espace Enseignant — Saisie de votre cours ({username})</h4>", unsafe_allow_html=True)
             else:
                 st.markdown(f"<h4 class='tab-title'>Saisie / Substitution Censeur & Administration</h4>", unsafe_allow_html=True)
 
-            with st.form("form_add_cahier_db"):
-                col1, col2 = st.columns(2)
-                with col1:
-                    classe_choisie = st.selectbox("Classe", noms_classes, key="form_cahier_classe")
-                    
-                    # Récupération dynamique et propre des matières du cycle pour cette classe
-                    noms_matieres = get_matieres_dynamiques_cahier([classe_choisie], classes_cycle, target_school_id, cycle_en_cours, db)
-                    matiere_choisie = st.selectbox("Matière", noms_matieres if noms_matieres else ["Aucune matière"])
-                with col2:
-                    date_cours = st.date_input("Date du cours", value=datetime.now().date())
-                    duree_cours = st.selectbox(
-                        "Durée de la séance",
-                        options=[1.0, 2.0, 3.0, 4.0],
-                        format_func=lambda x: f"{int(x)} heure{'s' if x > 1 else ''}",
+            col1, col2 = st.columns(2)
+            with col1:
+                classe_choisie = st.selectbox("Classe", noms_classes, key="form_cahier_classe")
+                noms_matieres = get_matieres_dynamiques_cahier([classe_choisie], classes_cycle, target_school_id, cycle_en_cours, db)
+                matiere_choisie = st.selectbox("Matière", noms_matieres if noms_matieres else ["Aucune matière"], key="form_cahier_matiere")
+            with col2:
+                date_cours = st.date_input("Date du cours", value=datetime.now().date(), key="form_cahier_date")
+                duree_cours = st.selectbox(
+                    "Durée de la séance",
+                    options=[1.0, 2.0, 3.0, 4.0],
+                    format_func=lambda x: f"{int(x)} heure{'s' if x > 1 else ''}",
+                    key="form_cahier_duree"
+                )
+
+            # RECHERCHE ULTRA-PRÉCISE DU TITULAIRE AVEC GESTION DE L'ÉTAT STREAMLIT
+            enseignant_suggere_nom = "Aucun titulaire détecté automatiquement"
+            enseignant_id_final = None
+            
+            if dict_ens_options and classe_choisie and matiere_choisie:
+                cls_obj_cherche = next((c for c in classes_cycle if c.libelle == classe_choisie), None)
+                matiere_norm = normaliser_chaine(matiere_choisie)
+                if cls_obj_cherche:
+                    for e in tous_enseignants:
+                        mat_attr = str(getattr(e, "matieres_attribuees", "") or getattr(e, "matieres", "")).lower()
+                        cls_attr = str(getattr(e, "classes_attribuees", "") or getattr(e, "classes", "")).lower()
+                        if (matiere_norm in normaliser_chaine(mat_attr) or matiere_choisie.lower() in mat_attr) and \
+                           (cls_obj_cherche.libelle.lower() in cls_attr):
+                            enseignant_suggere_nom = f"{e.nom} {e.prenom}".strip()
+                            enseignant_id_final = e.id
+                            break
+
+            st.info(f"💡 **Titulaire suggéré :** {enseignant_suggere_nom}")
+
+            # SYNCHRONISATION FORCÉE DANS LE SESSION_STATE POUR MAJ INSTANTANÉE
+            if "last_classe_matiere_cahier" not in st.session_state:
+                st.session_state["last_classe_matiere_cahier"] = ("", "")
+
+            current_combo = (classe_choisie, matiere_choisie)
+            if st.session_state["last_classe_matiere_cahier"] != current_combo:
+                st.session_state["last_classe_matiere_cahier"] = current_combo
+                if enseignant_suggere_nom in dict_ens_options:
+                    st.session_state["form_cahier_enseignant"] = enseignant_suggere_nom
+
+            liste_noms_ens = list(dict_ens_options.keys())
+            
+            enseignant_nom_selectionne = st.selectbox(
+                "Enseignant dispensant le cours (Modifiable si remplacement) *",
+                options=liste_noms_ens,
+                key="form_cahier_enseignant",
+                help="Le système pré-sélectionne instantanément le professeur titulaire de cette matière dans cette classe."
+            )
+            enseignant_id_final = dict_ens_options.get(enseignant_nom_selectionne)
+
+            titre_cours = st.text_input("Titre / Intitulé du cours ou du devoir *", placeholder="Ex: Chapitre 1 - Les bases", key="form_cahier_titre")
+            contenu = st.text_area("Contenu détaillé de la séance / Travail à faire *", placeholder="Déroulement de la leçon...", key="form_cahier_contenu")
+            
+            with st.expander("➕ Options supplémentaires"):
+                difficultees = st.text_area("Difficultés particulières observées (optionnel)", placeholder="Remarques...", key="form_cahier_diff")
+
+            if st.button("💾 Enregistrer l'entrée dans la base", type="primary", key="form_cahier_submit"):
+                if not titre_cours.strip() or not contenu.strip():
+                    st.error("⚠️ Veuillez remplir le titre et le contenu détaillé de la séance.")
+                elif not enseignant_id_final:
+                    st.error("⚠️ Veuillez sélectionner l'enseignant dispensant le cours.")
+                else:
+                    cls_obj = next((c for c in classes_cycle if c.libelle == classe_choisie), None)
+                    mat_brutes_all = db.query(Matiere).filter(Matiere.school_id == target_school_id).all()
+                    mat_obj = next(
+                        (m for m in mat_brutes_all if (m.libelle if hasattr(m, "libelle") and m.libelle else getattr(m, "nom", "")).strip().title() == matiere_choisie), 
+                        None
                     )
 
-                titre_cours = st.text_input("Titre / Intitulé du cours ou du devoir *", placeholder="Ex: Chapitre 1 - Les bases")
-                contenu = st.text_area("Contenu détaillé de la séance / Travail à faire *", placeholder="Déroulement de la leçon...")
-                
-                with st.expander("➕ Options supplémentaires"):
-                    difficultees = st.text_area("Difficultés particulières observées (optionnel)", placeholder="Remarques...")
+                    contenu_formate = f"**[{titre_cours.strip()}]**\n{contenu.strip()}"
+                    duree_str = f"{int(duree_cours)} heure{'s' if duree_cours > 1 else ''}"
 
-                submitted = st.form_submit_button("💾 Enregistrer l'entrée dans la base", type="primary")
-                
-                if submitted:
-                    if not titre_cours.strip() or not contenu.strip():
-                        st.error("⚠️ Veuillez remplir le titre et le contenu détaillé de la séance.")
-                    else:
-                        cls_obj = next((c for c in classes_cycle if c.libelle == classe_choisie), None)
-                        
-                        mat_brutes_all = db.query(Matiere).filter(Matiere.school_id == target_school_id).all()
-                        mat_obj = next(
-                            (m for m in mat_brutes_all if (m.libelle if hasattr(m, "libelle") and m.libelle else getattr(m, "nom", "")).strip().title() == matiere_choisie), 
-                            None
-                        )
+                    nouvelle_entree = CahierTexte(
+                        school_id=target_school_id,
+                        cycle=cycle_en_cours,
+                        classe_id=cls_obj.id if cls_obj else None,
+                        matiere_id=mat_obj.id if mat_obj else None,
+                        enseignant_id=enseignant_id_final,
+                        user_id=user_id_val,
+                        date_cours=datetime.combine(date_cours, datetime.now().time()),
+                        duree_seance=duree_str,
+                        titre=titre_cours.strip(),
+                        contenu=contenu_formate,
+                        difficultees=difficultees.strip() if difficultees else None,
+                        auteur_saisie=username,
+                        statut_validation="Validé",
+                    )
+                    db.add(nouvelle_entree)
+                    db.commit()
 
-                        contenu_formate = f"**[{titre_cours.strip()}]**\n{contenu.strip()}"
-                        duree_str = f"{int(duree_cours)} heure{'s' if duree_cours > 1 else ''}"
-
-                        nouvelle_entree = CahierTexte(
-                            school_id=target_school_id,
-                            cycle=cycle_en_cours,
-                            classe_id=cls_obj.id if cls_obj else None,
-                            matiere_id=mat_obj.id if mat_obj else None,
-                            user_id=user_id_val,
-                            date_cours=datetime.combine(date_cours, datetime.now().time()),
-                            duree_seance=duree_str,
-                            titre=titre_cours.strip(),
-                            contenu=contenu_formate,
-                            difficultees=difficultees.strip() if difficultees else None,
-                            auteur_saisie=username,
-                            statut_validation="Validé",
-                        )
-                        db.add(nouvelle_entree)
-                        db.commit()
-
-                        st.success(f"✅ Entrée enregistrée ({duree_str}) pour la classe **{classe_choisie}** en **{matiere_choisie}** !")
-                        st.rerun()
+                    st.success(f"✅ Entrée enregistrée ({duree_str}) pour la classe **{classe_choisie}** en **{matiere_choisie}** !")
+                    st.rerun()
 
     finally:
         db.close()
 
 afficher_cahier_de_texte = afficher_cahier_texte
-afficher_cahier_texte = afficher_cahier_texte

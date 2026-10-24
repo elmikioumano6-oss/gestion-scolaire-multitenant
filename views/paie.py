@@ -2,7 +2,7 @@ from datetime import datetime
 import streamlit as st
 import streamlit.components.v1 as components
 from database.db_config import SessionLocal
-from database.models import CahierTexte, Enseignant, School, User, Classe, Matiere, Depense, HeureVacataireMois
+from database.models import CahierTexte, Enseignant, School, User, Classe, Matiere, Depense
 
 def format_fcfa(montant):
     """Formate un montant en FCFA avec un espace comme séparateur de milliers."""
@@ -11,6 +11,19 @@ def format_fcfa(montant):
 def format_taux(montant):
     """Formate un taux horaire sans espace pour tenir sur une seule ligne."""
     return str(int(round(montant)))
+
+def est_prof_lycee(ens_obj, classes_attribuees_ens):
+    """Détermine rigoureusement si un enseignant appartient au Lycée."""
+    txt_ens = f"{getattr(ens_obj, 'classes_attribuees', '')} {getattr(ens_obj, 'classes', '')} {getattr(ens_obj, 'matieres_attribuees', '')} {classes_attribuees_ens}".lower()
+    mots_cles_lycee = ["lycée", "lycee", "2de", "2nd", "seconde", "1ere", "1ère", "premiere", "terminale", "tle"]
+    mots_cles_college = ["collège", "college", "6eme", "6ème", "5eme", "5ème", "4eme", "4ème", "3eme", "3ème"]
+    
+    is_lycee = any(kw in txt_ens for kw in mots_cles_lycee)
+    is_college = any(kw in txt_ens for kw in mots_cles_college)
+    
+    if is_lycee and not is_college:
+        return True
+    return is_lycee
 
 def afficher_etat_paie_administration(mois, date_paie):
     school_id = st.session_state.get("school_id")
@@ -67,20 +80,20 @@ def afficher_etat_paie_administration(mois, date_paie):
                 net_a_payer = salaire_base + primes - acompte
                 total_net_global += net_a_payer
 
-                lignes_html += f"""
+                lignes_html += """
                 <tr>
-                    <td style="text-align: center;">{i}</td>
-                    <td><b>{nom_complet}</b></td>
-                    <td>{str(poste).capitalize()}</td>
-                    <td style="text-align: right; white-space: nowrap;">{format_fcfa(salaire_base)}</td>
-                    <td style="text-align: right; white-space: nowrap;">{format_fcfa(primes)}</td>
-                    <td style="text-align: right; white-space: nowrap;">{format_fcfa(acompte)}</td>
-                    <td style="text-align: right; white-space: nowrap; background-color: #f8fafc;"><b>{format_fcfa(net_a_payer)}</b></td>
+                    <td style="text-align: center;">{}</td>
+                    <td><b>{}</b></td>
+                    <td>{}</td>
+                    <td style="text-align: right; white-space: nowrap;">{}</td>
+                    <td style="text-align: right; white-space: nowrap;">{}</td>
+                    <td style="text-align: right; white-space: nowrap;">{}</td>
+                    <td style="text-align: right; white-space: nowrap; background-color: #f8fafc;"><b>{}</b></td>
                     <td style="height: 35px;"></td>
                 </tr>
-                """
+                """.format(i, nom_complet, str(poste).capitalize(), format_fcfa(salaire_base), format_fcfa(primes), format_fcfa(acompte), format_fcfa(net_a_payer))
 
-        html_content = f"""
+        html_template = """
         <!DOCTYPE html>
         <html>
         <head>
@@ -94,8 +107,8 @@ def afficher_etat_paie_administration(mois, date_paie):
                 }}
                 body {{ background: #f0f2f5; font-family: Arial, sans-serif; padding: 10px 0; }}
                 .print-container {{ text-align: center; margin-bottom: 15px; }}
-                .print-btn {{ background-color: #ff8800; color: white; padding: 10px 24px; font-size: 14px; font-weight: bold; border: none; border-radius: 6px; cursor: pointer; }}
-                .page {{ width: 277mm; min-height: 180mm; margin: 0 auto; background: #FFFFFF; padding: 12mm; border: 2px solid #000080; box-sizing: border-box; }}
+                .print-btn {{ background-color: #000080; color: white; padding: 10px 24px; font-size: 14px; font-weight: bold; border: none; border-radius: 6px; cursor: pointer; }}
+                .page {{ width: 277mm; min-height: 180mm; margin: 0 auto; background: #FFFFFF; padding: 12mm; border: 1.5px solid #000080; box-sizing: border-box; }}
                 table {{ width: 100%; border-collapse: collapse; font-size: 0.75rem; margin-top: 10px; }}
                 th, td {{ border: 1px solid #000080; padding: 6px 8px; }}
                 th {{ background-color: #800020; color: #FFFFFF; text-align: center; }}
@@ -106,23 +119,28 @@ def afficher_etat_paie_administration(mois, date_paie):
             <div class="page">
                 <table>
                     <tr>
-                        <td style="border: none; font-size: 0.8rem; font-weight: bold;">{nom_ecole}<br>{adresse_ecole}</td>
-                        <td style="border: none; text-align: right; font-size: 0.8rem;"><b>ÉTAT DE PAIE — ADMINISTRATIF</b><br>Mois : <b>{mois}</b><br>Date : <b>{date_paie.strftime('%d/%m/%Y')}</b></td>
+                        <td style="border: none; font-size: 0.8rem; font-weight: bold;">{ecole}<br>{adresse}</td>
+                        <td style="border: none; text-align: right; font-size: 0.8rem;"><b>ÉTAT DE PAIE — ADMINISTRATIF</b><br>Mois : <b>{mois}</b><br>Date : <b>{date_format}</b></td>
                     </tr>
                 </table>
                 <table>
                     <thead><tr><th>N°</th><th>Nom & Prénom</th><th>Poste</th><th>Salaire de Base</th><th>Primes</th><th>Acomptes</th><th>Net à Payer</th><th>Signature</th></tr></thead>
-                    <tbody>{lignes_html}</tbody>
-                    <tfoot><tr style="background-color: #000080; color: #FFFFFF; font-weight: bold;"><td colspan="6" style="text-align: right;">TOTAL GÉNÉRAL :</td><td style="text-align: right; white-space: nowrap;">{format_fcfa(total_net_global)} FCFA</td><td></td></tr></tfoot>
+                    <tbody>{lignes}</tbody>
+                    <tfoot><tr style="background-color: #000080; color: #FFFFFF; font-weight: bold;"><td colspan="6" style="text-align: right;">TOTAL GÉNÉRAL :</td><td style="text-align: right; white-space: nowrap;">{total_net} FCFA</td><td></td></tr></tfoot>
                 </table>
             </div>
         </body>
         </html>
         """
+        html_content = html_template.format(
+            ecole=nom_ecole, adresse=adresse_ecole, mois=mois,
+            date_format=date_paie.strftime('%d/%m/%Y'), lignes=lignes_html,
+            total_net=format_fcfa(total_net_global)
+        )
         components.html(html_content, height=620, scrolling=True)
     except Exception as e:
         db.rollback()
-        st.error(f"Erreur technique : {e}")
+        st.error(f"Erreur technique (Administration) : {e}")
     finally:
         db.close()
 
@@ -137,231 +155,203 @@ def afficher_etat_paie_vacataires(mois, date_paie, cycle_filtre="Tous les cycles
         enseignants_query = db.query(Enseignant)
         if school_id:
             enseignants_query = enseignants_query.filter(Enseignant.school_id == school_id)
-
         tous_enseignants = enseignants_query.all()
-        
-        classes_db = []
-        try:
-            classes_q = db.query(Classe)
-            if school_id:
-                classes_q = classes_q.filter(Classe.school_id == school_id)
-            classes_db = classes_q.all()
-        except Exception:
-            db.rollback()
 
-        enseignants = []
-        for ens in tous_enseignants:
-            classes_attribuees_str = str(getattr(ens, "classes_attribuees", "") or getattr(ens, "classes", "")).lower()
-            est_lycee = False
-            est_college = False
-            
-            for c in classes_db:
-                lib_c = str(getattr(c, "libelle", "")).lower()
-                cyc_c = str(getattr(c, "cycle", "")).lower()
-                if lib_c and lib_c in classes_attribuees_str:
-                    if "lycée" in cyc_c or "lycee" in cyc_c or any(n in lib_c for n in ["2de", "premiere", "terminale", "1ere", "tle"]):
-                        est_lycee = True
-                    else:
-                        est_college = True
-
-            if not est_lycee and not est_college:
-                if any(n in classes_attribuees_str for n in ["2de", "premiere", "terminale", "1ere", "tle", "lycée", "lycee"]):
-                    est_lycee = True
-                else:
-                    est_college = True
-
-            if cycle_filtre == "Lycée Uniquement" and not est_lycee:
-                continue
-            if cycle_filtre == "Collège Uniquement" and not est_college:
-                continue
-                
-            enseignants.append(ens)
-
-        if not enseignants:
-            st.warning(f"Aucun enseignant trouvé pour le filtre : {cycle_filtre}")
+        if not tous_enseignants:
+            st.warning("Aucun enseignant enregistré.")
             return
 
-        # --- SYNCHRONISATION AUTOMATIQUE UNIVERSELLE ---
-        parties_mois = mois.split()
-        nom_mois = parties_mois[0].lower() if len(parties_mois) > 0 else "octobre"
-        annee_mois = int(parties_mois[1]) if len(parties_mois) > 1 else 2026
-        
+        dict_enseignants = {e.id: e for e in tous_enseignants}
+        classes_db = db.query(Classe).filter(Classe.school_id == school_id).all() if school_id else db.query(Classe).all()
+        dict_classes_id = {c.id: c for c in classes_db}
+
+        matieres_db = db.query(Matiere).filter(Matiere.school_id == school_id).all() if school_id else db.query(Matiere).all()
+        dict_matieres_id = {m.id: m for m in matieres_db}
+
         mapping_mois = {
             "septembre": 9, "octobre": 10, "novembre": 11, "decembre": 12,
             "janvier": 1, "fevrier": 2, "mars": 3, "avril": 4,
             "mai": 5, "juin": 6, "juillet": 7, "aout": 8
         }
+        parties_mois = mois.split()
+        nom_mois = parties_mois[0].lower() if len(parties_mois) > 0 else "octobre"
+        annee_mois = int(parties_mois[1]) if len(parties_mois) > 1 else 2026
         num_mois = mapping_mois.get(nom_mois, 10)
 
-        for ens in enseignants:
-            enreg_mois = db.query(HeureVacataireMois).filter(
-                HeureVacataireMois.enseignant_id == ens.id,
-                HeureVacataireMois.mois == mois
-            ).first()
+        cahier_query = db.query(CahierTexte)
+        if school_id:
+            cahier_query = cahier_query.filter(CahierTexte.school_id == school_id)
+        cahier_entries = cahier_query.all()
 
-            if not enreg_mois:
-                heures_calculees = 0.0
-                try:
-                    mat_attr_str = str(getattr(ens, "matieres_attribuees", "") or getattr(ens, "matieres", "") or "").lower()
-                    
-                    cahier_entries = db.query(CahierTexte).filter(
-                        CahierTexte.school_id == school_id if school_id else True
-                    ).all()
+        heures_par_cycle = {ens.id: {"Collège": 0.0, "Lycée": 0.0} for ens in tous_enseignants}
+        cycles_actifs_ens = {ens.id: set() for ens in tous_enseignants}
 
-                    for entry in cahier_entries:
-                        if entry.date_cours and entry.date_cours.month == num_mois and entry.date_cours.year == annee_mois:
-                            mat_obj = db.query(Matiere).filter(Matiere.id == entry.matiere_id).first() if entry.matiere_id else None
-                            nom_mat_entry = str(getattr(mat_obj, "libelle", "") or getattr(mat_obj, "nom", "")).lower()
-                            
-                            auteur = str(getattr(entry, "auteur_saisie", "")).lower()
-                            nom_ens_complet = f"{getattr(ens, 'nom', '')} {getattr(ens, 'prenom', '')}".strip().lower()
-
-                            match_matiere = nom_mat_entry and any(m.strip() in mat_attr_str for m in nom_mat_entry.split(","))
-                            match_auteur = nom_ens_complet in auteur or (ens.email and ens.email.lower() in auteur)
-
-                            if match_matiere or match_auteur:
-                                duree_str = str(getattr(entry, "duree_seance", "1"))
-                                chiffres = "".join([c for c in duree_str if c.isdigit() or c == '.'])
-                                heures_calculees += float(chiffres) if chiffres else 1.0
-                except Exception:
-                    heures_calculees = 0.0
-
-                if heures_calculees <= 0:
-                    heures_calculees = float(getattr(ens, "heures_defaut", 0.0) or 0.0)
-
-                nouvel_enreg = HeureVacataireMois(
-                    school_id=school_id if school_id else 1,
-                    enseignant_id=ens.id,
-                    mois=mois,
-                    heures=heures_calculees
-                )
-                db.add(nouvel_enreg)
-                db.commit()
-
-        st.markdown(f"### Gestion des heures — {cycle_filtre} ({mois})")
-        st.info(f"Les heures ci-dessous sont synchronisées automatiquement avec le **Cahier de Texte** (peu importe l'auteur de la saisie). Vous pouvez les ajuster manuellement si besoin.")
-
-        heures_saisies = {}
-        
-        with st.form(key=f"form_saisie_heures_{mois}"):
-            for ens in enseignants:
-                nom_ens = f"{getattr(ens, 'nom', '')} {getattr(ens, 'prenom', '')}".strip() or getattr(ens, "name", "Enseignant")
-                mat_attr_str = getattr(ens, "matieres_attribuees", None) or getattr(ens, "matieres", None) or getattr(ens, "matiere", None)
-                matiere_ens = str(mat_attr_str).strip() if mat_attr_str else "Matière non spécifiée"
-                
-                enreg_mois = db.query(HeureVacataireMois).filter(
-                    HeureVacataireMois.enseignant_id == ens.id,
-                    HeureVacataireMois.mois == mois
-                ).first()
-                valeur_actuelle = enreg_mois.heures if enreg_mois else 0.0
-
-                c1, c2, c3 = st.columns([3, 2, 2])
-                with c1:
-                    st.text(f"Agent: {nom_ens}")
-                with c2:
-                    st.text(f"Matière: {matiere_ens}")
-                with c3:
-                    heures_saisies[ens.id] = st.number_input(
-                        f"Heures {nom_ens}", 
-                        min_value=0.0, 
-                        max_value=300.0, 
-                        value=float(valeur_actuelle),
-                        step=1.0,
-                        label_visibility="collapsed"
-                    )
+        for entry in cahier_entries:
+            date_c = getattr(entry, "date_cours", None)
+            if not date_c:
+                continue
             
-            submitted = st.form_submit_button("💾 Enregistrer / Mettre à jour les heures", type="primary")
-            if submitted:
-                for ens_id, h_val in heures_saisies.items():
-                    enreg = db.query(HeureVacataireMois).filter(
-                        HeureVacataireMois.enseignant_id == ens_id,
-                        HeureVacataireMois.mois == mois
-                    ).first()
+            if isinstance(date_c, str):
+                parsed_date = None
+                for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+                    try:
+                        parsed_date = datetime.strptime(date_c, fmt)
+                        break
+                    except ValueError:
+                        continue
+                date_c = parsed_date
+
+            if not date_c or not hasattr(date_c, "month") or not hasattr(date_c, "year"):
+                continue
+
+            if date_c.month != num_mois or date_c.year != annee_mois:
+                continue
+
+            classe_entry = dict_classes_id.get(getattr(entry, "classe_id", None))
+            
+            matched_ens_id = getattr(entry, "enseignant_id", None)
+            
+            if not matched_ens_id or str(getattr(entry, "auteur_saisie", "")).lower() in ["admin", "admin_rahmat", "directeur", "censeur"]:
+                matiere_entree_id = getattr(entry, "matiere_id", None)
+                classe_entree_id = getattr(entry, "classe_id", None)
+                
+                if matiere_entree_id and classe_entree_id:
+                    matiere_obj_db = dict_matieres_id.get(matiere_entree_id)
+                    nom_mat_db = str(getattr(matiere_obj_db, "libelle", "") or getattr(matiere_obj_db, "nom", "")).lower() if matiere_obj_db else ""
                     
-                    if enreg:
-                        enreg.heures = h_val
-                    else:
-                        nouvel_enreg = HeureVacataireMois(
-                            school_id=school_id if school_id else 1,
-                            enseignant_id=ens_id,
-                            mois=mois,
-                            heures=h_val
-                        )
-                        db.add(nouvel_enreg)
-                db.commit()
-                st.success(f"✅ Heures mises à jour pour le mois de **{mois}** avec succès !")
-                st.rerun()
+                    for ens in tous_enseignants:
+                        mat_attr = str(getattr(ens, "matieres_attribuees", "") or getattr(ens, "matieres", "")).lower()
+                        cls_attr = str(getattr(ens, "classes_attribuees", "") or getattr(ens, "classes", "")).lower()
+                        
+                        if classe_entry and (classe_entry.libelle.lower() in cls_attr) and (nom_mat_db and nom_mat_db in mat_attr):
+                            matched_ens_id = ens.id
+                            break
+            
+            if not matched_ens_id:
+                texte_entree = f"{getattr(entry, 'auteur_saisie', '')} {getattr(entry, 'cours', '')} {getattr(entry, 'contenu', '')}".lower()
+                for ens in tous_enseignants:
+                    nom = str(getattr(ens, "nom", "") or "").strip().lower()
+                    prenom = str(getattr(ens, "prenom", "") or "").strip().lower()
+                    if (nom and nom in texte_entree) or (prenom and prenom in texte_entree):
+                        matched_ens_id = ens.id
+                        break
+
+            if not matched_ens_id:
+                continue
+
+            ens_obj = dict_enseignants.get(matched_ens_id)
+            nom_classe_str = str(getattr(classe_entry, "cycle", "") or getattr(classe_entry, "libelle", "")).lower() if classe_entry else ""
+            mots_lycee = ["lycée", "lycee", "2de", "2nd", "seconde", "1ere", "1ère", "premiere", "terminale", "tle"]
+            
+            is_lycee_cours = any(kw in nom_classe_str for kw in mots_lycee) or (classe_entry and str(getattr(classe_entry, "cycle", "")).lower() == "lycée")
+            cycle_nom = "Lycée" if is_lycee_cours else "Collège"
+
+            duree_str = str(getattr(entry, "duree_seance", "1"))
+            chiffres = "".join([c for c in duree_str if c.isdigit() or c == '.'])
+            duree_val = float(chiffres) if chiffres else 1.0
+
+            if matched_ens_id not in heures_par_cycle:
+                heures_par_cycle[matched_ens_id] = {"Collège": 0.0, "Lycée": 0.0}
+            heures_par_cycle[matched_ens_id][cycle_nom] += duree_val
+            cycles_actifs_ens[matched_ens_id].add(cycle_nom)
+
+        lignes_paie_data = []
+        for ens_id, cycles_dict in heures_par_cycle.items():
+            ens = dict_enseignants.get(ens_id)
+            if not ens:
+                continue
+            nom_ens = f"{getattr(ens, 'nom', '')} {getattr(ens, 'prenom', '')}".strip() or "Enseignant"
+            mat_attr = getattr(ens, "matieres_attribuees", None) or getattr(ens, "matieres", None) or "Matière non spécifiée"
+            retenue = float(getattr(ens, "retenue", 0.0) or 0.0)
+            acompte_base = float(getattr(ens, "acompte", 0.0) or 0.0)
+
+            classes_attr_ens = str(getattr(ens, "classes_attribuees", "") or getattr(ens, "classes", ""))
+            is_prof_lyc = est_prof_lycee(ens, classes_attr_ens)
+            cycle_principal = "Lycée" if is_prof_lyc else "Collège"
+
+            has_college = cycles_dict["Collège"] > 0
+            has_lycee = cycles_dict["Lycée"] > 0
+
+            if not has_college and not has_lycee:
+                if cycle_filtre == "Collège Uniquement" and cycle_principal != "Collège":
+                    continue
+                if cycle_filtre == "Lycée Uniquement" and cycle_principal != "Lycée":
+                    continue
+
+                taux_horaire = 2000.0 if cycle_principal == "Lycée" else 1500.0
+                net_a_payer = max(0.0, 0.0 - retenue - acompte_base)
+                lignes_paie_data.append({
+                    'nom': f"{nom_ens} ({cycle_principal})",
+                    'matiere': f"{mat_attr} — {cycle_principal}",
+                    'heures': 0.0,
+                    'taux': taux_horaire,
+                    'brut': 0.0,
+                    'retenue': retenue if cycle_principal == "Collège" else 0.0,
+                    'acompte': acompte_base if cycle_principal == "Collège" else 0.0,
+                    'net': net_a_payer
+                })
+            else:
+                for cycle_nom in ["Collège", "Lycée"]:
+                    if cycle_filtre == "Lycée Uniquement" and cycle_nom != "Lycée":
+                        continue
+                    if cycle_filtre == "Collège Uniquement" and cycle_nom != "Collège":
+                        continue
+
+                    heures = cycles_dict[cycle_nom]
+                    
+                    if heures > 0 or (cycle_nom == cycle_principal and sum(cycles_dict.values()) == 0):
+                        taux_horaire = 2000.0 if cycle_nom == "Lycée" else 1500.0
+                        brut = heures * taux_horaire
+                        net_a_payer = max(0.0, brut - retenue - acompte_base if cycle_nom == "Collège" else brut)
+
+                        lignes_paie_data.append({
+                            'nom': f"{nom_ens} ({cycle_nom})",
+                            'matiere': f"{mat_attr} — {cycle_nom}",
+                            'heures': heures,
+                            'taux': taux_horaire,
+                            'brut': brut,
+                            'retenue': retenue if cycle_nom == "Collège" else 0.0,
+                            'acompte': acompte_base if cycle_nom == "Collège" else 0.0,
+                            'net': net_a_payer
+                        })
+
+        st.markdown(f"### 🎓 Gestion des Heures & Paie — Vacataires ({cycle_filtre} - {mois})")
+        
+        if not lignes_paie_data:
+            st.info(f"ℹ️ Aucun enseignant trouvé pour le filtre : **{cycle_filtre}**.")
+            return
+
+        st.info("💡 **État Officiel de Paie :** Filtrage rigoureux par cycle (Collège / Lycée).")
 
         lignes_html = ""
         total_heures_global = 0
         total_net_global = 0
-        lignes_paie_data = []
 
-        for ens in enseignants:
-            nom_ens = f"{getattr(ens, 'nom', '')} {getattr(ens, 'prenom', '')}".strip() or getattr(ens, "name", "Enseignant")
-            
-            enreg_mois = db.query(HeureVacataireMois).filter(
-                HeureVacataireMois.enseignant_id == ens.id,
-                HeureVacataireMois.mois == mois
-            ).first()
-            heures_realisees = enreg_mois.heures if enreg_mois else 0.0
-            
-            if heures_realisees <= 0:
-                continue
+        for i, row in enumerate(lignes_paie_data, 1):
+            total_heures_global += row['heures']
+            total_net_global += row['net']
 
-            matieres_set = set()
-            mat_attr_str = getattr(ens, "matieres_attribuees", None) or getattr(ens, "matieres", None) or getattr(ens, "matiere", None)
-            if mat_attr_str and str(mat_attr_str).strip() and str(mat_attr_str).lower() != "aucune":
-                for m in str(mat_attr_str).split(","):
-                    if m.strip():
-                        matieres_set.add(m.strip().title())
+            lignes_html += """
+            <tr>
+                <td style="text-align: center;">{}</td>
+                <td><b>{}</b></td>
+                <td>{}</td>
+                <td style="text-align: center;">{:g} h</td>
+                <td style="text-align: right; white-space: nowrap;">{}</td>
+                <td style="text-align: right; white-space: nowrap;">{}</td>
+                <td style="text-align: right; white-space: nowrap;">{}</td>
+                <td style="text-align: right; white-space: nowrap;">{}</td>
+                <td style="text-align: right; white-space: nowrap; background-color: #f8fafc;"><b>{}</b></td>
+                <td style="height: 35px;"></td>
+            </tr>
+            """.format(
+                i, row['nom'], row['matiere'], row['heures'],
+                format_taux(row['taux']), format_fcfa(row['brut']),
+                format_fcfa(row['retenue']), format_fcfa(row['acompte']),
+                format_fcfa(row['net'])
+            )
 
-            matiere_ens = ", ".join(matieres_set) if matieres_set else "Matière non spécifiée"
-            retenue = float(getattr(ens, "retenue", 0.0) or 0.0)
-            acompte_base = float(getattr(ens, "acompte", 0.0) or 0.0)
-            
-            taux_base_defaut = float(getattr(ens, "taux_horaire", 0.0) or 0.0)
-            if taux_base_defaut > 0:
-                taux_horaire = taux_base_defaut
-            else:
-                taux_horaire = 2000.0 if cycle_filtre == "Lycée Uniquement" else 1500.0
-
-            brut = heures_realisees * taux_horaire
-            net_a_payer = max(0.0, brut - retenue - acompte_base)
-
-            lignes_paie_data.append({
-                "nom": nom_ens,
-                "matiere": matiere_ens,
-                "heures": heures_realisees,
-                "taux": taux_horaire,
-                "brut": brut,
-                "retenue": retenue,
-                "acompte": acompte_base,
-                "net": net_a_payer
-            })
-
-        if not lignes_paie_data:
-            lignes_html = '<tr><td colspan="10" style="text-align: center; color: gray;">Aucune heure enregistrée ou validée pour ce mois.</td></tr>'
-        else:
-            for i, row in enumerate(lignes_paie_data, 1):
-                total_heures_global += row["heures"]
-                total_net_global += row["net"]
-                lignes_html += f"""
-                <tr>
-                    <td style="text-align: center;">{i}</td>
-                    <td><b>{row["nom"]}</b></td>
-                    <td>{row["matiere"]}</td>
-                    <td style="text-align: center;">{row["heures"]:g} h</td>
-                    <td style="text-align: right; white-space: nowrap;">{format_taux(row["taux"])}</td>
-                    <td style="text-align: right; white-space: nowrap;">{format_fcfa(row["brut"])}</td>
-                    <td style="text-align: right; white-space: nowrap;">{format_fcfa(row["retenue"])}</td>
-                    <td style="text-align: right; white-space: nowrap;">{format_fcfa(row["acompte"])}</td>
-                    <td style="text-align: right; white-space: nowrap; background-color: #f8fafc;"><b>{format_fcfa(row["net"])}</b></td>
-                    <td style="height: 35px;"></td>
-                </tr>
-                """
-
-        html_content = f"""
+        html_template = """
         <!DOCTYPE html>
         <html>
         <head>
@@ -375,35 +365,48 @@ def afficher_etat_paie_vacataires(mois, date_paie, cycle_filtre="Tous les cycles
                 }}
                 body {{ background: #f0f2f5; font-family: Arial, sans-serif; padding: 10px 0; }}
                 .print-container {{ text-align: center; margin-bottom: 15px; }}
-                .print-btn {{ background-color: #ff8800; color: white; padding: 10px 24px; font-size: 14px; font-weight: bold; border: none; border-radius: 6px; cursor: pointer; }}
-                .page {{ width: 277mm; min-height: 180mm; margin: 0 auto; background: #FFFFFF; padding: 12mm; border: 2px solid #000080; box-sizing: border-box; }}
+                .print-btn {{ background-color: #000080; color: white; padding: 10px 24px; font-size: 14px; font-weight: bold; border: none; border-radius: 6px; cursor: pointer; }}
+                .page {{ width: 277mm; min-height: 180mm; margin: 0 auto; background: #FFFFFF; padding: 12mm; border: 1.5px solid #000080; box-sizing: border-box; }}
                 table {{ width: 100%; border-collapse: collapse; font-size: 0.75rem; margin-top: 10px; }}
                 th, td {{ border: 1px solid #000080; padding: 6px 8px; }}
                 th {{ background-color: #800020; color: #FFFFFF; text-align: center; }}
             </style>
         </head>
         <body>
-            <div class="print-container no-print"><button class="print-btn" onclick="window.print()">🖨️ Imprimer l'État de Paie Vacataires</button></div>
+            <div class="print-container no-print"><button class="print-btn" onclick="window.print()">🖨️ Imprimer l'État Officiel de Paie — Vacataires ({cycle})</button></div>
             <div class="page">
                 <table>
                     <tr>
-                        <td style="border: none; font-size: 0.8rem; font-weight: bold;">{nom_ecole}<br>{adresse_ecole}</td>
-                        <td style="border: none; text-align: right; font-size: 0.8rem;"><b>ÉTAT DE PAIE — VACATAIRES ({cycle_filtre.upper()})</b><br>Mois : <b>{mois}</b><br>Date : <b>{date_paie.strftime('%d/%m/%Y')}</b></td>
+                        <td style="border: none; font-size: 0.8rem; font-weight: bold;">{ecole}<br>{adresse}</td>
+                        <td style="border: none; text-align: right; font-size: 0.8rem;"><b>ÉTAT RÉCAPITULATIF DE PAIE — VACATAIRES ({cycle_upper})</b><br>Période : <b>{mois}</b><br>Date d'édition : <b>{date_format}</b></td>
                     </tr>
                 </table>
                 <table>
-                    <thead><tr><th>N°</th><th>Nom & Prénom</th><th>Matières</th><th>Heures</th><th>Taux</th><th>Montant Brut</th><th>Retenues</th><th>Acomptes</th><th>Net à Payer</th><th>Signature</th></tr></thead>
-                    <tbody>{lignes_html}</tbody>
-                    <tfoot><tr style="background-color: #000080; color: #FFFFFF; font-weight: bold;"><td colspan="3" style="text-align: right;">TOTAUX :</td><td style="text-align: center;">{total_heures_global:g} h</td><td colspan="4" style="text-align: right;">TOTAL GÉNÉRAL NET :</td><td style="text-align: right; white-space: nowrap;">{format_fcfa(total_net_global)} FCFA</td><td></td></tr></tfoot>
+                    <thead><tr><th>N°</th><th>Nom & Prénom</th><th>Matières Enseignées</th><th>Volume Horaire</th><th>Taux Horaire</th><th>Montant Brut</th><th>Retenues</th><th>Acomptes</th><th>Net à Payer (FCFA)</th><th>Visa & Signature</th></tr></thead>
+                    <tbody>{lignes}</tbody>
+                    <tfoot><tr style="background-color: #000080; color: #FFFFFF; font-weight: bold;"><td colspan="3" style="text-align: right;">TOTAUX GLOBAUX :</td><td style="text-align: center;">{total_h:g} h</td><td colspan="4" style="text-align: right;">TOTAL GÉNÉRAL NET :</td><td style="text-align: right; white-space: nowrap;">{total_net_str} FCFA</td><td></td></tr></tfoot>
                 </table>
             </div>
         </body>
         </html>
         """
+        
+        html_content = html_template.format(
+            cycle=cycle_filtre,
+            cycle_upper=cycle_filtre.upper(),
+            ecole=nom_ecole,
+            adresse=adresse_ecole,
+            mois=mois,
+            date_format=date_paie.strftime('%d/%m/%Y'),
+            lignes=lignes_html,
+            total_h=total_heures_global,
+            total_net_str=format_fcfa(total_net_global)
+        )
+
         components.html(html_content, height=620, scrolling=True)
     except Exception as e:
         db.rollback()
-        st.error(f"Erreur : {e}")
+        st.error(f"Erreur technique (Vacataires) : {e}")
     finally:
         db.close()
 
@@ -412,21 +415,30 @@ def afficher_paie():
     st.markdown("Générez et imprimez les états récapitulatifs globaux directement connectés aux données de l'établissement.")
     st.markdown("---")
 
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        type_etat = st.radio("Catégorie :", ["Personnel Administratif", "Enseignants Vacataires"], horizontal=True)
-    with col2:
-        mois_selectionne = st.selectbox("Mois :", ["Septembre 2026", "Octobre 2026", "Novembre 2026", "Décembre 2026", "Janvier 2027", "Février 2027", "Mars 2027", "Avril 2027", "Mai 2027", "Juin 2027", "Juillet 2027", "Août 2027"], index=1)
-    with col3:
-        date_versement = st.date_input("Date de versement :", value=datetime.today())
-    with col4:
-        cycle_selectionne = st.selectbox("Filtrer par cycle :", ["Tous les cycles", "Collège Uniquement", "Lycée Uniquement"])
+    try:
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            # Utilisation d'un sélecteur à boutons clairs et explicites
+            type_etat = st.radio("Catégorie :", ["Personnel Administratif", "Enseignants Vacataires"], horizontal=True, key="radio_type_etat_paie")
+        with col2:
+            mois_selectionne = st.selectbox("Mois :", ["Septembre 2026", "Octobre 2026", "Novembre 2026", "Décembre 2026", "Janvier 2027", "Février 2027", "Mars 2027", "Avril 2027", "Mai 2027", "Juin 2027", "Juillet 2027", "Août 2027"], index=1, key="select_mois_paie")
+        with col3:
+            date_versement = st.date_input("Date de versement :", value=datetime.today(), key="date_versement_paie")
+        with col4:
+            cycle_selectionne = st.selectbox("Filtrer par cycle :", ["Tous les cycles", "Collège Uniquement", "Lycée Uniquement"], key="select_cycle_paie")
+    except Exception as e:
+        st.error(f"Erreur lors du rendu des filtres : {e}")
+        return
 
     st.markdown("---")
 
-    if type_etat == "Personnel Administratif":
-        afficher_etat_paie_administration(mois=mois_selectionne, date_paie=date_versement)
-    else:
-        afficher_etat_paie_vacataires(mois=mois_selectionne, date_paie=date_versement, cycle_filtre=cycle_selectionne)
+    try:
+        # Utilisation d'une condition robuste basée sur la présence du mot clé dans le choix
+        if "Administratif" in str(type_etat):
+            afficher_etat_paie_administration(mois=mois_selectionne, date_paie=date_versement)
+        else:
+            afficher_etat_paie_vacataires(mois=mois_selectionne, date_paie=date_versement, cycle_filtre=cycle_selectionne)
+    except Exception as e:
+        st.error(f"Erreur lors de l'exécution de l'état de paie : {e}")
 
 afficher_gestion_paie = afficher_paie
