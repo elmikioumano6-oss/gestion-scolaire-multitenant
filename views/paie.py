@@ -176,25 +176,18 @@ def afficher_etat_paie_vacataires(mois, date_paie, cycle_filtre="Tous les cycles
         mots_lycee_kw = ["lycée", "lycee", "2de", "2nd", "seconde", "1ere", "1ère", "premiere", "terminale", "tle"]
         mots_college_kw = ["collège", "college", "6eme", "6ème", "5eme", "5ème", "4eme", "4ème", "3eme", "3ème"]
 
-        # ÉTAPE 1 : Détermination rigoureuse et exclusive des cycles par enseignant via ses classes réelles
+        # ÉTAPE 1 : Détection intelligente des cycles par enseignant (autorise la multi-appartenance si l'professeur enseigne dans les deux)
         for ens in tous_enseignants:
             txt_prof = f"{getattr(ens, 'classes_attribuees', '')} {getattr(ens, 'classes', '')} {getattr(ens, 'matieres_attribuees', '')}".lower()
-            
             is_lycee = any(kw in txt_prof for kw in mots_lycee_kw) or any(k in txt_prof for k in ["tle", "2de", "2nd", "seconde", "1ere", "1ère", "premiere", "terminale"])
             is_college = any(kw in txt_prof for kw in mots_college_kw) or any(k in txt_prof for k in ["6eme", "6ème", "5eme", "5ème", "4eme", "4ème", "3eme", "3ème"])
-
-            # Si l'enseignant n'a explicitement que des classes de lycée (ex: Tle D), on force uniquement le Lycée
-            if is_lycee and not is_college:
+            
+            if is_lycee:
                 cycles_detectes[ens.id].add("Lycée")
-            elif is_college and not is_lycee:
+            if is_college:
                 cycles_detectes[ens.id].add("Collège")
-            else:
-                if is_lycee:
-                    cycles_detectes[ens.id].add("Lycée")
-                if is_college:
-                    cycles_detectes[ens.id].add("Collège")
 
-        # ÉTAPE 2 : Analyse des entrées réelles du cahier de texte pour ventiler les heures
+        # ÉTAPE 2 : Analyse du cahier de texte pour ventiler les heures dans les cycles réels
         for entry in cahier_entries:
             date_c = getattr(entry, "date_cours", None)
             if not date_c:
@@ -254,16 +247,20 @@ def afficher_etat_paie_vacataires(mois, date_paie, cycle_filtre="Tous les cycles
 
             if matched_ens_id not in heures_par_cycle:
                 heures_par_cycle[matched_ens_id] = {"Collège": 0.0, "Lycée": 0.0}
-            
-            # S'assure que l'heure va dans le cycle détecté pour cet enseignant
-            if cycle_nom in cycles_detectes.get(matched_ens_id, {cycle_nom}):
-                heures_par_cycle[matched_ens_id][cycle_nom] += duree_val
-            else:
-                # Fallback sur le cycle unique de l'enseignant si la classe saisie diffère
-                primary_cycle = list(cycles_detectes[matched_ens_id])[0] if cycles_detectes[matched_ens_id] else cycle_nom
-                heures_par_cycle[matched_ens_id][primary_cycle] += duree_val
+            heures_par_cycle[matched_ens_id][cycle_nom] += duree_val
+            cycles_detectes[matched_ens_id].add(cycle_nom)
 
-        # ÉTAPE 3 : Récupération globale des acomptes depuis les dépenses
+        # Si aucun cycle textuel ni heure n'est détecté, on attribue un cycle par défaut basé sur la classe unique
+        for ens_id, cycles_dict in heures_par_cycle.items():
+            if not cycles_detectes[ens_id]:
+                if cycles_dict["Lycée"] > 0 and cycles_dict["Collège"] == 0:
+                    cycles_detectes[ens_id].add("Lycée")
+                elif cycles_dict["Collège"] > 0 and cycles_dict["Lycée"] == 0:
+                    cycles_detectes[ens_id].add("Collège")
+                else:
+                    cycles_detectes[ens_id].add("Collège")
+
+        # ÉTAPE 3 : Récupération globale des acomptes depuis la table Depense
         acomptes_depenses_dict = {}
         try:
             depenses_query = db.query(Depense).filter(Depense.school_id == school_id) if school_id else db.query(Depense)
@@ -294,7 +291,6 @@ def afficher_etat_paie_vacataires(mois, date_paie, cycle_filtre="Tous les cycles
             acompte_base = float(getattr(ens, "acompte", 0.0) or 0.0)
             acompte_total = acompte_base + acomptes_depenses_dict.get(ens.id, 0.0)
 
-            # Restreint strictement aux cycles réellement détectés pour l'enseignant
             cycles_valides = cycles_detectes.get(ens_id, {"Collège"})
             if not cycles_valides:
                 cycles_valides = {"Collège"}
@@ -304,9 +300,16 @@ def afficher_etat_paie_vacataires(mois, date_paie, cycle_filtre="Tous les cycles
                     continue
 
                 heures = cycles_dict[cycle_nom]
-                
-                # On affiche la ligne si l'enseignant a des heures ou s'il est rattaché à ce cycle
-                doit_afficher = (heures > 0) or (len(cycles_valides) == 1)
+                est_multicycle = len(cycles_valides) > 1
+                a_des_heures_partout = sum(cycles_dict.values()) > 0
+
+                doit_afficher = False
+                if heures > 0:
+                    doit_afficher = True
+                elif est_multicycle:
+                    doit_afficher = True
+                elif not a_des_heures_partout and len(cycles_valides) == 1:
+                    doit_afficher = True
 
                 if doit_afficher:
                     taux_horaire = 2000.0 if cycle_nom == "Lycée" else 1500.0
@@ -434,13 +437,13 @@ def afficher_paie():
     try:
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            type_etat = st.radio("Catégorie :", ["Personnel Administratif", "Enseignants Vacataires"], horizontal=True, key="radio_type_etat_paie_v6")
+            type_etat = st.radio("Catégorie :", ["Personnel Administratif", "Enseignants Vacataires"], horizontal=True, key="radio_type_etat_paie_v7")
         with col2:
-            mois_selectionne = st.selectbox("Mois :", ["Septembre 2026", "Octobre 2026", "Novembre 2026", "Décembre 2026", "Janvier 2027", "Février 2027", "Mars 2027", "Avril 2027", "Mai 2027", "Juin 2027", "Juillet 2027", "Août 2027"], index=1, key="select_mois_paie_v6")
+            mois_selectionne = st.selectbox("Mois :", ["Septembre 2026", "Octobre 2026", "Novembre 2026", "Décembre 2026", "Janvier 2027", "Février 2027", "Mars 2027", "Avril 2027", "Mai 2027", "Juin 2027", "Juillet 2027", "Août 2027"], index=1, key="select_mois_paie_v7")
         with col3:
-            date_versement = st.date_input("Date de versement :", value=datetime.today(), key="date_versement_paie_v6")
+            date_versement = st.date_input("Date de versement :", value=datetime.today(), key="date_versement_paie_v7")
         with col4:
-            cycle_selectionne = st.selectbox("Filtrer par cycle :", ["Tous les cycles", "Collège Uniquement", "Lycée Uniquement"], key="select_cycle_paie_v6")
+            cycle_selectionne = st.selectbox("Filtrer par cycle :", ["Tous les cycles", "Collège Uniquement", "Lycée Uniquement"], key="select_cycle_paie_v7")
     except Exception as e:
         st.error(f"Erreur lors du rendu des filtres : {e}")
         return

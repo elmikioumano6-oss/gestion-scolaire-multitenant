@@ -6,6 +6,7 @@ from sqlalchemy.orm import relationship, synonym
 
 class School(Base):
     __tablename__ = "schools"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Integer, primary_key=True, index=True)
     nom = Column(String(150), nullable=False)
@@ -34,6 +35,7 @@ class School(Base):
 
 class AnneeScolaire(Base):
     __tablename__ = "annees_scolaires"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False, index=True)
@@ -47,6 +49,7 @@ class AnneeScolaire(Base):
 
 class Classe(Base):
     __tablename__ = "classes"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False, index=True)
@@ -79,6 +82,7 @@ class Classe(Base):
 
 class Eleve(Base):
     __tablename__ = "eleves"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False, index=True)
@@ -106,6 +110,7 @@ class Eleve(Base):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=True, index=True)
@@ -132,6 +137,7 @@ class User(Base):
 
 class Message(Base):
     __tablename__ = "messages"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False, index=True)
@@ -149,6 +155,7 @@ class Message(Base):
 
 class Matiere(Base):
     __tablename__ = "matieres"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False, index=True)
@@ -175,6 +182,7 @@ class Matiere(Base):
 
 class Programme(Base):
     __tablename__ = "programmes"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False, index=True)
@@ -190,6 +198,7 @@ class Programme(Base):
 
 class Note(Base):
     __tablename__ = "notes"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False, index=True)
@@ -206,6 +215,7 @@ class Note(Base):
 
 class Enseignant(Base):
     __tablename__ = "enseignants"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False, index=True)
@@ -230,15 +240,17 @@ class Enseignant(Base):
     school = relationship("School", back_populates="enseignants")
     user_compte = relationship("User", back_populates="enseignant", cascade="all, delete-orphan")
     heures_mois = relationship("HeureVacataireMois", back_populates="enseignant", cascade="all, delete-orphan")
+    cahiers_texte = relationship("CahierTexte", back_populates="enseignant", cascade="all, delete-orphan")
 
 
 class HeureVacataireMois(Base):
     __tablename__ = "heures_vacataires_mois"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False, index=True)
     enseignant_id = Column(Integer, ForeignKey("enseignants.id"), nullable=False, index=True)
-    mois = Column(String(50), nullable=False, index=True)  # Ex: "Octobre 2026"
+    mois = Column(String(50), nullable=False, index=True)
     heures = Column(Float, default=0.0)
 
     enseignant = relationship("Enseignant", back_populates="heures_mois")
@@ -246,6 +258,7 @@ class HeureVacataireMois(Base):
 
 class Affectation(Base):
     __tablename__ = "affectations"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False, index=True)
@@ -260,6 +273,7 @@ class Affectation(Base):
 
 class Presence(Base):
     __tablename__ = "presences"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False, index=True)
@@ -273,6 +287,7 @@ class Presence(Base):
 
 class EmploiDuTemps(Base):
     __tablename__ = "emplois_du_temps"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False, index=True)
@@ -288,6 +303,7 @@ class EmploiDuTemps(Base):
 
 class CahierTexte(Base):
     __tablename__ = "cahiers_texte"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False, index=True)
@@ -295,6 +311,7 @@ class CahierTexte(Base):
     classe_id = Column(Integer, ForeignKey("classes.id"), nullable=True, index=True)
     matiere_id = Column(Integer, ForeignKey("matieres.id"), nullable=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    enseignant_id = Column(Integer, ForeignKey("enseignants.id"), nullable=True, index=True)
     
     date_cours = Column(DateTime, nullable=True)
     date = synonym("date_cours")
@@ -315,10 +332,12 @@ class CahierTexte(Base):
     classe = relationship("Classe", back_populates="cahiers_texte")
     matiere = relationship("Matiere", back_populates="cahiers_texte")
     enseignant_user = relationship("User", back_populates="cahiers_texte")
+    enseignant = relationship("Enseignant", back_populates="cahiers_texte")
 
 
 class EcheancePaiement(Base):
     __tablename__ = "echeances_paiements"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False, index=True)
@@ -329,6 +348,7 @@ class EcheancePaiement(Base):
 
 class Evaluation(Base):
     __tablename__ = "planification_evaluations"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False, index=True)
@@ -356,6 +376,7 @@ PlanificationEvaluation = Evaluation
 
 class ActivityLog(Base):
     __tablename__ = "journal_activites"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=True, index=True)
@@ -376,6 +397,7 @@ JournalActivite = ActivityLog
 
 class SystemLog(Base):
     __tablename__ = "system_logs"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Integer, primary_key=True, index=True)
     timestamp = Column(DateTime, default=datetime.now)
@@ -387,6 +409,7 @@ class SystemLog(Base):
 
 class Paiement(Base):
     __tablename__ = "paiements"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Integer, primary_key=True, index=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False, index=True)
@@ -405,6 +428,7 @@ class Paiement(Base):
 
 class Depense(Base):
     __tablename__ = "depenses"
+    __table_args__ = {'extend_existing': True}
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     school_id = Column(Integer, ForeignKey("schools.id"), nullable=False, index=True)
