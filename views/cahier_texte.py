@@ -304,7 +304,6 @@ def afficher_cahier_texte():
                     key="form_cahier_duree"
                 )
 
-            # RECHERCHE ULTRA-PRÉCISE DU TITULAIRE AVEC GESTION DE L'ÉTAT STREAMLIT
             enseignant_suggere_nom = "Aucun titulaire détecté automatiquement"
             enseignant_id_final = None
             
@@ -323,7 +322,6 @@ def afficher_cahier_texte():
 
             st.info(f"💡 **Titulaire suggéré :** {enseignant_suggere_nom}")
 
-            # SYNCHRONISATION FORCÉE DANS LE SESSION_STATE POUR MAJ INSTANTANÉE
             if "last_classe_matiere_cahier" not in st.session_state:
                 st.session_state["last_classe_matiere_cahier"] = ("", "")
 
@@ -362,31 +360,48 @@ def afficher_cahier_texte():
                         None
                     )
 
-                    contenu_formate = f"**[{titre_cours.strip()}]**\n{contenu.strip()}"
-                    duree_str = f"{int(duree_cours)} heure{'s' if duree_cours > 1 else ''}"
+                    # --- CONTRÔLE ANTI-DOUBLON ---
+                    date_debut_jour = datetime.combine(date_cours, datetime.min.time())
+                    date_fin_jour = datetime.combine(date_cours, datetime.max.time())
 
-                    nouvelle_entree = CahierTexte(
-                        school_id=target_school_id,
-                        cycle=cycle_en_cours,
-                        classe_id=cls_obj.id if cls_obj else None,
-                        matiere_id=mat_obj.id if mat_obj else None,
-                        enseignant_id=enseignant_id_final,
-                        user_id=user_id_val,
-                        date_cours=datetime.combine(date_cours, datetime.now().time()),
-                        duree_seance=duree_str,
-                        titre=titre_cours.strip(),
-                        contenu=contenu_formate,
-                        difficultees=difficultees.strip() if difficultees else None,
-                        auteur_saisie=username,
-                        statut_validation="Validé",
-                    )
-                    db.add(nouvelle_entree)
-                    db.commit()
+                    doublon_existant = db.query(CahierTexte).filter(
+                        CahierTexte.school_id == target_school_id,
+                        CahierTexte.classe_id == (cls_obj.id if cls_obj else None),
+                        CahierTexte.matiere_id == (mat_obj.id if mat_obj else None),
+                        CahierTexte.enseignant_id == enseignant_id_final,
+                        CahierTexte.date_cours >= date_debut_jour,
+                        CahierTexte.date_cours <= date_fin_jour
+                    ).first()
 
-                    st.success(f"✅ Entrée enregistrée ({duree_str}) pour la classe **{classe_choisie}** en **{matiere_choisie}** !")
-                    st.rerun()
+                    if doublon_existant:
+                        st.error(f"⚠️ **Erreur de saisie :** Un cours pour cette classe, cette matière et cet enseignant a **déjà été enregistré** à la date du **{date_cours.strftime('%d/%m/%Y')}** (ID : {doublon_existant.id}). Impossible de le saisir deux fois.")
+                    else:
+                        contenu_formate = f"**[{titre_cours.strip()}]**\n{contenu.strip()}"
+                        duree_str = f"{int(duree_cours)} heure{'s' if duree_cours > 1 else ''}"
+
+                        nouvelle_entree = CahierTexte(
+                            school_id=target_school_id,
+                            cycle=cycle_en_cours,
+                            classe_id=cls_obj.id if cls_obj else None,
+                            matiere_id=mat_obj.id if mat_obj else None,
+                            enseignant_id=enseignant_id_final,
+                            user_id=user_id_val,
+                            date_cours=datetime.combine(date_cours, datetime.now().time()),
+                            duree_seance=duree_str,
+                            titre=titre_cours.strip(),
+                            contenu=contenu_formate,
+                            difficultees=difficultees.strip() if difficultees else None,
+                            auteur_saisie=username,
+                            statut_validation="Validé",  # Correction ici (statut_validation au lieu de stat_validation)
+                        )
+                        db.add(nouvelle_entree)
+                        db.commit()
+
+                        st.success(f"✅ Entrée enregistrée ({duree_str}) pour la classe **{classe_choisie}** en **{matiere_choisie}** !")
+                        st.rerun()
 
     finally:
         db.close()
 
+# Alias correct pour l'importation dans app.py
 afficher_cahier_de_texte = afficher_cahier_texte
