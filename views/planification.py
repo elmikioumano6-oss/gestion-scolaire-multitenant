@@ -1,4 +1,4 @@
-from datetime import datetime, date, time, timedelta
+from datetime import datetime, date, timedelta
 import io
 import sqlalchemy as sa
 import pandas as pd
@@ -6,15 +6,31 @@ import streamlit as st
 import streamlit.components.v1 as components
 from database.db_config import SessionLocal, engine
 from database.models import Classe, Matiere, Evaluation, ActivityLog, School
-import reportlab
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4, landscape
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+
+# Importation sécurisée de ReportLab
+PDF_AVAILABLE = True
+try:
+    import reportlab
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+except ImportError:
+    PDF_AVAILABLE = False
+
+JOURS_FR = {
+    0: "Lundi",
+    1: "Mardi",
+    2: "Mercredi",
+    3: "Jeudi",
+    4: "Vendredi",
+    5: "Samedi",
+    6: "Dimanche"
+}
 
 def afficher_planification_evaluations():
     st.subheader("📋 Planification Avancée des Évaluations (SIA)")
-    st.markdown("Calendrier officiel des contrôles, compositions et examens blancs avec workflow de validation, gestion des ressources et contrôle anti-collision.")
+    st.markdown("Calendrier officiel des contrôles, compositions et examens blancs avec grille matricielle globale pour toutes les classes.")
     st.markdown("---")
 
     # --- MIGRATION AUTOMATIQUE DE LA COLONNE SEMESTRE ---
@@ -63,7 +79,7 @@ def afficher_planification_evaluations():
         classes_dict_map = {c.id: c.libelle for c in classes_cycle}
         matieres_dict_map = {m.id: (m.libelle if hasattr(m, 'libelle') else getattr(m, 'nom', 'N/A')) for m in matieres_disponibles}
 
-        tab1, tab2 = st.tabs(["📅 Calendrier & Suivi des Évaluations", "⚡ Saisie Rapide en Grille"])
+        tab1, tab2 = st.tabs(["📅 Calendrier & Suivi des Évaluations", "⚡ Grille Globale (Toutes les Classes)"])
 
         with tab1:
             st.markdown(f"### Calendrier Officiel ({annee_en_cours}) — **{school_name} ({cycle_en_cours})**")
@@ -104,10 +120,9 @@ def afficher_planification_evaluations():
                         "Surveillant": ev.surveillant or "Non assigné",
                         "Statut": ev.statut
                     })
-                
+            
                 df_evals = pd.DataFrame(data_tableau)
 
-                # --- BOUTONS D'EXPORTATION (TAB 1) ---
                 col_exp1, col_exp2, col_exp3, _ = st.columns([1.3, 1.3, 1.3, 3])
 
                 with col_exp1:
@@ -124,105 +139,47 @@ def afficher_planification_evaluations():
                     )
 
                 with col_exp2:
-                    pdf_buffer = io.BytesIO()
-                    doc = SimpleDocTemplate(
-                        pdf_buffer,
-                        pagesize=landscape(A4),
-                        rightMargin=30,
-                        leftMargin=30,
-                        topMargin=30,
-                        bottomMargin=50
-                    )
+                    if PDF_AVAILABLE:
+                        pdf_buffer = io.BytesIO()
+                        doc = SimpleDocTemplate(pdf_buffer, pagesize=landscape(A4), rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=50)
+                        elements = []
+                        styles = getSampleStyleSheet()
+                        title_style = ParagraphStyle("TitleStyle", parent=styles["Heading1"], fontSize=14, textColor=colors.HexColor("#1e3a8a"), alignment=1, spaceAfter=15)
+                        elements.append(Paragraph(f"CALENDRIER OFFICIEL DES ÉVALUATIONS ({annee_en_cours}) — {school_name} ({cycle_en_cours})", title_style))
+                        elements.append(Spacer(1, 10))
 
-                    elements = []
-                    styles = getSampleStyleSheet()
+                        df_pdf = df_evals.drop(columns=["ID"]) if "ID" in df_evals.columns else df_evals
+                        table_data = [list(df_pdf.columns)]
+                        for _, row in df_pdf.iterrows():
+                            table_data.append([str(val) for val in row])
 
-                    title_style = ParagraphStyle(
-                        "TitleStyle",
-                        parent=styles["Heading1"],
-                        fontSize=14,
-                        textColor=colors.HexColor("#1e3a8a"),
-                        alignment=1,
-                        spaceAfter=15
-                    )
+                        col_widths = [780 / len(df_pdf.columns)] * len(df_pdf.columns)
+                        t = Table(table_data, colWidths=col_widths)
+                        t.setStyle(TableStyle([
+                            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#1e3a8a")),
+                            ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+                            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                            ('FONTSIZE', (0,0), (-1,0), 8),
+                            ('BOTTOMPADDING', (0,0), (-1,0), 8),
+                            ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#f8fafc")),
+                            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cbd5e1")),
+                            ('FONTNAME', (0,1), (-1,-1), 'Helvetica'),
+                            ('FONTSIZE', (0,1), (-1,-1), 8),
+                            ('BOTTOMPADDING', (0,1), (-1,-1), 5),
+                            ('TOPPADDING', (0,1), (-1,-1), 5),
+                        ]))
+                        elements.append(t)
+                        doc.build(elements)
+                        pdf_data = pdf_buffer.getvalue()
 
-                    elements.append(Paragraph(f"CALENDRIER OFFICIEL DES ÉVALUATIONS ({annee_en_cours}) — {school_name} ({cycle_en_cours})", title_style))
-                    elements.append(Spacer(1, 10))
-
-                    df_pdf = df_evals.drop(columns=["ID"]) if "ID" in df_evals.columns else df_evals
-                    table_data = [list(df_pdf.columns)]
-                    for _, row in df_pdf.iterrows():
-                        table_data.append([str(val) for val in row])
-
-                    col_widths = [780 / len(df_pdf.columns)] * len(df_pdf.columns)
-                    t = Table(table_data, colWidths=col_widths)
-                    t.setStyle(TableStyle([
-                        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#1e3a8a")),
-                        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-                        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-                        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                        ('FONTSIZE', (0,0), (-1,0), 8),
-                        ('BOTTOMPADDING', (0,0), (-1,0), 8),
-                        ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#f8fafc")),
-                        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cbd5e1")),
-                        ('FONTNAME', (0,1), (-1,-1), 'Helvetica'),
-                        ('FONTSIZE', (0,1), (-1,-1), 8),
-                        ('BOTTOMPADDING', (0,1), (-1,-1), 5),
-                        ('TOPPADDING', (0,1), (-1,-1), 5),
-                    ]))
-                    elements.append(t)
-
-                    def add_footer(canvas, doc_obj):
-                        canvas.saveState()
-                        footer_y = 22
-                        s_nom = ecole_courante.nom if ecole_courante else school_name
-                        s_adr = ecole_courante.adresse if ecole_courante and ecole_courante.adresse else "Niamey - Niger"
-                        s_cont = ecole_courante.contacts if ecole_courante and ecole_courante.contacts else "N/D"
-                        s_dev = ecole_courante.devise if ecole_courante and ecole_courante.devise else "Excellence - Persévérance - Réussite"
-
-                        footer_text = f"<b>{s_nom}</b> | Adresse : {s_adr} | Contacts : {s_cont} | Devise : <i>{s_dev}</i>"
-                        footer_style = ParagraphStyle(
-                            "FooterStyle",
-                            parent=styles["Normal"],
-                            fontSize=8,
-                            textColor=colors.HexColor("#475569"),
-                            alignment=1
-                        )
-                        p = Paragraph(footer_text, footer_style)
-                        p.wrap(doc_obj.pagesize[0] - 60, footer_y)
-                        p.drawOn(canvas, 30, footer_y)
-                        canvas.restoreState()
-
-                    doc.build(elements, onFirstPage=add_footer)
-                    pdf_data = pdf_buffer.getvalue()
-
-                    st.download_button(
-                        label="📥 PDF",
-                        data=pdf_data,
-                        file_name=f"Calendrier_Evaluations_{annee_en_cours}.pdf",
-                        mime="application/pdf",
-                        key="btn_pdf_tab1"
-                    )
+                        st.download_button(label="📥 PDF", data=pdf_data, file_name=f"Calendrier_Evaluations_{annee_en_cours}.pdf", mime="application/pdf", key="btn_pdf_tab1")
+                    else:
+                        st.info("Export PDF indisponible (installez reportlab)")
 
                 with col_exp3:
-                    components.html(
-                        """
-                        <button onclick="parent.window.print()" style="
-                            background-color: #2563eb;
-                            color: white;
-                            border: none;
-                            padding: 0.45rem 1rem;
-                            font-size: 0.85rem;
-                            font-weight: 500;
-                            border-radius: 6px;
-                            cursor: pointer;
-                            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-                            font-family: sans-serif;
-                        ">🖨️ Imprimer</button>
-                        """,
-                        height=40,
-                    )
+                    components.html('<button onclick="parent.window.print()" style="background-color: #2563eb; color: white; border: none; padding: 0.45rem 1rem; font-size: 0.85rem; font-weight: 500; border-radius: 6px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.2); font-family: sans-serif;">🖨️ Imprimer</button>', height=40)
 
                 st.markdown("<br>", unsafe_allow_html=True)
                 st.dataframe(df_evals, use_container_width=True)
@@ -247,205 +204,155 @@ def afficher_planification_evaluations():
                             st.rerun()
 
         with tab2:
-            st.markdown(f"### ⚡ Saisie Rapide en Grille ({annee_en_cours}) — **{school_name} ({cycle_en_cours})**")
-            st.markdown("Renseignez directement les informations d'évaluation pour plusieurs matières simultanément sous forme de tableau interactif.")
+            st.markdown(f"### ⚡ Grille Matricielle Globale (Toutes les Classes) — **{school_name} ({cycle_en_cours})**")
+            st.markdown("Planifiez les évaluations pour l'ensemble des classes de l'établissement dans un tableau unifié (Lundi au Dimanche).")
 
-            if not matieres_disponibles:
-                st.warning("⚠️ Veuillez d'abord créer des matières dans le module 'Matières & Coeffs' pour pouvoir planifier une évaluation.")
-            else:
-                col_g1, col_g2, col_g3 = st.columns(3)
-                with col_g1:
-                    classe_choisie = st.selectbox("Classe concernée (Grille)", noms_classes, key="grille_classe")
-                with col_g2:
-                    semestre_eval = st.selectbox("Sélectionner le semestre (Grille)", ["Semestre 1", "Semestre 2"], key="grille_semestre")
-                with col_g3:
-                    type_eval = st.selectbox("Type d'évaluation (Global)", ["Interro 1", "Interro 2", "Devoir 1", "Devoir 2", "Compo"], key="grille_type")
+            col_g1, col_g2 = st.columns(2)
+            with col_g1:
+                semestre_eval = st.selectbox("Sélectionner le semestre", ["Semestre 1", "Semestre 2"], key="grille_semestre_matrix_global")
+            with col_g2:
+                type_eval = st.selectbox("Type d'évaluation", ["Interro 1", "Interro 2", "Devoir 1", "Devoir 2", "Compo"], key="grille_type_matrix_global")
 
-                lignes_grille = []
-                for m in matieres_disponibles:
-                    mat_lib = m.libelle if hasattr(m, 'libelle') else getattr(m, 'nom', 'Matière')
-                    lignes_grille.append({
-                        "Matière": mat_lib,
-                        "Intitulé": f"{type_eval} de {mat_lib}",
-                        "Date": date.today(),
-                        "Heure Début": "08h00",
-                        "Heure Fin": "10h00",
-                        "Salle": "Salle Principale",
-                        "Surveillant": ""
-                    })
+            date_debut_semaine = st.date_input("Date de début de la session d'évaluation (Lundi de référence)", value=date.today(), key="grille_date_debut_global")
+            
+            # Génération des 7 jours (Lundi à Dimanche)
+            jours_colonnes = []
+            dates_jours = {}
+            for i in range(7):
+                d_courante = date_debut_semaine + timedelta(days=i)
+                nom_jour_fr = JOURS_FR[d_courante.weekday()]
+                lib_jour = f"{nom_jour_fr} {d_courante.strftime('%d/%m')}"
+                jours_colonnes.append(lib_jour)
+                dates_jours[lib_jour] = d_courante
 
-                df_saisie = pd.DataFrame(lignes_grille)
+            # Construction des lignes combinant Classe et Créneaux par défaut
+            creneaux_defaut = ["08h00 - 10h00", "10h30 - 12h30", "15h00 - 17h00"]
+            matrice_data = []
 
-                # --- BOUTONS D'EXPORTATION (TAB 2 - SAISIE RAPIDE) ---
-                col_g_exp1, col_g_exp2, col_g_exp3, _ = st.columns([1.3, 1.3, 1.3, 3])
+            target_school_id = school_id if school_id else (ecole_courante.id if ecole_courante else 1)
 
-                with col_g_exp1:
-                    output_excel_g = io.BytesIO()
-                    with pd.ExcelWriter(output_excel_g, engine="openpyxl") as writer:
-                        df_saisie.to_excel(writer, index=False, sheet_name="Saisie_Evaluations")
-                    excel_data_g = output_excel_g.getvalue()
-                    st.download_button(
-                        label="📥 Excel",
-                        data=excel_data_g,
-                        file_name=f"Grille_Saisie_{classe_choisie}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key="btn_excel_tab2"
-                    )
+            for classe_obj in classes_cycle:
+                # Matières spécifiques à cette classe
+                m_list = db.query(Matiere).filter(Matiere.classe_id == classe_obj.id).all()
+                noms_mats_classe = ["---"] + sorted(list(set([(m.libelle if hasattr(m, 'libelle') and m.libelle else getattr(m, 'nom', '')).strip().title() for m in m_list])))
 
-                with col_g_exp2:
-                    pdf_buffer_g = io.BytesIO()
-                    doc_g = SimpleDocTemplate(
-                        pdf_buffer_g,
-                        pagesize=landscape(A4),
-                        rightMargin=30,
-                        leftMargin=30,
-                        topMargin=30,
-                        bottomMargin=50
-                    )
-                    elements_g = []
-                    styles_g = getSampleStyleSheet()
+                for heure in creneaux_defaut:
+                    h_deb = heure.split(" - ")[0]
+                    ligne = {
+                        "Classe": classe_obj.libelle,
+                        "Créneau Horaire": heure
+                    }
+                    for j in jours_colonnes:
+                        d_eval_cib = dates_jours[j]
+                        
+                        existant = db.query(Evaluation).filter(
+                            Evaluation.school_id == target_school_id,
+                            Evaluation.classe_id == classe_obj.id,
+                            Evaluation.semestre == semestre_eval,
+                            Evaluation.type_evaluation == type_eval,
+                            Evaluation.date_evaluation == d_eval_cib,
+                            Evaluation.heure_debut == h_deb
+                        ).first()
+                        
+                        matiere_affectee = "---"
+                        if existant and existant.matiere_id:
+                            m_trouvee = db.query(Matiere).filter(Matiere.id == existant.matiere_id).first()
+                            if m_trouvee:
+                                matiere_affectee = (m_trouvee.libelle if hasattr(m_trouvee, 'libelle') and m_trouvee.libelle else getattr(m_trouvee, 'nom', '')).strip().title()
+                        
+                        ligne[j] = matiere_affectee if matiere_affectee in noms_mats_classe else "---"
+                    matrice_data.append(ligne)
 
-                    title_style_g = ParagraphStyle(
-                        "TitleStyleGrille",
-                        parent=styles_g["Heading1"],
-                        fontSize=14,
-                        textColor=colors.HexColor("#1e3a8a"),
-                        alignment=1,
-                        spaceAfter=15
-                    )
+            df_matrice_grid = pd.DataFrame(matrice_data)
 
-                    elements_g.append(Paragraph(f"GRILLE DE SAISIE DES ÉVALUATIONS — {classe_choisie} ({semestre_eval})", title_style_g))
-                    elements_g.append(Spacer(1, 10))
-
-                    table_data_g = [list(df_saisie.columns)]
-                    for _, row in df_saisie.iterrows():
-                        table_data_g.append([str(val) for val in row])
-
-                    col_widths_g = [780 / len(df_saisie.columns)] * len(df_saisie.columns)
-                    t_g = Table(table_data_g, colWidths=col_widths_g)
-                    t_g.setStyle(TableStyle([
-                        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#1e3a8a")),
-                        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-                        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-                        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                        ('FONTSIZE', (0,0), (-1,0), 8),
-                        ('BOTTOMPADDING', (0,0), (-1,0), 8),
-                        ('BACKGROUND', (0,1), (-1,-1), colors.HexColor("#f8fafc")),
-                        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cbd5e1")),
-                        ('FONTNAME', (0,1), (-1,-1), 'Helvetica'),
-                        ('FONTSIZE', (0,1), (-1,-1), 8),
-                        ('BOTTOMPADDING', (0,1), (-1,-1), 5),
-                        ('TOPPADDING', (0,1), (-1,-1), 5),
-                    ]))
-                    elements_g.append(t_g)
-                    doc_g.build(elements_g)
-                    pdf_data_g = pdf_buffer_g.getvalue()
-
-                    st.download_button(
-                        label="📥 PDF",
-                        data=pdf_data_g,
-                        file_name=f"Grille_Saisie_{classe_choisie}.pdf",
-                        mime="application/pdf",
-                        key="btn_pdf_tab2"
-                    )
-
-                with col_g_exp3:
-                    components.html(
-                        """
-                        <button onclick="parent.window.print()" style="
-                            background-color: #2563eb;
-                            color: white;
-                            border: none;
-                            padding: 0.45rem 1rem;
-                            font-size: 0.85rem;
-                            font-weight: 500;
-                            border-radius: 6px;
-                            cursor: pointer;
-                            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-                            font-family: sans-serif;
-                        ">🖨️ Imprimer</button>
-                        """,
-                        height=40,
-                    )
-
-                st.markdown("<br>", unsafe_allow_html=True)
-                st.markdown("#### ✏️ Tableau d'édition rapide (Modifiable)")
-                df_modifie = st.data_editor(
-                    df_saisie,
-                    num_rows="dynamic",
-                    use_container_width=True,
-                    key="table_saisie_evals"
+            # Configuration des colonnes de l'éditeur interactif
+            column_config_grid = {
+                "Classe": st.column_config.TextColumn("Classe", disabled=True),
+                "Créneau Horaire": st.column_config.TextColumn("Créneau Horaire", required=True)
+            }
+            # Pour chaque jour, on met une selectbox globale avec toutes les matières du cycle ou de l'école
+            toutes_matieres_cycle = ["---"] + sorted(list(set([(m.libelle if hasattr(m, 'libelle') and m.libelle else getattr(m, 'nom', '')).strip().title() for m in matieres_disponibles])))
+            for j in jours_colonnes:
+                column_config_grid[j] = st.column_config.SelectboxColumn(
+                    j,
+                    options=toutes_matieres_cycle,
+                    required=True
                 )
 
-                if st.button("💾 Enregistrer toutes les évaluations de la grille", type="primary"):
-                    target_school_id = school_id
-                    if is_super_admin and not target_school_id:
-                        ecole_defaut = db.query(School).first()
-                        target_school_id = ecole_defaut.id if ecole_defaut else 1
+            st.markdown("#### 🗓️ Emploi du Temps Global des Évaluations (Toutes les Classes)")
+            edited_grid_df = st.data_editor(
+                df_matrice_grid,
+                column_config=column_config_grid,
+                num_rows="dynamic",
+                hide_index=True,
+                use_container_width=True,
+                key="editor_global_classes_heures"
+            )
 
-                    classe_obj = db.query(Classe).filter(Classe.libelle == classe_choisie, Classe.school_id == target_school_id).first()
+            if st.button("💾 Enregistrer la grille globale pour toutes les classes", type="primary", key="btn_save_global_grid"):
+                enregistrements_compteur = 0
+
+                for _, row in edited_grid_df.iterrows():
+                    nom_classe_ligne = str(row["Classe"]).strip()
+                    classe_obj_ligne = db.query(Classe).filter(Classe.libelle == nom_classe_ligne, Classe.school_id == target_school_id).first()
                     
-                    if not classe_obj:
-                        st.error("❌ Erreur : Classe introuvable en base de données.")
+                    if not classe_obj_ligne:
+                        continue
+
+                    heure_creneau = str(row["Créneau Horaire"]).strip()
+                    if " - " in heure_creneau:
+                        h_deb, h_fin = heure_creneau.split(" - ", 1)
                     else:
-                        success_count = 0
-                        for _, row in df_modifie.iterrows():
-                            mat_nom = row["Matière"]
-                            matiere_obj = db.query(Matiere).filter((Matiere.libelle == mat_nom) | (Matiere.nom == mat_nom), Matiere.school_id == target_school_id).first()
-                            
-                            titre_eval = str(row["Intitulé"]).strip()
-                            date_ev = row["Date"]
-                            h_debut = str(row["Heure Début"]).strip()
-                            h_fin = str(row["Heure Fin"]).strip()
-                            salle_val = str(row["Salle"]).strip()
-                            surv_val = str(row["Surveillant"]).strip()
+                        h_deb, h_fin = heure_creneau, "10h00"
 
-                            if not titre_eval or not mat_nom:
-                                continue
+                    for j in jours_colonnes:
+                        matiere_choisie_cellule = row[j]
+                        d_eval_cellule = dates_jours[j]
 
-                            conflit = db.query(Evaluation).filter(
-                                Evaluation.school_id == target_school_id,
-                                Evaluation.classe_id == classe_obj.id,
-                                Evaluation.date_evaluation == date_ev,
-                                Evaluation.heure_debut == h_debut
+                        if matiere_choisie_cellule and matiere_choisie_cellule != "---":
+                            mat_obj_cell = db.query(Matiere).filter(
+                                ((Matiere.libelle == matiere_choisie_cellule) | (Matiere.nom == matiere_choisie_cellule)),
+                                Matiere.classe_id == classe_obj_ligne.id,
+                                Matiere.school_id == target_school_id
                             ).first()
 
-                            if not conflit:
-                                nouvelle_eval = Evaluation(
-                                    school_id=target_school_id,
-                                    cycle=cycle_en_cours,
-                                    classe_id=classe_obj.id,
-                                    matiere_id=matiere_obj.id if matiere_obj else None,
-                                    semestre=semestre_eval,
-                                    type_evaluation=type_eval,
-                                    intitule=titre_eval,
-                                    date_evaluation=date_ev,
-                                    heure_debut=h_debut,
-                                    heure_fin=h_fin,
-                                    salle=salle_val,
-                                    surveillant=surv_val,
-                                    statut="Brouillon",
-                                    cree_par=username
-                                )
-                                db.add(nouvelle_eval)
-                                success_count += 1
+                            if mat_obj_cell:
+                                eval_existante = db.query(Evaluation).filter(
+                                    Evaluation.school_id == target_school_id,
+                                    Evaluation.classe_id == classe_obj_ligne.id,
+                                    Evaluation.semestre == semestre_eval,
+                                    Evaluation.type_evaluation == type_eval,
+                                    Evaluation.date_evaluation == d_eval_cellule,
+                                    Evaluation.heure_debut == h_deb
+                                ).first()
 
-                        if success_count > 0:
-                            nouveau_log = ActivityLog(
-                                school_id=target_school_id,
-                                timestamp=datetime.now(),
-                                username=username,
-                                action=f"Planification en masse ({semestre_eval}) : {success_count} évaluations pour {classe_choisie}",
-                                module="Planification des Évaluations",
-                                statut="Succès"
-                            )
-                            db.add(nouveau_log)
-                            db.commit()
-                            st.success(f"🎉 {success_count} évaluations programmées et enregistrées avec succès en mode grille pour la classe de **{classe_choisie}** !")
-                            st.rerun()
-                        else:
-                            st.warning("⚠️ Aucune nouvelle évaluation valide n'a pu être enregistrée (vérifiez les conflits d'horaires ou les champs vides).")
+                                if eval_existante:
+                                    eval_existante.matiere_id = mat_obj_cell.id
+                                    eval_existante.heure_fin = h_fin
+                                    eval_existante.intitule = f"{type_eval} de {matiere_choisie_cellule}"
+                                else:
+                                    nouvelle_eval = Evaluation(
+                                        school_id=target_school_id,
+                                        cycle=cycle_en_cours,
+                                        classe_id=classe_obj_ligne.id,
+                                        matiere_id=mat_obj_cell.id,
+                                        semestre=semestre_eval,
+                                        type_evaluation=type_eval,
+                                        intitule=f"{type_eval} de {matiere_choisie_cellule}",
+                                        date_evaluation=d_eval_cellule,
+                                        heure_debut=h_deb,
+                                        heure_fin=h_fin,
+                                        salle="Salle Principale",
+                                        surveillant="",
+                                        statut="Brouillon",
+                                        cree_par=username
+                                    )
+                                    db.add(nouvelle_eval)
+                                enregistrements_compteur += 1
+
+                db.commit()
+                st.success(f"✅ Grille globale enregistrée avec succès ! {enregistrements_compteur} affectations mises à jour pour l'ensemble des classes.")
+                st.rerun()
 
     finally:
         db.close()
