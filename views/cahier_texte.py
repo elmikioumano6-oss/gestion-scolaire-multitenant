@@ -256,10 +256,14 @@ def afficher_cahier_texte():
 
                     st.markdown(f'<div class="delete-section">', unsafe_allow_html=True)
                     st.markdown("#### 🗑️ Gestion & Suppression d'une entrée")
-                    options_suppr = {
-                        f"ID {e.id} — {e.date_cours.strftime('%d/%m/%Y') if e.date_cours else ''} — {e.titre or 'Cours'}": e.id
-                        for e in entrees_db
-                    }
+                    
+                    options_suppr = {}
+                    for e in entrees_db:
+                        d_str = e.date_cours.strftime('%d/%m/%Y') if e.date_cours else ''
+                        t_str = e.titre or 'Cours'
+                        libelle_opt = f"ID {e.id} — {d_str} — {t_str}"
+                        options_suppr[libelle_opt] = e.id
+
                     entree_a_supprimer_label = st.selectbox(
                         "Sélectionner l'entrée à supprimer",
                         list(options_suppr.keys()),
@@ -360,7 +364,7 @@ def afficher_cahier_texte():
                         None
                     )
 
-                    # --- CONTRÔLE ANTI-DOUBLON ---
+                    # --- CONTRÔLE ANTI-DOUBLON STRICT (Classe + Matière + Date) ---
                     date_debut_jour = datetime.combine(date_cours, datetime.min.time())
                     date_fin_jour = datetime.combine(date_cours, datetime.max.time())
 
@@ -368,13 +372,12 @@ def afficher_cahier_texte():
                         CahierTexte.school_id == target_school_id,
                         CahierTexte.classe_id == (cls_obj.id if cls_obj else None),
                         CahierTexte.matiere_id == (mat_obj.id if mat_obj else None),
-                        CahierTexte.enseignant_id == enseignant_id_final,
                         CahierTexte.date_cours >= date_debut_jour,
                         CahierTexte.date_cours <= date_fin_jour
                     ).first()
 
                     if doublon_existant:
-                        st.error(f"⚠️ **Erreur de saisie :** Un cours pour cette classe, cette matière et cet enseignant a **déjà été enregistré** à la date du **{date_cours.strftime('%d/%m/%Y')}** (ID : {doublon_existant.id}). Impossible de le saisir deux fois.")
+                        st.error(f"⚠️ **Erreur de saisie :** Un cours pour la classe **{classe_choisie}** en **{matiere_choisie}** a **déjà été enregistré** à la date du **{date_cours.strftime('%d/%m/%Y')}** (ID : {doublon_existant.id}). Impossible de le saisir deux fois.")
                     else:
                         contenu_formate = f"**[{titre_cours.strip()}]**\n{contenu.strip()}"
                         duree_str = f"{int(duree_cours)} heure{'s' if duree_cours > 1 else ''}"
@@ -392,7 +395,7 @@ def afficher_cahier_texte():
                             contenu=contenu_formate,
                             difficultees=difficultees.strip() if difficultees else None,
                             auteur_saisie=username,
-                            statut_validation="Validé",  # Correction ici (statut_validation au lieu de stat_validation)
+                            statut_validation="Validé",
                         )
                         db.add(nouvelle_entree)
                         db.commit()
