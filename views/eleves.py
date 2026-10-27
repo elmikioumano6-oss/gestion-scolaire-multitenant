@@ -2,6 +2,7 @@ from datetime import datetime
 import urllib.parse
 import string
 import random
+import pandas as pd
 import streamlit as st
 from werkzeug.security import generate_password_hash
 from database.audit import log_action_erp
@@ -30,7 +31,7 @@ def afficher_eleves(niveau_actif="Collège"):
     st.subheader("🎓 Inscription et Gestion des Élèves")
     st.markdown(
         "Enregistrement des effectifs avec création automatique des comptes parents, "
-        "génération de liens WhatsApp et encaissement initial de la 1ère tranche."
+        "génération de liens WhatsApp, encaissement initial et régularisation des quittances."
     )
     st.markdown("---")
 
@@ -48,8 +49,8 @@ def afficher_eleves(niveau_actif="Collège"):
 
     db = SessionLocal()
     try:
-        tab_liste, tab_ajout = st.tabs(
-            ["📋 Liste des Élèves", "➕ Inscrire un Élève"]
+        tab_liste, tab_ajout, tab_regul = st.tabs(
+            ["📋 Liste des Élèves", "➕ Inscrire un Élève", "🧾 Régularisation des Reçus (Souches Papier)"]
         )
 
         # --- REQUÊTE COMMUNE AVEC ISOLATION MULTI-TENANT ---
@@ -275,6 +276,14 @@ def afficher_eleves(niveau_actif="Collège"):
                 st.markdown("#### 2. Encaissement Initial (Acompte / 1ère tranche)")
                 st.caption("ℹ️ *Saisissez uniquement le montant payé AUJOURD'HUI. Le reliquat sera calculé automatiquement et pourra être payé plus tard dans le module **Encaissements**.*")
                 
+                # --- NORMES INTERNATIONALES : NUMÉRO DE REÇU & MODE DE RÈGLEMENT ---
+                col_r1, col_r2 = st.columns(2)
+                with col_r1:
+                    defaut_recu = f"REC-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                    numero_recu = st.text_input("Numéro de Reçu / Quittance *", value=defaut_recu)
+                with col_r2:
+                    mode_reglement = st.selectbox("Mode de règlement", ["Espèces", "Mobile Money", "Virement Bancaire", "Chèque"])
+
                 col_v1, col_v2, col_v3 = st.columns(3)
                 with col_v1:
                     versement_inscription = st.number_input(
@@ -297,8 +306,8 @@ def afficher_eleves(niveau_actif="Collège"):
                 submit_inscription = st.form_submit_button("💾 Enregistrer l'inscription et générer le compte parent", type="primary")
 
                 if submit_inscription:
-                    if not nom_e or not prenom_e or not matricule_e or not tuteur_e:
-                        st.error("Veuillez remplir tous les champs obligatoires (*).")
+                    if not nom_e or not prenom_e or not matricule_e or not tuteur_e or not numero_recu:
+                        st.error("Veuillez remplir tous les champs obligatoires (*), y compris le numéro de reçu.")
                     else:
                         existing = db.query(Eleve).filter(Eleve.matricule == matricule_e.strip(), Eleve.school_id == school_id).first()
                         if existing:
@@ -335,13 +344,12 @@ def afficher_eleves(niveau_actif="Collège"):
 
                             total_paye = versement_inscription + versement_scolarite + versement_autre
                             if total_paye > 0:
-                                ref_recu = f"REC-{datetime.now().strftime('%Y%m%d%H%M%S')}-{nouvel_eleve.id}"
                                 paiement = Paiement(
                                     school_id=school_id,
-                                    reference_recu=ref_recu,
+                                    reference_recu=numero_recu.strip(),
                                     eleve_id=nouvel_eleve.id,
                                     montant=total_paye,
-                                    mode_reglement="Espèces",
+                                    mode_reglement=mode_reglement,
                                     motif="Inscription et 1ère tranche",
                                     nom_payeur=tuteur_e.strip(),
                                     agent_caisse=username,
@@ -355,14 +363,115 @@ def afficher_eleves(niveau_actif="Collège"):
                                 school_id=school_id,
                                 username=username,
                                 module="Inscription Élèves",
-                                action=f"Inscription de l'élève {nouvel_eleve.nom} {nouvel_eleve.prenom} (Mat: {nouvel_eleve.matricule})",
+                                action=f"Inscription de l'élève {nouvel_eleve.nom} {nouvel_eleve.prenom} (Mat: {nouvel_eleve.matricule}) avec reçu {numero_recu}",
                                 statut="Succès"
                             )
 
-                            st.success("Élève inscrit avec succès et compte parent généré !")
+                            st.success("Élève inscrit avec succès, compte parent généré et reçu enregistré !")
                             
                             lien_wa = generer_lien_whatsapp(tuteur_e, "Parent", f"{nouvel_eleve.prenom} {nouvel_eleve.nom}", username_parent, password_clair)
                             st.markdown(f"📱 [Envoyer les identifiants par WhatsApp]({lien_wa})", unsafe_allow_html=True)
+
+        # ==========================================
+        # ONGLET 3 : REPORT DES SOUCHES PAPIER (Manuel)
+        # ==========================================
+        with tab_regul:
+            st.markdown("### 🧾 Report Manuel des Souches Papier (Reçus du Comptable)")
+            st.markdown("Sélectionnez un élève pour lui attribuer ou corriger le numéro de quittance conformément au carnet à souches papier.")
+            st.markdown("---")
+
+            list_tous_eleves = query.order_by(Eleve.nom).all()
+
+            if not list_tous_eleves:
+                st.info("Aucun élève enregistré pour ce cycle.")
+            else:
+                with st.form("form_report_souche_papier"):
+                    col_s1, col_s2 = st.columns(2)
+                    with col_s1:
+                        eleve_selectionne = st.selectbox(
+                            "Sélectionner l'élève (Matricule - Nom & Prénom)",
+                            options=list_tous_eleves,
+                            format_func=lambda el: f"{el.matricule} - {el.nom} {el.prenom} ({el.classe.libelle if el.classe else 'Sans classe'})"
+                        )
+                    with col_s2:
+                        paiement_existant = db.query(Paiement).filter(Paiement.eleve_id == eleve_selectionne.id).first()
+                        recu_actuel_val = paiement_existant.reference_recu if paiement_existant and paiement_existant.reference_recu else ""
+                        
+                        saisie_souche_papier = st.text_input(
+                            "Numéro de reçu du carnet papier *",
+                            value=recu_actuel_val,
+                            placeholder="Ex: N° 04521 ou REC-2026-001"
+                        )
+
+                    col_montant_1, col_montant_2 = st.columns(2)
+                    with col_montant_1:
+                        montant_saisi = st.number_input(
+                            "Montant initial versé (FCFA)",
+                            min_value=0.0,
+                            value=float(paiement_existant.montant) if paiement_existant else 0.0,
+                            step=5000.0
+                        )
+                    with col_montant_2:
+                        mode_saisi = st.selectbox(
+                            "Mode de règlement d'origine",
+                            ["Espèces", "Mobile Money", "Virement Bancaire", "Chèque"],
+                            index=0
+                        )
+
+                    btn_enregistrer_souche = st.form_submit_button("💾 Enregistrer la quittance papier", type="primary")
+
+                    if btn_enregistrer_souche:
+                        if not saisie_souche_papier.strip():
+                            st.error("Veuillez saisir le numéro de reçu indiqué sur la souche papier.")
+                        else:
+                            if paiement_existant:
+                                paiement_existant.reference_recu = saisie_souche_papier.strip()
+                                paiement_existant.montant = montant_saisi
+                                paiement_existant.mode_reglement = mode_saisi
+                                db.commit()
+                            else:
+                                nouveau_paiement_papier = Paiement(
+                                    school_id=school_id,
+                                    reference_recu=saisie_souche_papier.strip(),
+                                    eleve_id=eleve_selectionne.id,
+                                    montant=montant_saisi,
+                                    mode_reglement=mode_saisi,
+                                    motif="Report souche papier (Inscription)",
+                                    agent_caisse=username,
+                                    date_paiement=datetime.now()
+                                )
+                                db.add(nouveau_paiement_papier)
+                                db.commit()
+
+                            log_action_erp(
+                                school_id=school_id,
+                                username=username,
+                                module="Finances / Souches Papier",
+                                action=f"Report manuel de la souche papier {saisie_souche_papier.strip()} pour l'élève {eleve_selectionne.nom} {eleve_selectionne.prenom}",
+                                statut="Succès"
+                            )
+
+                            st.success(f"✅ Le numéro de quittance **{saisie_souche_papier.strip()}** a été associé avec succès à l'élève **{eleve_selectionne.nom} {eleve_selectionne.prenom}** !")
+                            st.rerun()
+
+                st.markdown("---")
+                st.markdown("#### 📋 Récapitulatif global des quittances enregistrées")
+                
+                data_recap = []
+                for el in list_tous_eleves:
+                    p_el = db.query(Paiement).filter(Paiement.eleve_id == el.id).first()
+                    data_recap.append({
+                        "Matricule": el.matricule,
+                        "Élève": f"{el.nom} {el.prenom}",
+                        "Classe": el.classe.libelle if el.classe else "N/D",
+                        "Montant Payé": f"{float(p_el.montant):,.0f} FCFA" if p_el else "0 FCFA",
+                        "N° de Reçu (Souche Papier)": p_el.reference_recu if p_el and p_el.reference_recu else "❌ Manquant",
+                        "Mode": p_el.mode_reglement if p_el and hasattr(p_el, "mode_reglement") else "N/D"
+                    })
+                
+                df_recap = pd.DataFrame(data_recap)
+                st.dataframe(df_recap, use_container_width=True, hide_index=True)
+
     except Exception as e:
         db.rollback()
         st.error(f"Erreur technique : {e}")

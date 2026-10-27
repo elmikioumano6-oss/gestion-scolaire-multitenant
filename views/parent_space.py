@@ -1,4 +1,7 @@
 from datetime import datetime
+import pandas as pd
+import streamlit as st
+import streamlit.components.v1 as components
 from database.audit import log_action_erp
 from database.db_config import SessionLocal
 from database.models import (
@@ -13,8 +16,6 @@ from database.models import (
     User,
     Message,
 )
-import pandas as pd
-import streamlit as st
 
 
 def afficher_espace_parent():
@@ -45,8 +46,8 @@ def afficher_espace_parent():
         </style>
     """, unsafe_allow_html=True)
 
-    st.markdown("## 👋 Bienvenue dans votre Espace Famille")
-    st.markdown("Suivez la scolarité, l'assiduité et la situation financière de vos enfants en temps réel.")
+    st.markdown("## 👋 Bienvenue dans votre Espace Famille (Portail International)")
+    st.markdown("Suivi académique, assiduité certifiée et situation financière consolidée en temps réel.")
     st.markdown("---")
 
     school_id = st.session_state.get("school_id")
@@ -152,7 +153,7 @@ def afficher_espace_parent():
                     "🕒 Emploi du Temps",
                     "📌 Assiduité",
                     "💳 Situation Financière",
-                    "✉️ Message",
+                    "✉️ Message & Support",
                 ])
 
                 with tab1:
@@ -215,12 +216,181 @@ def afficher_espace_parent():
                             st.metric("Moyenne Générale Estimée", f"{total_points / total_coef:.2f} / 20")
 
                 with tab3:
-                    edt_list = db.query(EmploiDuTemps).filter(EmploiDuTemps.classe_id == eleve_obj.classe_id).all()
+                    st.markdown(f"#### Emploi du Temps — Classe : **{classe_nom}**")
+                    
+                    edt_list = db.query(EmploiDuTemps).filter(
+                        (EmploiDuTemps.classe_id == eleve_obj.classe_id) | (EmploiDuTemps.classe == classe_nom)
+                    ).all()
+
                     if not edt_list:
-                        st.info("Aucun emploi du temps configuré.")
+                        st.info("Aucun emploi du temps configuré pour cette classe.")
                     else:
-                        edt_data = [{"Jour": ed.jour, "Heure": ed.heure, "Matière": ed.matiere} for ed in edt_list]
-                        st.dataframe(pd.DataFrame(edt_data), use_container_width=True, hide_index=True)
+                        edt_dict = {}
+                        for item in edt_list:
+                            edt_dict[(item.jour, item.heure)] = {
+                                "matiere": item.matiere,
+                                "prof": item.enseignant,
+                                "contact": getattr(item, "contact", "N/D") or "N/D"
+                            }
+
+                        jours = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"]
+                        creneaux_horaires = [
+                            "08h00 - 09h00",
+                            "09h00 - 10h00",
+                            "10h00 - 11h00",
+                            "11h00 - 11h30",
+                            "11h30 - 12h30",
+                            "12h30 - 13h30",
+                            "13h30 - 14h30",
+                        ]
+
+                        lignes_tbody = ""
+                        for jour in jours:
+                            lignes_tbody += f"<tr><td>{jour}</td>"
+                            skip_slots = 0
+                            for i, horaire in enumerate(creneaux_horaires):
+                                if skip_slots > 0:
+                                    skip_slots -= 1
+                                    continue
+
+                                if horaire == "11h00 - 11h30":
+                                    lignes_tbody += '<td class="pause-col">☕ Pause</td>'
+                                    continue
+
+                                val_creneau = edt_dict.get((jour, horaire), None)
+                                if val_creneau:
+                                    span = 1
+                                    for next_h in creneaux_horaires[i+1:]:
+                                        if next_h == "11h00 - 11h30":
+                                            break
+                                        next_val = edt_dict.get((jour, next_h), None)
+                                        if next_val == val_creneau:
+                                            span += 1
+                                        else:
+                                            break
+                                    
+                                    skip_slots = span - 1
+                                    colspan_attr = f' colspan="{span}"' if span > 1 else ''
+
+                                    lignes_tbody += f"""
+                                    <td{colspan_attr}>
+                                        <div style="color: #34d399; font-weight: 700; font-size: 0.85rem; margin-bottom: 3px;">📖 {val_creneau['matiere']}</div>
+                                        <div style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 2px;">👨‍🏫 {val_creneau['prof']}</div>
+                                        <div style="font-size: 0.7rem; color: #60a5fa;">📞 {val_creneau['contact']}</div>
+                                    </td>
+                                    """
+                                else:
+                                    lignes_tbody += "<td></td>"
+                            lignes_tbody += "</tr>"
+
+                        html_table_parent = f"""
+                        <!DOCTYPE html>
+                        <html>
+                        <head>
+                        <meta charset="utf-8">
+                        <style>
+                            body {{
+                                background-color: #0e1117;
+                                color: #f3f4f6;
+                                font-family: sans-serif;
+                                margin: 0;
+                                padding: 0;
+                            }}
+                            .edt-container {{
+                                background-color: #0e1117;
+                                padding: 0.5rem;
+                                border-radius: 12px;
+                                border: 1px solid rgba(255, 255, 255, 0.1);
+                            }}
+                            .edt-header {{
+                                display: flex;
+                                justify-content: space-between;
+                                align-items: center;
+                                margin-bottom: 1.2rem;
+                                border-bottom: 2px solid #1f2937;
+                                padding-bottom: 0.8rem;
+                            }}
+                            .edt-title {{
+                                font-size: 1.1rem;
+                                font-weight: 600;
+                                color: #f3f4f6;
+                            }}
+                            .edt-badge-repot {{
+                                background: #3b82f6;
+                                color: white;
+                                padding: 0.4rem 0.8rem;
+                                border-radius: 20px;
+                                font-size: 0.8rem;
+                                font-weight: 500;
+                            }}
+                            .styled-table {{
+                                width: 100%;
+                                border-collapse: collapse;
+                                border-radius: 8px;
+                                overflow: hidden;
+                                border: 1px solid #2d3748;
+                            }}
+                            .styled-table th {{
+                                background-color: #1a202c;
+                                color: #e2e8f0;
+                                text-align: center;
+                                padding: 12px 8px;
+                                font-size: 0.85rem;
+                                border-bottom: 2px solid #4a5568;
+                            }}
+                            .styled-table td {{
+                                background-color: #111827;
+                                color: #cbd5e0;
+                                text-align: center;
+                                padding: 12px 8px;
+                                font-size: 0.8rem;
+                                border-bottom: 1px solid #1f2937;
+                                border-right: 1px solid #1f2937;
+                                vertical-align: middle;
+                                height: 65px;
+                                word-break: break-word;
+                            }}
+                            .styled-table td:first-child {{
+                                font-weight: 600;
+                                color: #60a5fa;
+                                background-color: #161e2e;
+                                width: 90px;
+                            }}
+                            .pause-col {{
+                                background-color: #18212f !important;
+                                color: #9ca3af !important;
+                                font-style: italic;
+                            }}
+                        </style>
+                        </head>
+                        <body>
+                        <div class="edt-container">
+                            <div class="edt-header">
+                                <div class="edt-title">📌 Emploi du temps officiel : <span style="color: #60a5fa;">{classe_nom}</span></div>
+                                <div class="edt-badge-repot">☕ Pause récréative : 11h00 - 11h30</div>
+                            </div>
+                            <table class="styled-table">
+                               <thead>
+                                    <tr>
+                                        <th>Jour</th>
+                                        <th>08h00 - 09h00</th>
+                                        <th>09h00 - 10h00</th>
+                                        <th>10h00 - 11h00</th>
+                                        <th class="pause-col">11h00 - 11h30<br><span style="font-size:0.65rem;">(Récréation)</span></th>
+                                        <th>11h30 - 12h30</th>
+                                        <th>12h30 - 13h30</th>
+                                        <th>13h30 - 14h30</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {lignes_tbody}
+                                </tbody>
+                            </table>
+                        </div>
+                        </body>
+                        </html>
+                        """
+                        components.html(html_table_parent, height=520, scrolling=True)
 
                 with tab4:
                     if not presences_list:
@@ -230,17 +400,24 @@ def afficher_espace_parent():
                         st.dataframe(pd.DataFrame(pres_data), use_container_width=True, hide_index=True)
 
                 with tab5:
-                    st.metric("Solde Restant", f"{solde_restant:,.0f} FCFA")
+                    st.markdown("#### État de Compte & Règlements")
+                    st.metric("Solde Restant Dû", f"{solde_restant:,.0f} FCFA")
+                    if paiements_eleve:
+                        data_pay = [{"Date": p.date_paiement.strftime("%d/%m/%Y") if hasattr(p, 'date_paiement') and p.date_paiement else "N/D", "Montant": f"{float(p.montant):,.0f} FCFA", "Motif": getattr(p, 'motif', 'Scolarité')} for p in paiements_eleve]
+                        st.dataframe(pd.DataFrame(data_pay), use_container_width=True, hide_index=True)
+                    else:
+                        st.info("Aucun historique de versement enregistré pour le moment.")
 
                 with tab6:
+                    st.markdown("#### Canaux de communication sécurisés")
                     with st.form("form_contact"):
-                        obj = st.text_input("Objet")
-                        msg = st.text_area("Message")
-                        if st.form_submit_button("Envoyer", type="primary"):
+                        obj = st.text_input("Objet du message")
+                        msg = st.text_area("Contenu de votre message")
+                        if st.form_submit_button("Envoyer à l'administration", type="primary"):
                             if obj and msg:
                                 db.add(Message(school_id=school_id, expediteur=username, destinataire="Administration", objet=obj, contenu=msg, date_envoi=datetime.now()))
                                 db.commit()
-                                st.success("Message envoyé !")
+                                st.success("Message transmis avec succès à l'administration !")
     finally:
         db.close()
 

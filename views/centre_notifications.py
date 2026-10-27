@@ -1,4 +1,6 @@
+from datetime import datetime
 import urllib.parse
+import pandas as pd
 import streamlit as st
 from database.db_config import SessionLocal
 from database.models import Classe, Eleve, Note, Presence, Paiement
@@ -24,24 +26,34 @@ def generer_lien_whatsapp(telephone: str, nom_eleve: str, type_alerte: str, deta
 def afficher_bloc_notifications(titre: str, donnees, type_alerte: str, db):
     """Affiche de manière générique les lignes de notifications pour optimiser le code."""
     if not donnees:
-        st.info(f"Aucun élément récent trouvé pour cette sélection.")
+        st.info("Aucun élément récent trouvé pour cette sélection.")
         return
 
     for item in donnees:
         eleve = db.query(Eleve).filter(Eleve.id == item.eleve_id).first()
-        if eleve and eleve.tuteur:
+        if eleve and getattr(eleve, "tuteur", None):
             nom_complet = f"{eleve.nom} {eleve.prenom}"
             
             # Formatage spécifique selon le type d'élément
             if type_alerte == "Nouvelle note enregistrée":
-                details = f"Matière : {item.matiere} | Évaluation : {item.type_evaluation} | Note : {item.valeur} / {item.sur or 20}"
-                libelle_info = f"📝 {item.matiere} : **{item.valeur}**"
+                matiere_obj = getattr(item, "matiere", None)
+                matiere_nom = getattr(matiere_obj, "libelle", "Matière") if matiere_obj else "Matière"
+                valeur_note = getattr(item, "valeur", 0)
+                type_eval = getattr(item, "type_evaluation", "Évaluation")
+                sur_note = getattr(item, "sur", 20) or 20
+                
+                details = f"Matière : {matiere_nom} | Évaluation : {type_eval} | Note : {valeur_note} / {sur_note}"
+                libelle_info = f"📝 {matiere_nom} : **{valeur_note}**"
             elif type_alerte == "Point d'assiduité":
-                details = f"Statut : {item.statut} | Date : {item.date}"
-                libelle_info = f"⚠️ {item.statut}"
+                statut_pres = getattr(item, "statut", "Présent")
+                date_pres = getattr(item, "date", datetime.now().strftime("%d/%m/%Y"))
+                details = f"Statut : {statut_pres} | Date : {date_pres}"
+                libelle_info = f"⚠️ {statut_pres}"
             else:  # Paiement
-                details = f"Montant versé : {item.montant} FCFA | Motif : {item.motif or 'Scolarité'}"
-                libelle_info = f"💰 {item.montant} FCFA"
+                montant_paye = getattr(item, "montant", 0)
+                motif_paiement = getattr(item, "motif", "Scolarité") or "Scolarité"
+                details = f"Montant versé : {montant_paye} FCFA | Motif : {motif_paiement}"
+                libelle_info = f"💰 {montant_paye} FCFA"
 
             lien_wa = generer_lien_whatsapp(eleve.tuteur, nom_complet, type_alerte, details)
 
