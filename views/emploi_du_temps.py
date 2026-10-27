@@ -1,15 +1,15 @@
 from datetime import datetime
 import io
+import pandas as pd
+import streamlit as st
+import streamlit.components.v1 as components
 from database.db_config import SessionLocal
 from database.models import ActivityLog, Classe, School
-import pandas as pd
 import reportlab
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-import streamlit as st
-import streamlit.components.v1 as components
 
 
 def afficher_emploi_temps():
@@ -34,9 +34,7 @@ def afficher_emploi_temps():
     try:
         ecole_courante = None
         if school_id:
-            ecole_courante = (
-                db.query(School).filter(School.id == school_id).first()
-            )
+            ecole_courante = db.query(School).filter(School.id == school_id).first()
             if ecole_courante:
                 school_name = ecole_courante.nom
 
@@ -48,9 +46,7 @@ def afficher_emploi_temps():
 
         classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours)
         if not is_super_admin and school_id:
-            classes_query = classes_query.filter(
-                Classe.school_id == school_id
-            )
+            classes_query = classes_query.filter(Classe.school_id == school_id)
         classes_cycle = classes_query.all()
 
         if "emplois_du_temps_data" not in st.session_state:
@@ -75,6 +71,16 @@ def afficher_emploi_temps():
             "12h30 - 13h30",
             "13h30 - 14h30",
         ]
+        
+        creneaux_cours_uniquement = [
+            "08h00 - 09h00",
+            "09h00 - 10h00",
+            "10h00 - 11h00",
+            "11h30 - 12h30",
+            "12h30 - 13h30",
+            "13h30 - 14h30",
+        ]
+
         jours = [
             "Lundi",
             "Mardi",
@@ -111,9 +117,7 @@ def afficher_emploi_temps():
                 )
                 if classe_obj:
                     key_edt = f"{school_id}_{cycle_en_cours}_{classe_choisie}"
-                    edt_dict = st.session_state["emplois_du_temps_data"].get(
-                        key_edt, {}
-                    )
+                    edt_dict = st.session_state["emplois_du_temps_data"].get(key_edt, {})
 
                     data_grille = []
                     for jour in jours:
@@ -122,9 +126,7 @@ def afficher_emploi_temps():
                             if horaire == "11h00 - 11h30":
                                 ligne[horaire] = "☕ Pause"
                             else:
-                                val_creneau = edt_dict.get(
-                                    (jour, horaire), None
-                                )
+                                val_creneau = edt_dict.get((jour, horaire), None)
                                 if val_creneau:
                                     ligne[horaire] = (
                                         f"{val_creneau['matiere']} (Prof: {val_creneau['prof']} - {val_creneau['contact']})"
@@ -141,9 +143,7 @@ def afficher_emploi_temps():
 
                     with col_exp1:
                         output_excel = io.BytesIO()
-                        with pd.ExcelWriter(
-                            output_excel, engine="openpyxl"
-                        ) as writer:
+                        with pd.ExcelWriter(output_excel, engine="openpyxl") as writer:
                             df_edt.to_excel(
                                 writer,
                                 index=False,
@@ -154,9 +154,7 @@ def afficher_emploi_temps():
                             label="📥 Excel",
                             data=excel_data,
                             file_name=f"Emploi_du_Temps_{classe_choisie}.xlsx",
-                            mime=(
-                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                            ),
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         )
 
                     with col_exp2:
@@ -197,68 +195,34 @@ def afficher_emploi_temps():
                         col_widths = [70] + [
                             (780 - 70) / len(creneaux_horaires)
                         ] * len(creneaux_horaires)
+                        
+                        t_style = TableStyle([
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a8a")),
+                            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                            ("FONTSIZE", (0, 0), (-1, 0), 9),
+                            ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
+                            ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#f8fafc")),
+                            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+                            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+                            ("FONTSIZE", (0, 1), (-1, -1), 8),
+                            ("BOTTOMPADDING", (0, 1), (-1, -1), 5),
+                            ("TOPPADDING", (0, 1), (-1, -1), 5),
+                        ])
+                        
                         t = Table(table_data, colWidths=col_widths)
-                        t.setStyle(
-                            TableStyle([
-                                (
-                                    "BACKGROUND",
-                                    (0, 0),
-                                    (-1, 0),
-                                    colors.HexColor("#1e3a8a"),
-                                ),
-                                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                                ("FONTSIZE", (0, 0), (-1, 0), 9),
-                                ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
-                                (
-                                    "BACKGROUND",
-                                    (0, 1),
-                                    (-1, -1),
-                                    colors.HexColor("#f8fafc"),
-                                ),
-                                (
-                                    "GRID",
-                                    (0, 0),
-                                    (-1, -1),
-                                    0.5,
-                                    colors.HexColor("#cbd5e1"),
-                                ),
-                                ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-                                ("FONTSIZE", (0, 1), (-1, -1), 8),
-                                ("BOTTOMPADDING", (0, 1), (-1, -1), 5),
-                                ("TOPPADDING", (0, 1), (-1, -1), 5),
-                            ])
-                        )
+                        t.setStyle(t_style)
                         elements.append(t)
 
                         def add_footer(canvas, doc_obj):
                             canvas.saveState()
                             footer_y = 22
-                            s_nom = (
-                                ecole_courante.nom
-                                if ecole_courante
-                                else school_name
-                            )
-                            s_adr = (
-                                ecole_courante.adresse
-                                if ecole_courante
-                                and ecole_courante.adresse
-                                else "Niamey - Niger"
-                            )
-                            s_cont = (
-                                ecole_courante.contacts
-                                if ecole_courante
-                                and ecole_courante.contacts
-                                else "N/D"
-                            )
-                            s_dev = (
-                                ecole_courante.devise
-                                if ecole_courante
-                                and ecole_courante.devise
-                                else "Excellence - Persévérance - Réussite"
-                            )
+                            s_nom = ecole_courante.nom if ecole_courante else school_name
+                            s_adr = ecole_courante.adresse if ecole_courante and ecole_courante.adresse else "Niamey - Niger"
+                            s_cont = ecole_courante.contacts if ecole_courante and ecole_courante.contacts else "N/D"
+                            s_dev = ecole_courante.devise if ecole_courante and ecole_courante.devise else "Excellence - Persévérance - Réussite"
 
                             footer_text = f"<b>{s_nom}</b> | Adresse : {s_adr} | Contacts : {s_cont} | Devise : <i>{s_dev}</i>"
                             footer_style = ParagraphStyle(
@@ -304,88 +268,132 @@ def afficher_emploi_temps():
 
                     st.markdown("<br>", unsafe_allow_html=True)
 
-                    st.markdown(
-                        """
-                        <style>
-                            .edt-container {
-                                background-color: #0e1117;
-                                padding: 1.5rem;
-                                border-radius: 12px;
-                                border: 1px solid rgba(255, 255, 255, 0.1);
-                                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-                                font-family: 'Inter', sans-serif;
-                            }
-                            .edt-header {
-                                display: flex;
-                                justify-content: space-between;
-                                align-items: center;
-                                margin-bottom: 1.2rem;
-                                border-bottom: 2px solid #1f2937;
-                                padding-bottom: 0.8rem;
-                            }
-                            .edt-title {
-                                font-size: 1.15rem;
-                                font-weight: 600;
-                                color: #f3f4f6;
-                            }
-                            .edt-badge-repot {
-                                background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-                                color: white;
-                                padding: 0.4rem 0.8rem;
-                                border-radius: 20px;
-                                font-size: 0.85rem;
-                                font-weight: 500;
-                                box-shadow: 0 2px 6px rgba(59, 130, 246, 0.3);
-                            }
-                            .styled-table {
-                                width: 100%;
-                                border-collapse: separate;
-                                border-spacing: 0;
-                                border-radius: 8px;
-                                overflow: hidden;
-                                border: 1px solid #2d3748;
-                            }
-                            .styled-table th {
-                                background-color: #1a202c;
-                                color: #e2e8f0;
-                                text-align: center;
-                                padding: 12px 8px;
-                                font-size: 0.85rem;
-                                font-weight: 600;
-                                letter-spacing: 0.05em;
-                                border-bottom: 2px solid #4a5568;
-                            }
-                            .styled-table td {
-                                background-color: #111827;
-                                color: #cbd5e0;
-                                text-align: center;
-                                padding: 12px 8px;
-                                font-size: 0.8rem;
-                                border-bottom: 1px solid #1f2937;
-                                border-right: 1px solid #1f2937;
-                                vertical-align: middle;
-                                height: 45px;
-                            }
-                            .styled-table td:first-child {
-                                font-weight: 600;
-                                color: #60a5fa;
-                                background-color: #161e2e;
-                            }
-                            .pause-col {
-                                background-color: #18212f !important;
-                                color: #9ca3af !important;
-                                font-style: italic;
-                                font-size: 0.8rem;
-                            }
-                        </style>
-                        """,
-                        unsafe_allow_html=True,
-                    )
+                    # --- Moteur de génération HTML avec fusion intelligente des cours (1h, 2h, 3h) ---
+                    lignes_tbody = ""
+                    for jour in jours:
+                        lignes_tbody += f"<tr><td>{jour}</td>"
+                        
+                        skip_slots = 0
+                        for i, horaire in enumerate(creneaux_horaires):
+                            if skip_slots > 0:
+                                skip_slots -= 1
+                                continue
+
+                            if horaire == "11h00 - 11h30":
+                                lignes_tbody += '<td class="pause-col">☕ Pause</td>'
+                                continue
+
+                            val_creneau = edt_dict.get((jour, horaire), None)
+                            if val_creneau:
+                                # Calculer combien de créneaux consécutifs partagent exactement le même cours
+                                span = 1
+                                for next_h in creneaux_horaires[i+1:]:
+                                    if next_h == "11h00 - 11h30":
+                                        break
+                                    next_val = edt_dict.get((jour, next_h), None)
+                                    if next_val == val_creneau:
+                                        span += 1
+                                    else:
+                                        break
+                                
+                                skip_slots = span - 1
+                                colspan_attr = f' colspan="{span}"' if span > 1 else ''
+
+                                lignes_tbody += f"""
+                                <td{colspan_attr}>
+                                    <div style="color: #34d399; font-weight: 700; font-size: 0.85rem; margin-bottom: 3px;">{val_creneau['matiere']}</div>
+                                    <div style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 2px;">👨‍🏫 {val_creneau['prof']}</div>
+                                    <div style="font-size: 0.7rem; color: #60a5fa;">📞 {val_creneau['contact']}</div>
+                                </td>
+                                """
+                            else:
+                                lignes_tbody += "<td></td>"
+                        lignes_tbody += "</tr>"
 
                     html_table = f"""
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                    <meta charset="utf-8">
+                    <style>
+                        body {{
+                            background-color: #0e1117;
+                            color: #f3f4f6;
+                            font-family: sans-serif;
+                            margin: 0;
+                            padding: 0;
+                        }}
+                        .edt-container {{
+                            background-color: #0e1117;
+                            padding: 0.5rem;
+                            border-radius: 12px;
+                            border: 1px solid rgba(255, 255, 255, 0.1);
+                        }}
+                        .edt-header {{
+                            display: flex;
+                            justify-content: space-between;
+                            align-items: center;
+                            margin-bottom: 1.2rem;
+                            border-bottom: 2px solid #1f2937;
+                            padding-bottom: 0.8rem;
+                        }}
+                        .edt-title {{
+                            font-size: 1.1rem;
+                            font-weight: 600;
+                            color: #f3f4f6;
+                        }}
+                        .edt-badge-repot {{
+                            background: #3b82f6;
+                            color: white;
+                            padding: 0.4rem 0.8rem;
+                            border-radius: 20px;
+                            font-size: 0.8rem;
+                            font-weight: 500;
+                        }}
+                        .styled-table {{
+                            width: 100%;
+                            border-collapse: collapse;
+                            border-radius: 8px;
+                            overflow: hidden;
+                            border: 1px solid #2d3748;
+                        }}
+                        .styled-table th {{
+                            background-color: #1a202c;
+                            color: #e2e8f0;
+                            text-align: center;
+                            padding: 12px 8px;
+                            font-size: 0.85rem;
+                            border-bottom: 2px solid #4a5568;
+                        }}
+                        .styled-table td {{
+                            background-color: #111827;
+                            color: #cbd5e0;
+                            text-align: center;
+                            padding: 12px 8px;
+                            font-size: 0.8rem;
+                            border-bottom: 1px solid #1f2937;
+                            border-right: 1px solid #1f2937;
+                            vertical-align: middle;
+                            height: 65px;
+                            word-break: break-word;
+                        }}
+                        .styled-table td:first-child {{
+                            font-weight: 600;
+                            color: #60a5fa;
+                            background-color: #161e2e;
+                            width: 90px;
+                        }}
+                        .pause-col {{
+                            background-color: #18212f !important;
+                            color: #9ca3af !important;
+                            font-style: italic;
+                        }}
+                    </style>
+                    </head>
+                    <body>
                     <div class="edt-container">
                         <div class="edt-header">
-                            <div class="edt-title">📌 Emploi du temps officiel ({annee_en_cours}) : <span style="color: #60a5fa;">{classe_obj.libelle}</span></div>
+                            <div class="edt-title">📌 Emploi du temps officiel ({annee_en_cours}) : <span style="color: #60a5fa;">{classe_choisie}</span></div>
                             <div class="edt-badge-repot">☕ Pause récréative : 11h00 - 11h30</div>
                         </div>
                         <table class="styled-table">
@@ -402,40 +410,17 @@ def afficher_emploi_temps():
                                 </tr>
                             </thead>
                             <tbody>
-                    """
-
-                    for jour in jours:
-                        html_table += f"<tr><td>{jour}</td>"
-                        for horaire in creneaux_horaires:
-                            if horaire == "11h00 - 11h30":
-                                html_table += (
-                                    '<td class="pause-col">☕ Pause</td>'
-                                )
-                            else:
-                                val_creneau = edt_dict.get(
-                                    (jour, horaire), None
-                                )
-                                if val_creneau:
-                                    html_table += f"""
-                                    <td>
-                                        <strong style="color: #34d399;">{val_creneau['matiere']}</strong><br>
-                                        <span style="font-size: 0.75rem; color: #94a3b8;">👨‍🏫 {val_creneau['prof']}</span><br>
-                                        <span style="font-size: 0.7rem; color: #60a5fa;">📞 {val_creneau['contact']}</span>
-                                    </td>
-                                    """
-                                else:
-                                    html_table += "<td></td>"
-                        html_table += "</tr>"
-
-                    html_table += """
+                                {lignes_tbody}
                             </tbody>
                         </table>
                     </div>
+                    </body>
+                    </html>
                     """
-                    st.markdown(html_table, unsafe_allow_html=True)
+                    components.html(html_table, height=520, scrolling=True)
 
         # ==========================================
-        # ONGLET 2 : VUE GLOBALE DE L'ÉTABLISSEMENT (Avec boutons d'exportation)
+        # ONGLET 2 : VUE GLOBALE DE L'ÉTABLISSEMENT
         # ==========================================
         with tab_global:
             st.markdown(f"### 📊 Tableau de Service Global — **{school_name} ({cycle_en_cours})**")
@@ -470,7 +455,6 @@ def afficher_emploi_temps():
                 if lignes_globales:
                     df_global_service = pd.DataFrame(lignes_globales)
 
-                    # --- BOUTONS D'EXPORTATION POUR LA VUE GLOBALE ---
                     col_g_exp1, col_g_exp2, col_g_exp3, col_g_vide = st.columns([1.3, 1.3, 1.3, 3.5])
 
                     with col_g_exp1:
@@ -514,7 +498,7 @@ def afficher_emploi_temps():
 
                         elements_g.append(
                             Paragraph(
-                                f"TABLEAU DE SERVICE GLOBAL — {school_name} ({cycle_en_cours}) | ANNEESCOLAIRE : {annee_en_cours}",
+                                f"TABLEAU DE SERVICE GLOBAL — {school_name} ({cycle_en_cours}) | ANNÉE SCOLAIRE : {annee_en_cours}",
                                 title_style_g,
                             )
                         )
@@ -524,24 +508,24 @@ def afficher_emploi_temps():
                         for _, row in df_global_service.iterrows():
                             table_data_g.append([str(val) for val in row])
 
+                        t_g_style = TableStyle([
+                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a8a")),
+                            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                            ("FONTSIZE", (0, 0), (-1, 0), 8),
+                            ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+                            ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#f8fafc")),
+                            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+                            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+                            ("FONTSIZE", (0, 1), (-1, -1), 7),
+                            ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
+                            ("TOPPADDING", (0, 1), (-1, -1), 4),
+                        ])
+
                         t_g = Table(table_data_g)
-                        t_g.setStyle(
-                            TableStyle([
-                                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a8a")),
-                                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                                ("FONTSIZE", (0, 0), (-1, 0), 8),
-                                ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
-                                ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#f8fafc")),
-                                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
-                                ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-                                ("FONTSIZE", (0, 1), (-1, -1), 7),
-                                ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
-                                ("TOPPADDING", (0, 1), (-1, -1), 4),
-                            ])
-                        )
+                        t_g.setStyle(t_g_style)
                         elements_g.append(t_g)
                         doc_g.build(elements_g)
                         pdf_data_g = pdf_buffer_g.getvalue()
@@ -577,7 +561,7 @@ def afficher_emploi_temps():
                     st.dataframe(df_global_service, use_container_width=True)
 
         # ==========================================
-        # ONGLET 3 : AJOUTER UN CRÉNEAU
+        # ONGLET 3 : AJOUTER UN CRÉNEAU (Support 1h, 2h, 3h)
         # ==========================================
         with tab2:
             st.markdown(
@@ -601,11 +585,11 @@ def afficher_emploi_temps():
                             "Jour de la semaine",
                             jours,
                         )
-                        creneaux_cours = [
-                            c for c in creneaux_horaires if c != "11h00 - 11h30"
-                        ]
-                        horaire = st.selectbox(
-                            "Plage horaire", creneaux_cours
+                        horaire_debut = st.selectbox(
+                            "Heure de début", creneaux_cours_uniquement
+                        )
+                        duree_cours = st.selectbox(
+                            "Durée du cours", ["1 heure", "2 heures", "3 heures"]
                         )
                     with col2:
                         matiere = st.text_input("Matière / Intitulé du cours")
@@ -629,37 +613,44 @@ def afficher_emploi_temps():
                                 )
 
                             key_edt = f"{target_school_id}_{cycle_en_cours}_{classe_selectionnee}"
-                            if (
-                                key_edt
-                                not in st.session_state[
-                                    "emplois_du_temps_data"
-                                ]
-                            ):
-                                st.session_state["emplois_du_temps_data"][
-                                    key_edt
-                                ] = {}
+                            if key_edt not in st.session_state["emplois_du_temps_data"]:
+                                st.session_state["emplois_du_temps_data"][key_edt] = {}
 
-                            st.session_state["emplois_du_temps_data"][key_edt][
-                                (jour, horaire)
-                            ] = {
+                            # Déterminer le nombre d'heures consécutives
+                            nb_heures = 1
+                            if duree_cours == "2 heures":
+                                nb_heures = 2
+                            elif duree_cours == "3 heures":
+                                nb_heures = 3
+
+                            # Retrouver l'index de départ dans les créneaux de cours
+                            try:
+                                start_idx = creneaux_cours_uniquement.index(horaire_debut)
+                            except ValueError:
+                                start_idx = 0
+
+                            creneau_data = {
                                 "matiere": matiere.strip().upper(),
                                 "prof": prof_nom.strip(),
-                                "contact": (
-                                    prof_contact.strip()
-                                    if prof_contact
-                                    else "N/D"
-                                ),
+                                "contact": prof_contact.strip() if prof_contact else "N/D",
                             }
+
+                            # Enregistrer le cours sur les créneaux consécutifs (en évitant la pause de 11h-11h30)
+                            assigned_count = 0
+                            current_idx = start_idx
+                            while assigned_count < nb_heures and current_idx < len(creneaux_cours_uniquement):
+                                target_slot = creneaux_cours_uniquement[current_idx]
+                                st.session_state["emplois_du_temps_data"][key_edt][(jour, target_slot)] = creneau_data
+                                assigned_count += 1
+                                current_idx += 1
 
                             nouveau_log = ActivityLog(
                                 school_id=target_school_id,
                                 timestamp=datetime.now(),
-                                username=st.session_state.get(
-                                    "username", "admin"
-                                ),
+                                username=st.session_state.get("username", "admin"),
                                 action=(
-                                    f"Planification créneau EDT : {matiere} avec {prof_nom}"
-                                    f" ({classe_selectionnee}, {jour} {horaire})"
+                                    f"Planification créneau EDT ({duree_cours}) : {matiere} avec {prof_nom}"
+                                    f" ({classe_selectionnee}, {jour} à partir de {horaire_debut})"
                                 ),
                                 module="Emploi du temps",
                                 statut="Succès",
@@ -668,8 +659,8 @@ def afficher_emploi_temps():
                             db.commit()
 
                             st.success(
-                                f"✅ Créneau de {matiere} ({prof_nom}) ajouté avec succès pour"
-                                f" {classe_selectionnee} ({jour}, {horaire}) !"
+                                f"✅ Créneau de {matiere} ({prof_nom}) d'une durée de {duree_cours} "
+                                f"ajouté avec succès pour {classe_selectionnee} ({jour}, dès {horaire_debut}) !"
                             )
                             st.rerun()
 
