@@ -618,7 +618,8 @@ def afficher_emploi_temps():
                             background-color: #0e1117;
                             border-radius: 8px;
                             border: 1px solid #2d3748;
-                            overflow-x: auto;
+                            overflow: auto;
+                            max-height: 650px;
                         }}
                         .global-table {{
                             width: 100%;
@@ -631,6 +632,9 @@ def afficher_emploi_temps():
                             padding: 12px 14px;
                             font-size: 0.85rem;
                             border-bottom: 2px solid #4a5568;
+                            position: sticky;
+                            top: 0;
+                            z-index: 10;
                             white-space: nowrap;
                         }}
                         .global-table td {{
@@ -642,7 +646,7 @@ def afficher_emploi_temps():
                             border-bottom: 1px solid #1f2937;
                             border-right: 1px solid #1f2937;
                             vertical-align: middle;
-                            min-width: 140px;
+                            min-width: 160px;
                             word-break: break-word;
                         }}
                         .global-table td:first-child, .global-table td:nth-child(2), .global-table td:nth-child(3) {{
@@ -671,7 +675,7 @@ def afficher_emploi_temps():
                     </body>
                     </html>
                     """
-                    components.html(html_global_table, height=520, scrolling=True)
+                    components.html(html_global_table, height=650, scrolling=True)
 
         # ==========================================
         # ONGLET 3 : AJOUTER UN CRÉNEAU
