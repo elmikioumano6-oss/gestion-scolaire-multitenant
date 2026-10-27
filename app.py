@@ -2,6 +2,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import importlib
 import inspect
+import json
 import logging
 import os
 import re
@@ -114,18 +115,59 @@ def main():
         initial_sidebar_state="expanded",
     )
 
-    # --- DYNAMISATION DE L'ICÔNE ET DU MANIFESTE PWA MOBILE PAR ÉCOLE ---
-    school_id_actuel = st.session_state.get("school_id")
-    logo_manifest_path = f"logo_{school_id_actuel}.png" if school_id_actuel else "Logo Gestion Scolaire Pro.png"
-    if not os.path.exists(logo_manifest_path):
-        logo_manifest_path = "Logo Gestion Scolaire Pro.png"
+    # --- DÉTECTION AUTOMATIQUE ET DYNAMIQUE DU LOGO DE L'ÉCOLE POUR LA PWA MOBILE ---
+    school_code = str(st.session_state.get("school_code", "")).strip().upper()
+    school_name = str(st.session_state.get("school_name", "")).strip().lower()
+    school_name_actuel = st.session_state.get("school_name", "ERP Scolaire")
+
+    logo_filename = None
+    try:
+        fichiers_racine = os.listdir(".")
+        mots_cles = [school_code, school_name]
+        mots_cles_propres = [re.sub(r"[^a-z0-9]", "", m.lower()) for m in mots_cles if m]
+
+        for fichier in fichiers_racine:
+            if fichier.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
+                nom_fichier_clean = re.sub(r"[^a-z0-9]", "", fichier.lower())
+                if any(mot in nom_fichier_clean for mot in mots_cles_propres if len(mot) > 2):
+                    logo_filename = fichier
+                    break
+    except Exception:
+        pass
+
+    if not logo_filename or not os.path.exists(logo_filename):
+        logo_filename = "Logo CSP-RAHMAT-FH.png" if os.path.exists("Logo CSP-RAHMAT-FH.png") else "Logo Gestion Scolaire Pro.png"
+
+    # Création dynamique du manifeste JSON pour l'installation sur l'écran d'accueil du mobile
+    manifest_data = {
+        "name": school_name_actuel,
+        "short_name": "ERP Scolaire",
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#0b131d",
+        "theme_color": "#111827",
+        "icons": [
+            {
+                "src": f"/{logo_filename}" if os.path.exists(logo_filename) else "/favicon.png",
+                "sizes": "192x192 512x512",
+                "type": "image/png"
+            }
+        ]
+    }
+    
+    try:
+        with open("manifest.json", "w", encoding="utf-8") as f:
+            json.dump(manifest_data, f)
+    except Exception:
+        pass
 
     st.markdown(
         f"""
         <meta name="apple-mobile-web-app-capable" content="yes">
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-        <meta name="apple-mobile-web-app-title" content="{st.session_state.get('school_name', 'ERP Scolaire')}">
-        <link rel="apple-touch-icon" href="{logo_manifest_path}">
+        <meta name="apple-mobile-web-app-title" content="{school_name_actuel}">
+        <link rel="apple-touch-icon" href="{logo_filename}">
+        <link rel="manifest" href="/manifest.json">
         <meta name="mobile-web-app-capable" content="yes">
         <meta name="theme-color" content="#111827">
     """,

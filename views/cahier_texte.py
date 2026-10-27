@@ -254,38 +254,72 @@ def afficher_cahier_texte():
                                 st.markdown("**⚠️ Difficultés / Remarques :**")
                                 st.write(e.difficultees)
 
+                    # --- SECTION GESTION, RECTIFICATION & SUPPRESSION ---
                     st.markdown(f'<div class="delete-section">', unsafe_allow_html=True)
-                    st.markdown("#### 🗑️ Gestion & Suppression d'une entrée")
+                    st.markdown("#### ✏️ Rectification de la durée & Suppression de séances")
+                    st.markdown("Permet de corriger la durée d'une séance suite à une réclamation d'un enseignant ou de supprimer un doublon (ex: ID 194/195).")
                     
                     options_suppr = {}
                     for e in entrees_db:
                         d_str = e.date_cours.strftime('%d/%m/%Y') if e.date_cours else ''
                         t_str = e.titre or 'Cours'
-                        libelle_opt = f"ID {e.id} — {d_str} — {t_str}"
+                        duree_actuelle = getattr(e, "duree_seance", "1 heure")
+                        libelle_opt = f"ID {e.id} — {d_str} — {t_str} ({duree_actuelle})"
                         options_suppr[libelle_opt] = e.id
 
-                    entree_a_supprimer_label = st.selectbox(
-                        "Sélectionner l'entrée à supprimer",
+                    entree_selectionnee_label = st.selectbox(
+                        "Sélectionner la séance concernée",
                         list(options_suppr.keys()),
-                        key="select_suppr_cahier",
+                        key="select_gestion_cahier",
                     )
-                    if st.button("🗑️ Supprimer l'entrée sélectionnée", type="secondary"):
-                        id_a_supprimer = options_suppr[entree_a_supprimer_label]
-                        entree_obj = db.query(CahierTexte).filter(CahierTexte.id == id_a_supprimer).first()
-                        if entree_obj:
-                            db.delete(entree_obj)
-                            nouveau_log = ActivityLog(
-                                school_id=target_school_id,
-                                timestamp=datetime.now(),
-                                username=username,
-                                action=f"Suppression entrée Cahier de Texte ID {id_a_supprimer} ({classe_consult})",
-                                module="Cahier de Texte",
-                                statut="Succès",
+                    
+                    id_selectionne = options_suppr[entree_selectionnee_label]
+                    entree_obj = db.query(CahierTexte).filter(CahierTexte.id == id_selectionne).first()
+
+                    if entree_obj:
+                        col_m1, col_m2 = st.columns(2)
+                        with col_m1:
+                            nouvelle_duree_num = st.selectbox(
+                                "Modifier la durée de la séance",
+                                options=[1.0, 2.0, 3.0, 4.0],
+                                format_func=lambda x: f"{int(x)} heure{'s' if x > 1 else ''}",
+                                key=f"mod_duree_{id_selectionne}"
                             )
-                            db.add(nouveau_log)
-                            db.commit()
-                            st.success("✅ Entrée supprimée avec succès !")
-                            st.rerun()
+                            if st.button("💾 Mettre à jour la durée", type="primary"):
+                                duree_str_new = f"{int(nouvelle_duree_num)} heure{'s' if nouvelle_duree_num > 1 else ''}"
+                                ancienne_duree = getattr(entree_obj, "duree_seance", "N/D")
+                                entree_obj.duree_seance = duree_str_new
+                                
+                                nouveau_log = ActivityLog(
+                                    school_id=target_school_id,
+                                    timestamp=datetime.now(),
+                                    username=username,
+                                    action=f"Modification durée séance ID {id_selectionne} ({ancienne_duree} -> {duree_str_new})",
+                                    module="Cahier de Texte",
+                                    statut="Succès",
+                                )
+                                db.add(nouveau_log)
+                                db.commit()
+                                st.success(f"✅ Durée mise à jour avec succès à **{duree_str_new}** !")
+                                st.rerun()
+
+                        with col_m2:
+                            st.markdown("<br>", unsafe_allow_html=True)
+                            if st.button("🗑️ Supprimer cette séance (Doublon)", type="secondary"):
+                                db.delete(entree_obj)
+                                nouveau_log = ActivityLog(
+                                    school_id=target_school_id,
+                                    timestamp=datetime.now(),
+                                    username=username,
+                                    action=f"Suppression entrée Cahier de Texte ID {id_selectionne} ({classe_consult})",
+                                    module="Cahier de Texte",
+                                    statut="Succès",
+                                )
+                                db.add(nouveau_log)
+                                db.commit()
+                                st.success("✅ Entrée supprimée avec succès !")
+                                st.rerun()
+
                     st.markdown('</div>', unsafe_allow_html=True)
 
         with tab2:
@@ -406,5 +440,4 @@ def afficher_cahier_texte():
     finally:
         db.close()
 
-# Alias correct pour l'importation dans app.py
 afficher_cahier_de_texte = afficher_cahier_texte
