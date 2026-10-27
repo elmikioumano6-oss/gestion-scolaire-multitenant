@@ -297,6 +297,7 @@ class EmploiDuTemps(Base):
     heure = Column(String)
     matiere = Column(String)
     enseignant = Column(String)
+    contact = Column(String, nullable=True)
 
     classe_rel = relationship("Classe")
 

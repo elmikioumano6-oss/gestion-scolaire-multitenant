@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 from database.db_config import SessionLocal
-from database.models import ActivityLog, Classe, School
+from database.models import ActivityLog, Classe, EmploiDuTemps, School
 import reportlab
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
@@ -48,9 +48,6 @@ def afficher_emploi_temps():
         if not is_super_admin and school_id:
             classes_query = classes_query.filter(Classe.school_id == school_id)
         classes_cycle = classes_query.all()
-
-        if "emplois_du_temps_data" not in st.session_state:
-            st.session_state["emplois_du_temps_data"] = {}
 
         heures_libelles = [
             ("1ère Heure", "08h00 - 09h00"),
@@ -116,8 +113,19 @@ def afficher_emploi_temps():
                     None,
                 )
                 if classe_obj:
-                    key_edt = f"{school_id}_{cycle_en_cours}_{classe_choisie}"
-                    edt_dict = st.session_state["emplois_du_temps_data"].get(key_edt, {})
+                    # Chargement persistant depuis la table SQLAlchemy EmploiDuTemps
+                    query_edt = db.query(EmploiDuTemps).filter(
+                        EmploiDuTemps.school_id == school_id,
+                        EmploiDuTemps.classe == classe_choisie
+                    ).all()
+
+                    edt_dict = {}
+                    for item in query_edt:
+                        edt_dict[(item.jour, item.heure)] = {
+                            "matiere": item.matiere,
+                            "prof": item.enseignant,
+                            "contact": getattr(item, "contact", "N/D") or "N/D"
+                        }
 
                     data_grille = []
                     for jour in jours:
@@ -449,8 +457,11 @@ def afficher_emploi_temps():
                 lignes_globales = []
                 for classe_obj in classes_cycle:
                     c_nom = classe_obj.libelle
-                    key_edt = f"{school_id}_{cycle_en_cours}_{c_nom}"
-                    edt_dict = st.session_state["emplois_du_temps_data"].get(key_edt, {})
+                    query_edt_g = db.query(EmploiDuTemps).filter(
+                        EmploiDuTemps.school_id == school_id,
+                        EmploiDuTemps.classe == c_nom
+                    ).all()
+                    edt_dict_g = {(item.jour, item.heure): {"matiere": item.matiere, "prof": item.enseignant} for item in query_edt_g}
 
                     for nom_h, plage_h in heures_libelles:
                         ligne_dict = {
@@ -462,7 +473,7 @@ def afficher_emploi_temps():
                             if nom_h == "Récréation" or plage_h == "11h00 - 11h30":
                                 ligne_dict[jour] = "☕ Pause"
                             else:
-                                val = edt_dict.get((jour, plage_h), None)
+                                val = edt_dict_g.get((jour, plage_h), None)
                                 if val:
                                     ligne_dict[jour] = f"{val['matiere']} ({val['prof']})"
                                 else:
@@ -578,7 +589,7 @@ def afficher_emploi_temps():
                     st.dataframe(df_global_service, use_container_width=True)
 
         # ==========================================
-        # ONGLET 3 : AJOUTER UN CRÉNEAU (Support 1h, 2h, 3h)
+        # ONGLET 3 : AJOUTER UN CRÉNEAU (Persistant en DB)
         # ==========================================
         with tab2:
             st.markdown(
@@ -629,10 +640,6 @@ def afficher_emploi_temps():
                                     ecole_defaut.id if ecole_defaut else 1
                                 )
 
-                            key_edt = f"{target_school_id}_{cycle_en_cours}_{classe_selectionnee}"
-                            if key_edt not in st.session_state["emplois_du_temps_data"]:
-                                st.session_state["emplois_du_temps_data"][key_edt] = {}
-
                             nb_heures = 1
                             if duree_cours == "2 heures":
                                 nb_heures = 2
@@ -644,17 +651,44 @@ def afficher_emploi_temps():
                             except ValueError:
                                 start_idx = 0
 
-                            creneau_data = {
-                                "matiere": matiere.strip().upper(),
-                                "prof": prof_nom.strip(),
-                                "contact": prof_contact.strip() if prof_contact else "N/D",
-                            }
+                            classe_db_obj = db.query(Classe).filter(
+                                Classe.school_id == target_school_id,
+                                Classe.libelle == classe_selectionnee
+                            ).first()
+                            classe_id_val = classe_db_obj.id if classe_db_obj else None
 
                             assigned_count = 0
                             current_idx = start_idx
                             while assigned_count < nb_heures and current_idx < len(creneaux_cours_uniquement):
                                 target_slot = creneaux_cours_uniquement[current_idx]
-                                st.session_state["emplois_du_temps_data"][key_edt][(jour, target_slot)] = creneau_data
+                                
+                                existing_creneau = db.query(EmploiDuTemps).filter(
+                                    EmploiDuTemps.school_id == target_school_id,
+                                    EmploiDuTemps.classe == classe_selectionnee,
+                                    EmploiDuTemps.jour == jour,
+                                    EmploiDuTemps.heure == target_slot
+                                ).first()
+
+                                if existing_creneau:
+                                    existing_creneau.matiere = matiere.strip().upper()
+                                    existing_creneau.enseignant = prof_nom.strip()
+                                    existing_creneau.classe_id = classe_id_val
+                                    if hasattr(existing_creneau, "contact"):
+                                        existing_creneau.contact = prof_contact.strip() if prof_contact else "N/D"
+                                else:
+                                    nouveau_creneau = EmploiDuTemps(
+                                        school_id=target_school_id,
+                                        classe_id=classe_id_val,
+                                        classe=classe_selectionnee,
+                                        jour=jour,
+                                        heure=target_slot,
+                                        matiere=matiere.strip().upper(),
+                                        enseignant=prof_nom.strip()
+                                    )
+                                    if hasattr(nouveau_creneau, "contact"):
+                                        nouveau_creneau.contact = prof_contact.strip() if prof_contact else "N/D"
+                                    db.add(nouveau_creneau)
+
                                 assigned_count += 1
                                 current_idx += 1
 
@@ -674,7 +708,7 @@ def afficher_emploi_temps():
 
                             st.success(
                                 f"✅ Créneau de {matiere} ({prof_nom}) d'une durée de {duree_cours} "
-                                f"ajouté avec succès pour {classe_selectionnee} ({jour}, dès {horaire_debut}) !"
+                                f"enregistré et persisté en base de données pour {classe_selectionnee} ({jour}, dès {horaire_debut}) !"
                             )
                             st.rerun()
 
