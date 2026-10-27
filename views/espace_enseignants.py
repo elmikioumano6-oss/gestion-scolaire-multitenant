@@ -2,6 +2,7 @@ from datetime import datetime
 import unicodedata
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 from database.db_config import SessionLocal
 from database.models import (
     ActivityLog,
@@ -461,44 +462,124 @@ def afficher_espace_enseignants():
 
             mat_norm_cible = normaliser_chaine(matiere_enseignant)
             
-            jours_semaine = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"]
-            creneaux_horaires_grille = [
-                "08h00 - 09h00",
-                "09h00 - 10h00",
-                "10h00 - 11h00",
-                "11h00 - 11h30",
-                "11h30 - 12h30",
-                "12h30 - 13h30",
-                "13h30 - 14h30",
-            ]
-
-            # Filtrage exclusif pour isoler uniquement les créneaux de la matière sélectionnée
             edt_prof_exclusif = {}
+            jours_presents = set()
+            heures_presents = set()
+
             for item in query_edt_classe:
                 if item.matiere and (mat_norm_cible in normaliser_chaine(item.matiere) or normaliser_chaine(item.matiere) in mat_norm_cible):
                     edt_prof_exclusif[(item.jour, item.heure)] = item
+                    jours_presents.add(item.jour)
+                    heures_presents.add(item.heure)
 
-            data_grille_prof = []
-            for j in jours_semaine:
-                ligne_j = {"Jour": j}
-                for h in creneaux_horaires_grille:
-                    if h == "11h00 - 11h30":
-                        ligne_j[h] = "☕ Pause"
-                    else:
-                        match_c = edt_prof_exclusif.get((j, h))
-                        if match_c:
-                            contact_str = f" (📞 {match_c.contact})" if hasattr(match_c, 'contact') and match_c.contact else ""
-                            ligne_j[h] = f"📖 {match_c.matiere}\n👨‍🏫 {match_c.enseignant}{contact_str}"
-                        else:
-                            ligne_j[h] = ""
-                data_grille_prof.append(ligne_j)
-
-            df_prof_edt = pd.DataFrame(data_grille_prof)
-            
             if not edt_prof_exclusif:
                 st.info(f"ℹ️ Aucun créneau horaire n'est planifié pour la matière **{matiere_enseignant}** dans la classe de **{classe_enseignant}**.")
             else:
-                st.dataframe(df_prof_edt, use_container_width=True)
+                ordre_jours = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"]
+                jours_actifs = [j for j in ordre_jours if j in jours_presents]
+
+                creneaux_ordre = [
+                    "08h00 - 09h00",
+                    "09h00 - 10h00",
+                    "10h00 - 11h00",
+                    "11h30 - 12h30",
+                    "12h30 - 13h30",
+                    "13h30 - 14h30",
+                ]
+                heures_actives = [h for h in creneaux_ordre if h in heures_presents]
+
+                headers_html = "<th>Jour</th>" + "".join([f"<th>{h}</th>" for h in heures_actives])
+
+                lignes_tbody_ens = ""
+                for j in jours_actifs:
+                    lignes_tbody_ens += f"<tr><td>{j}</td>"
+                    for h in heures_actives:
+                        match_c = edt_prof_exclusif.get((j, h))
+                        if match_c:
+                            contact_str = f"<br><span style='font-size: 0.7rem; color: #60a5fa;'>📞 {match_c.contact}</span>" if hasattr(match_c, 'contact') and match_c.contact else ""
+                            prof_str = f"<br><span style='font-size: 0.75rem; color: #94a3b8;'>👨‍🏫 {match_c.enseignant}</span>" if hasattr(match_c, 'enseignant') and match_c.enseignant else ""
+                            lignes_tbody_ens += f"""
+                            <td>
+                                <div style="color: #34d399; font-weight: 700; font-size: 0.85rem; margin-bottom: 3px;">📖 {match_c.matiere}</div>
+                                {prof_str}
+                                {contact_str}
+                            </td>
+                            """
+                        else:
+                            lignes_tbody_ens += "<td>—</td>"
+                    lignes_tbody_ens += "</tr>"
+
+                html_table_ens = f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                <meta charset="utf-8">
+                <style>
+                    body {{
+                        background-color: #0e1117;
+                        color: #f3f4f6;
+                        font-family: sans-serif;
+                        margin: 0;
+                        padding: 0;
+                    }}
+                    .edt-container {{
+                        background-color: #0e1117;
+                        padding: 0.5rem;
+                        border-radius: 12px;
+                        border: 1px solid rgba(255, 255, 255, 0.1);
+                    }}
+                    .styled-table {{
+                        width: 100%;
+                        border-collapse: collapse;
+                        border-radius: 8px;
+                        overflow: hidden;
+                        border: 1px solid #2d3748;
+                    }}
+                    .styled-table th {{
+                        background-color: #1a202c;
+                        color: #e2e8f0;
+                        text-align: center;
+                        padding: 12px 8px;
+                        font-size: 0.85rem;
+                        border-bottom: 2px solid #4a5568;
+                    }}
+                    .styled-table td {{
+                        background-color: #111827;
+                        color: #cbd5e0;
+                        text-align: center;
+                        padding: 12px 8px;
+                        font-size: 0.8rem;
+                        border-bottom: 1px solid #1f2937;
+                        border-right: 1px solid #1f2937;
+                        vertical-align: middle;
+                        height: 65px;
+                        word-break: break-word;
+                    }}
+                    .styled-table td:first-child {{
+                        font-weight: 600;
+                        color: #60a5fa;
+                        background-color: #161e2e;
+                        width: 110px;
+                    }}
+                </style>
+                </head>
+                <body>
+                <div class="edt-container">
+                    <table class="styled-table">
+                        <thead>
+                            <tr>
+                                {headers_html}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {lignes_tbody_ens}
+                        </tbody>
+                    </table>
+                </div>
+                </body>
+                </html>
+                """
+                components.html(html_table_ens, height=250, scrolling=True)
 
     finally:
         db.close()
