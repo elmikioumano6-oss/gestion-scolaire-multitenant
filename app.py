@@ -114,11 +114,18 @@ def main():
         initial_sidebar_state="expanded",
     )
 
+    # --- DYNAMISATION DE L'ICÔNE ET DU MANIFESTE PWA MOBILE PAR ÉCOLE ---
+    school_id_actuel = st.session_state.get("school_id")
+    logo_manifest_path = f"logo_{school_id_actuel}.png" if school_id_actuel else "Logo Gestion Scolaire Pro.png"
+    if not os.path.exists(logo_manifest_path):
+        logo_manifest_path = "Logo Gestion Scolaire Pro.png"
+
     st.markdown(
-        """
+        f"""
         <meta name="apple-mobile-web-app-capable" content="yes">
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-        <meta name="apple-mobile-web-app-title" content="ERP Scolaire">
+        <meta name="apple-mobile-web-app-title" content="{st.session_state.get('school_name', 'ERP Scolaire')}">
+        <link rel="apple-touch-icon" href="{logo_manifest_path}">
         <meta name="mobile-web-app-capable" content="yes">
         <meta name="theme-color" content="#111827">
     """,
@@ -164,6 +171,24 @@ def main():
             /* Changement de couleur au survol du curseur */
             section[data-testid="stSidebar"] ::-webkit-scrollbar-thumb:hover {
                 background: #ff8800 !important;
+            }
+
+            /* Personnalisation globale des barres de défilement de la page principale */
+            ::-webkit-scrollbar {
+                width: 12px;
+                height: 12px;
+            }
+            ::-webkit-scrollbar-track {
+                background: #0e1117;
+                border-radius: 6px;
+            }
+            ::-webkit-scrollbar-thumb {
+                background: #3b82f6;
+                border-radius: 6px;
+                border: 2px solid #0e1117;
+            }
+            ::-webkit-scrollbar-thumb:hover {
+                background: #60a5fa;
             }
         </style>
         """,
