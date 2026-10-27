@@ -506,10 +506,10 @@ def afficher_emploi_temps():
                         doc_g = SimpleDocTemplate(
                             pdf_buffer_g,
                             pagesize=landscape(A4),
-                            rightMargin=20,
-                            leftMargin=20,
-                            topMargin=30,
-                            bottomMargin=40,
+                            rightMargin=15,
+                            leftMargin=15,
+                            topMargin=25,
+                            bottomMargin=30,
                         )
                         elements_g = []
                         styles_g = getSampleStyleSheet()
@@ -517,10 +517,10 @@ def afficher_emploi_temps():
                         title_style_g = ParagraphStyle(
                             "TitleStyleGlobal",
                             parent=styles_g["Heading1"],
-                            fontSize=13,
+                            fontSize=12,
                             textColor=colors.HexColor("#1e3a8a"),
                             alignment=1,
-                            spaceAfter=12,
+                            spaceAfter=10,
                         )
 
                         elements_g.append(
@@ -529,30 +529,52 @@ def afficher_emploi_temps():
                                 title_style_g,
                             )
                         )
-                        elements_g.append(Spacer(1, 8))
+                        elements_g.append(Spacer(1, 6))
 
-                        table_data_g = [list(df_global_service.columns)]
+                        cell_style_g = ParagraphStyle(
+                            "CellPDFGlobal",
+                            parent=styles_g["Normal"],
+                            fontSize=6,
+                            leading=7.5,
+                            alignment=1,
+                            textColor=colors.HexColor("#1e293b"),
+                        )
+
+                        header_cell_style_g = ParagraphStyle(
+                            "HeaderCellPDFGlobal",
+                            parent=styles_g["Normal"],
+                            fontSize=6.5,
+                            leading=8.5,
+                            alignment=1,
+                            textColor=colors.white,
+                            fontName="Helvetica-Bold",
+                        )
+
+                        table_data_formatted_g = []
+                        header_row_g = [Paragraph(str(col), header_cell_style_g) for col in df_global_service.columns]
+                        table_data_formatted_g.append(header_row_g)
+
                         for _, row in df_global_service.iterrows():
-                            table_data_g.append([str(val) for val in row])
+                            row_cells_g = []
+                            for val in row:
+                                text_val = str(val) if val else "-"
+                                row_cells_g.append(Paragraph(text_val, cell_style_g))
+                            table_data_formatted_g.append(row_cells_g)
 
-                        t_g_style = TableStyle([
+                        num_cols = len(df_global_service.columns)
+                        # Largeur totale disponible en paysage A4 : ~812 points
+                        col_widths_g = [45, 50, 55] + [ (812 - 150) / (num_cols - 3) ] * (num_cols - 3)
+
+                        t_g = Table(table_data_formatted_g, colWidths=col_widths_g)
+                        t_g.setStyle(TableStyle([
                             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a8a")),
-                            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
                             ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                            ("FONTSIZE", (0, 0), (-1, 0), 8),
-                            ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
                             ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#f8fafc")),
                             ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
-                            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-                            ("FONTSIZE", (0, 1), (-1, -1), 7),
-                            ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
-                            ("TOPPADDING", (0, 1), (-1, -1), 4),
-                        ])
-
-                        t_g = Table(table_data_g)
-                        t_g.setStyle(t_g_style)
+                            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                            ("TOPPADDING", (0, 0), (-1, -1), 2),
+                        ]))
                         elements_g.append(t_g)
                         doc_g.build(elements_g)
                         pdf_data_g = pdf_buffer_g.getvalue()
