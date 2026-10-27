@@ -460,7 +460,16 @@ def afficher_emploi_temps():
                         EmploiDuTemps.school_id == school_id,
                         EmploiDuTemps.classe == c_nom
                     ).all()
-                    edt_dict_g = {(item.jour, item.heure): {"matiere": item.matiere, "prof": item.enseignant} for item in query_edt_g}
+                    
+                    # Inclusion du contact (téléphone) dans le dictionnaire global
+                    edt_dict_g = {
+                        (item.jour, item.heure): {
+                            "matiere": item.matiere, 
+                            "prof": item.enseignant,
+                            "contact": getattr(item, "contact", "N/D") or "N/D"
+                        } 
+                        for item in query_edt_g
+                    }
 
                     for nom_h, plage_h in heures_libelles:
                         ligne_dict = {
@@ -474,7 +483,7 @@ def afficher_emploi_temps():
                             else:
                                 val = edt_dict_g.get((jour, plage_h), None)
                                 if val:
-                                    ligne_dict[jour] = f"{val['matiere']} ({val['prof']})"
+                                    ligne_dict[jour] = f"{val['matiere']} ({val['prof']} - 📞 {val['contact']})"
                                 else:
                                     ligne_dict[jour] = "-"
                         lignes_globales.append(ligne_dict)
@@ -534,8 +543,8 @@ def afficher_emploi_temps():
                         cell_style_g = ParagraphStyle(
                             "CellPDFGlobal",
                             parent=styles_g["Normal"],
-                            fontSize=6,
-                            leading=7.5,
+                            fontSize=5.5,
+                            leading=7,
                             alignment=1,
                             textColor=colors.HexColor("#1e293b"),
                         )
@@ -562,7 +571,6 @@ def afficher_emploi_temps():
                             table_data_formatted_g.append(row_cells_g)
 
                         num_cols = len(df_global_service.columns)
-                        # Largeur totale disponible en paysage A4 : ~812 points
                         col_widths_g = [45, 50, 55] + [ (812 - 150) / (num_cols - 3) ] * (num_cols - 3)
 
                         t_g = Table(table_data_formatted_g, colWidths=col_widths_g)
@@ -668,7 +676,7 @@ def afficher_emploi_temps():
                             border-bottom: 1px solid #1f2937;
                             border-right: 1px solid #1f2937;
                             vertical-align: middle;
-                            min-width: 160px;
+                            min-width: 180px;
                             word-break: break-word;
                         }}
                         .global-table td:first-child, .global-table td:nth-child(2), .global-table td:nth-child(3) {{
