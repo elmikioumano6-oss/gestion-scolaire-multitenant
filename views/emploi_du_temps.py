@@ -113,7 +113,6 @@ def afficher_emploi_temps():
                     None,
                 )
                 if classe_obj:
-                    # Chargement persistant depuis la table SQLAlchemy EmploiDuTemps
                     query_edt = db.query(EmploiDuTemps).filter(
                         EmploiDuTemps.school_id == school_id,
                         EmploiDuTemps.classe == classe_choisie
@@ -449,7 +448,7 @@ def afficher_emploi_temps():
         # ==========================================
         with tab_global:
             st.markdown(f"### 📊 Tableau de Service Global — **{school_name} ({cycle_en_cours})**")
-            st.info("Disposition officielle : Classes et Heures en lignes, Jours de la semaine en colonnes.")
+            st.markdown("---")
 
             if not classes_cycle:
                 st.warning("Aucune classe disponible pour ce cycle.")
@@ -586,10 +585,96 @@ def afficher_emploi_temps():
                         )
 
                     st.markdown("<br>", unsafe_allow_html=True)
-                    st.dataframe(df_global_service, use_container_width=True)
+
+                    lignes_html_global = ""
+                    for _, row in df_global_service.iterrows():
+                        lignes_html_global += "<tr>"
+                        for col_name in df_global_service.columns:
+                            val_cel = str(row[col_name])
+                            if val_cel == "☕ Pause":
+                                lignes_html_global += f'<td class="pause-cell">{val_cel}</td>'
+                            elif val_cel == "-":
+                                lignes_html_global += f'<td style="color: #4b5563; text-align: center;">{val_cel}</td>'
+                            else:
+                                lignes_html_global += f'<td><strong style="color: #34d399;">{val_cel}</strong></td>'
+                        lignes_html_global += "</tr>"
+
+                    headers_html_global = "".join([f"<th>{col}</th>" for col in df_global_service.columns])
+
+                    html_global_table = f"""
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                    <meta charset="utf-8">
+                    <style>
+                        body {{
+                            background-color: #0e1117;
+                            color: #f3f4f6;
+                            font-family: sans-serif;
+                            margin: 0;
+                            padding: 0;
+                        }}
+                        .table-container {{
+                            background-color: #0e1117;
+                            border-radius: 8px;
+                            border: 1px solid #2d3748;
+                            overflow-x: auto;
+                        }}
+                        .global-table {{
+                            width: 100%;
+                            border-collapse: collapse;
+                        }}
+                        .global-table th {{
+                            background-color: #1a202c;
+                            color: #e2e8f0;
+                            text-align: left;
+                            padding: 12px 14px;
+                            font-size: 0.85rem;
+                            border-bottom: 2px solid #4a5568;
+                            white-space: nowrap;
+                        }}
+                        .global-table td {{
+                            background-color: #111827;
+                            color: #cbd5e0;
+                            text-align: left;
+                            padding: 10px 14px;
+                            font-size: 0.8rem;
+                            border-bottom: 1px solid #1f2937;
+                            border-right: 1px solid #1f2937;
+                            vertical-align: middle;
+                            min-width: 140px;
+                            word-break: break-word;
+                        }}
+                        .global-table td:first-child, .global-table td:nth-child(2), .global-table td:nth-child(3) {{
+                            white-space: nowrap;
+                            min-width: unset;
+                        }}
+                        .pause-cell {{
+                            background-color: #18212f !important;
+                            color: #9ca3af !important;
+                            font-style: italic;
+                            text-align: center;
+                        }}
+                    </style>
+                    </head>
+                    <body>
+                    <div class="table-container">
+                        <table class="global-table">
+                            <thead>
+                                <tr>{headers_html_global}</tr>
+                            </thead>
+                            <tbody>
+                                {lignes_html_global}
+                            </tbody>
+                        </table>
+                    </div>
+                    </body>
+                    </html>
+                    """
+                    components.html(html_global_table, height=520, scrolling=True)
 
         # ==========================================
-        # ONGLET 3 : AJOUTER UN CRÉNEAU (Persistant en DB)
+        # ONGLET 3 : AJOUTER UN CRÉNEAU
         # ==========================================
         with tab2:
             st.markdown(
