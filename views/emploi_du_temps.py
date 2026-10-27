@@ -129,7 +129,7 @@ def afficher_emploi_temps():
                                 val_creneau = edt_dict.get((jour, horaire), None)
                                 if val_creneau:
                                     ligne[horaire] = (
-                                        f"{val_creneau['matiere']} (Prof: {val_creneau['prof']} - {val_creneau['contact']})"
+                                        f"{val_creneau['matiere']}\nProf: {val_creneau['prof']}\n{val_creneau['contact']}"
                                     )
                                 else:
                                     ligne[horaire] = ""
@@ -162,10 +162,10 @@ def afficher_emploi_temps():
                         doc = SimpleDocTemplate(
                             pdf_buffer,
                             pagesize=landscape(A4),
-                            rightMargin=30,
-                            leftMargin=30,
-                            topMargin=30,
-                            bottomMargin=50,
+                            rightMargin=20,
+                            leftMargin=20,
+                            topMargin=25,
+                            bottomMargin=40,
                         )
 
                         elements = []
@@ -174,10 +174,10 @@ def afficher_emploi_temps():
                         title_style = ParagraphStyle(
                             "TitleStyle",
                             parent=styles["Heading1"],
-                            fontSize=15,
+                            fontSize=13,
                             textColor=colors.HexColor("#1e3a8a"),
                             alignment=1,
-                            spaceAfter=15,
+                            spaceAfter=10,
                         )
 
                         elements.append(
@@ -186,39 +186,59 @@ def afficher_emploi_temps():
                                 title_style,
                             )
                         )
-                        elements.append(Spacer(1, 10))
+                        elements.append(Spacer(1, 5))
 
-                        table_data = [list(df_edt.columns)]
+                        cell_style = ParagraphStyle(
+                            "CellPDF",
+                            parent=styles["Normal"],
+                            fontSize=7,
+                            leading=9,
+                            alignment=1,
+                            textColor=colors.HexColor("#1e293b"),
+                        )
+
+                        header_cell_style = ParagraphStyle(
+                            "HeaderCellPDF",
+                            parent=styles["Normal"],
+                            fontSize=7.5,
+                            leading=10,
+                            alignment=1,
+                            textColor=colors.white,
+                            fontName="Helvetica-Bold",
+                        )
+
+                        table_data_pdf = []
+                        header_row = [Paragraph(str(col), header_cell_style) for col in df_edt.columns]
+                        table_data_pdf.append(header_row)
+
                         for _, row in df_edt.iterrows():
-                            table_data.append([str(val) for val in row])
+                            row_cells = []
+                            for val in row:
+                                text_val = str(val) if val else ""
+                                text_formatted = text_val.replace("\n", "<br/>")
+                                row_cells.append(Paragraph(text_formatted, cell_style))
+                            table_data_pdf.append(row_cells)
 
-                        col_widths = [70] + [
-                            (780 - 70) / len(creneaux_horaires)
-                        ] * len(creneaux_horaires)
-                        
-                        t_style = TableStyle([
-                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a8a")),
-                            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-                            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-                            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                            ("FONTSIZE", (0, 0), (-1, 0), 9),
-                            ("BOTTOMPADDING", (0, 0), (-1, 0), 8),
-                            ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#f8fafc")),
-                            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
-                            ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-                            ("FONTSIZE", (0, 1), (-1, -1), 8),
-                            ("BOTTOMPADDING", (0, 1), (-1, -1), 5),
-                            ("TOPPADDING", (0, 1), (-1, -1), 5),
-                        ])
-                        
-                        t = Table(table_data, colWidths=col_widths)
-                        t.setStyle(t_style)
-                        elements.append(t)
+                        col_widths = [65] + [ (780 - 65) / len(creneaux_horaires) ] * len(creneaux_horaires)
+                        row_heights = [35] + [45] * len(jours)
+
+                        t_pdf = Table(table_data_pdf, colWidths=col_widths, rowHeights=row_heights)
+                        t_pdf.setStyle(
+                            TableStyle([
+                                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a8a")),
+                                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                                ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#f8fafc")),
+                                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+                                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                            ])
+                        )
+                        elements.append(t_pdf)
 
                         def add_footer(canvas, doc_obj):
                             canvas.saveState()
-                            footer_y = 22
+                            footer_y = 15
                             s_nom = ecole_courante.nom if ecole_courante else school_name
                             s_adr = ecole_courante.adresse if ecole_courante and ecole_courante.adresse else "Niamey - Niger"
                             s_cont = ecole_courante.contacts if ecole_courante and ecole_courante.contacts else "N/D"
@@ -228,13 +248,13 @@ def afficher_emploi_temps():
                             footer_style = ParagraphStyle(
                                 "FooterStyle",
                                 parent=styles["Normal"],
-                                fontSize=8,
+                                fontSize=7.5,
                                 textColor=colors.HexColor("#475569"),
                                 alignment=1,
                             )
                             p = Paragraph(footer_text, footer_style)
-                            p.wrap(doc_obj.pagesize[0] - 60, footer_y)
-                            p.drawOn(canvas, 30, footer_y)
+                            p.wrap(doc_obj.pagesize[0] - 40, footer_y)
+                            p.drawOn(canvas, 20, footer_y)
                             canvas.restoreState()
 
                         doc.build(elements, onFirstPage=add_footer)
@@ -268,11 +288,9 @@ def afficher_emploi_temps():
 
                     st.markdown("<br>", unsafe_allow_html=True)
 
-                    # --- Moteur de génération HTML avec fusion intelligente des cours (1h, 2h, 3h) ---
                     lignes_tbody = ""
                     for jour in jours:
                         lignes_tbody += f"<tr><td>{jour}</td>"
-                        
                         skip_slots = 0
                         for i, horaire in enumerate(creneaux_horaires):
                             if skip_slots > 0:
@@ -285,7 +303,6 @@ def afficher_emploi_temps():
 
                             val_creneau = edt_dict.get((jour, horaire), None)
                             if val_creneau:
-                                # Calculer combien de créneaux consécutifs partagent exactement le même cours
                                 span = 1
                                 for next_h in creneaux_horaires[i+1:]:
                                     if next_h == "11h00 - 11h30":
@@ -616,14 +633,12 @@ def afficher_emploi_temps():
                             if key_edt not in st.session_state["emplois_du_temps_data"]:
                                 st.session_state["emplois_du_temps_data"][key_edt] = {}
 
-                            # Déterminer le nombre d'heures consécutives
                             nb_heures = 1
                             if duree_cours == "2 heures":
                                 nb_heures = 2
                             elif duree_cours == "3 heures":
                                 nb_heures = 3
 
-                            # Retrouver l'index de départ dans les créneaux de cours
                             try:
                                 start_idx = creneaux_cours_uniquement.index(horaire_debut)
                             except ValueError:
@@ -635,7 +650,6 @@ def afficher_emploi_temps():
                                 "contact": prof_contact.strip() if prof_contact else "N/D",
                             }
 
-                            # Enregistrer le cours sur les créneaux consécutifs (en évitant la pause de 11h-11h30)
                             assigned_count = 0
                             current_idx = start_idx
                             while assigned_count < nb_heures and current_idx < len(creneaux_cours_uniquement):
