@@ -8,6 +8,7 @@ from database.models import (
     CahierTexte,
     Classe,
     Eleve,
+    EmploiDuTemps,
     Enseignant,
     Matiere,
     Note,
@@ -215,11 +216,12 @@ def afficher_espace_enseignants():
                 eleves_query = eleves_query.filter(Eleve.deleted_at.is_(None))
             eleves = eleves_query.order_by(Eleve.nom).all()
 
-        tab_cahier, tab_notes, tab_appel, tab_charge = st.tabs([
+        tab_cahier, tab_notes, tab_appel, tab_charge, tab_edt = st.tabs([
             "📖 Cahier de Texte",
             "📝 Saisie des Notes",
             "📋 Feuille d'Appel",
             "📊 Horaires & Reste à faire",
+            "📅 Emploi du Temps",
         ])
 
         with tab_cahier:
@@ -448,6 +450,55 @@ def afficher_espace_enseignants():
                 st.progress(max(0.0, min(1.0, progression_pct / 100.0)), text=f"Progression globale du programme : {progression_pct}%")
             else:
                 st.info("Veuillez sélectionner une classe et une matière valides.")
+
+        with tab_edt:
+            st.markdown(f"<h4 class='tab-title'>📅 Emploi du Temps — Matière : {matiere_enseignant} (Classe : {classe_enseignant})</h4>", unsafe_allow_html=True)
+            
+            query_edt_classe = db.query(EmploiDuTemps).filter(
+                EmploiDuTemps.school_id == ecole_active_id,
+                EmploiDuTemps.classe == classe_enseignant
+            ).all()
+
+            mat_norm_cible = normaliser_chaine(matiere_enseignant)
+            
+            jours_semaine = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"]
+            creneaux_horaires_grille = [
+                "08h00 - 09h00",
+                "09h00 - 10h00",
+                "10h00 - 11h00",
+                "11h00 - 11h30",
+                "11h30 - 12h30",
+                "12h30 - 13h30",
+                "13h30 - 14h30",
+            ]
+
+            # Filtrage exclusif pour isoler uniquement les créneaux de la matière sélectionnée
+            edt_prof_exclusif = {}
+            for item in query_edt_classe:
+                if item.matiere and (mat_norm_cible in normaliser_chaine(item.matiere) or normaliser_chaine(item.matiere) in mat_norm_cible):
+                    edt_prof_exclusif[(item.jour, item.heure)] = item
+
+            data_grille_prof = []
+            for j in jours_semaine:
+                ligne_j = {"Jour": j}
+                for h in creneaux_horaires_grille:
+                    if h == "11h00 - 11h30":
+                        ligne_j[h] = "☕ Pause"
+                    else:
+                        match_c = edt_prof_exclusif.get((j, h))
+                        if match_c:
+                            contact_str = f" (📞 {match_c.contact})" if hasattr(match_c, 'contact') and match_c.contact else ""
+                            ligne_j[h] = f"📖 {match_c.matiere}\n👨‍🏫 {match_c.enseignant}{contact_str}"
+                        else:
+                            ligne_j[h] = ""
+                data_grille_prof.append(ligne_j)
+
+            df_prof_edt = pd.DataFrame(data_grille_prof)
+            
+            if not edt_prof_exclusif:
+                st.info(f"ℹ️ Aucun créneau horaire n'est planifié pour la matière **{matiere_enseignant}** dans la classe de **{classe_enseignant}**.")
+            else:
+                st.dataframe(df_prof_edt, use_container_width=True)
 
     finally:
         db.close()
