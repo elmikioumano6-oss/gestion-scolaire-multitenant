@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import time
 
 from dotenv import load_dotenv
@@ -115,12 +116,12 @@ def main():
         initial_sidebar_state="expanded",
     )
 
-    # --- DÉTECTION AUTOMATIQUE ET DYNAMIQUE DU LOGO DE L'ÉCOLE POUR LA PWA MOBILE ---
+    # --- GESTION ROBUSTE ET UNIFORMISÉE DU LOGO MOBILE ET PWA ---
     school_code = str(st.session_state.get("school_code", "")).strip().upper()
     school_name = str(st.session_state.get("school_name", "")).strip().lower()
     school_name_actuel = st.session_state.get("school_name", "ERP Scolaire")
 
-    logo_filename = None
+    logo_trouve = None
     try:
         fichiers_racine = os.listdir(".")
         mots_cles = [school_code, school_name]
@@ -130,15 +131,23 @@ def main():
             if fichier.lower().endswith((".png", ".jpg", ".jpeg", ".webp")):
                 nom_fichier_clean = re.sub(r"[^a-z0-9]", "", fichier.lower())
                 if any(mot in nom_fichier_clean for mot in mots_cles_propres if len(mot) > 2):
-                    logo_filename = fichier
+                    logo_trouve = fichier
                     break
     except Exception:
         pass
 
-    if not logo_filename or not os.path.exists(logo_filename):
-        logo_filename = "Logo CSP-RAHMAT-FH.png" if os.path.exists("Logo CSP-RAHMAT-FH.png") else "Logo Gestion Scolaire Pro.png"
+    if not logo_trouve or not os.path.exists(logo_trouve):
+        logo_trouve = "Logo CSP-RAHMAT-FH.png" if os.path.exists("Logo CSP-RAHMAT-FH.png") else "Logo Gestion Scolaire Pro.png"
 
-    # Création dynamique du manifeste JSON pour l'installation sur l'écran d'accueil du mobile
+    # Copie normalisée du logo pour éviter les problèmes d'espaces et de chemins relatifs sur mobile
+    logo_standardise = "logo_actif_ecole.png"
+    try:
+        if os.path.exists(logo_trouve):
+            shutil.copyfile(logo_trouve, logo_standardise)
+    except Exception:
+        pass
+
+    # Création dynamique du manifeste JSON avec un chemin propre
     manifest_data = {
         "name": school_name_actuel,
         "short_name": "ERP Scolaire",
@@ -148,7 +157,7 @@ def main():
         "theme_color": "#111827",
         "icons": [
             {
-                "src": f"/{logo_filename}" if os.path.exists(logo_filename) else "/favicon.png",
+                "src": logo_standardise if os.path.exists(logo_standardise) else "Logo Gestion Scolaire Pro.png",
                 "sizes": "192x192 512x512",
                 "type": "image/png"
             }
@@ -166,8 +175,8 @@ def main():
         <meta name="apple-mobile-web-app-capable" content="yes">
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
         <meta name="apple-mobile-web-app-title" content="{school_name_actuel}">
-        <link rel="apple-touch-icon" href="{logo_filename}">
-        <link rel="manifest" href="/manifest.json">
+        <link rel="apple-touch-icon" href="{logo_standardise}">
+        <link rel="manifest" href="manifest.json">
         <meta name="mobile-web-app-capable" content="yes">
         <meta name="theme-color" content="#111827">
     """,

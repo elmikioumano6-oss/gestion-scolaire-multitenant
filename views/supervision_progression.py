@@ -3,7 +3,7 @@ from io import BytesIO
 import pandas as pd
 import streamlit as st
 from database.db_config import SessionLocal
-from database.models import ActivityLog, CahierTexte, Classe, Matiere, Programme, School
+from database.models import ActivityLog, CahierTexte, Classe, Enseignant, Matiere, Programme, School
 import unicodedata
 
 SYNONYMES_MATIERES = {
@@ -169,6 +169,7 @@ def afficher_supervision_progression():
         )
 
         programmes_ecole = db.query(Programme).filter(Programme.school_id == ecole_active_id).all()
+        tous_enseignants = db.query(Enseignant).filter(Enseignant.school_id == ecole_active_id).all()
 
         data_suivi = []
         for mat in matieres_cycle:
@@ -178,6 +179,28 @@ def afficher_supervision_progression():
                 else getattr(mat, "nom", "Matière")
             )
             mat_norm = normaliser_chaine(mat_lib)
+
+            # --- DÉTECTION INTELLIGENTE DE L'ENSEIGNANT ASSIGNÉ ---
+            enseignant_affecte = "Non assigné"
+            for ens in tous_enseignants:
+                mat_attr = str(getattr(ens, "matieres_attribuees", "") or getattr(ens, "matieres", "")).lower()
+                cls_attr = str(getattr(ens, "classes_attribuees", "") or getattr(ens, "classes", "")).lower()
+                
+                # Vérifier si l'enseignant enseigne cette matière dans cette classe
+                if (mat_norm in normaliser_chaine(mat_attr) or mat_lib.lower() in mat_attr) and \
+                   (classe_selectionnee.lower() in cls_attr or not cls_attr):
+                    enseignant_affecte = f"{getattr(ens, 'nom', '')} {getattr(ens, 'prenom', '')}".strip()
+                    break
+
+            # Fallback : vérifier si une entrée récente dans le cahier de texte a été enregistrée par un enseignant pour cette matière
+            if enseignant_affecte == "Non assigné":
+                seances_mat_check = [e for e in toutes_entrees if getattr(e, 'matiere_id', None) == mat.id]
+                for s in seances_mat_check:
+                    if hasattr(s, "enseignant_id") and s.enseignant_id:
+                        ens_lie = db.query(Enseignant).filter(Enseignant.id == s.enseignant_id).first()
+                        if ens_lie:
+                            enseignant_affecte = f"{getattr(ens_lie, 'nom', '')} {getattr(ens_lie, 'prenom', '')}".strip()
+                            break
 
             volume_prevu = 0.0
             coefficient_val = int(getattr(mat, "coefficient", 1) or 1)
@@ -230,82 +253,3 @@ def afficher_supervision_progression():
 
             volume_realise = 0.0
             for seance in seances_mat:
-                duree_val = float(getattr(seance, 'duree', 0.0) or 0.0)
-                if duree_val > 0:
-                    volume_realise += duree_val
-                else:
-                    d_str = str(getattr(seance, "duree_seance", "1 heure"))
-                    try:
-                        chiffre = float("".join(filter(str.isdigit, d_str)) or 1)
-                        volume_realise += chiffre
-                    except Exception:
-                        volume_realise += 1.0
-
-            taux = (
-                min(100, int((volume_realise / volume_prevu) * 100))
-                if volume_prevu > 0
-                else 0
-            )
-
-            if volume_prevu == 0:
-                remarques = "⚪ Non configuré"
-            elif taux < 20:
-                remarques = "🔴 En retard critique"
-            elif taux < 40:
-                remarques = "🟠 En léger retard"
-            elif taux <= 80:
-                remarques = "🟢 Rythme conforme"
-            else:
-                remarques = "🔵 Programme bien avancé"
-
-            data_suivi.append({
-                "Discipline / Matière": mat_lib.title(),
-                "Coefficient": coefficient_val,
-                "Volume Prévu": f"{volume_prevu:g}h",
-                "Volume Réalisé": f"{volume_realise:g}h",
-                "Taux d'Avancement": f"{taux}%",
-                "Analyse & Remarque": remarques,
-            })
-
-        df_suivi = pd.DataFrame(data_suivi)
-        st.dataframe(df_suivi, use_container_width=True)
-
-        def to_excel_buffer(df):
-            output = BytesIO()
-            with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                df.to_excel(writer, index=False, sheet_name="SuiviProgrammes")
-            return output.getvalue()
-
-        excel_data = to_excel_buffer(df_suivi)
-        st.download_button(
-            label="📥 Télécharger le rapport de suivi des programmes (.xlsx)",
-            data=excel_data,
-            file_name=(
-                f"Suivi_Programmes_{classe_selectionnee}_{school_name}.xlsx"
-            ),
-            mime=(
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            ),
-        )
-
-        db.add(
-            ActivityLog(
-                school_id=ecole_active_id,
-                timestamp=datetime.utcnow(),
-                username=st.session_state.get("username", "admin"),
-                action=(
-                    f"Consultation du suivi global des programmes"
-                    f" ({classe_selectionnee}) - {school_name}"
-                ),
-                module="Suivi des Programmes",
-                statut="Succès",
-            )
-        )
-        db.commit()
-
-    finally:
-        db.close()
-
-# Alias de compatibilité
-afficher_suivi_programmes = afficher_supervision_progression
-afficher_suivi_des_programmes = afficher_supervision_progression

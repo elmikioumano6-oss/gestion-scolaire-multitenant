@@ -5,12 +5,32 @@ from database.db_config import SessionLocal
 from database.models import CahierTexte, Enseignant, School, User, Classe, Matiere, Depense
 
 def format_fcfa(montant):
-    """Formate un montant en FCFA avec un espace comme séparateur de milliers."""
     return f"{int(round(montant)):,}".replace(",", " ")
 
 def format_taux(montant):
-    """Formate un taux horaire sans espace pour tenir sur une seule ligne."""
     return str(int(round(montant)))
+
+def parse_date_securisee(date_c):
+    if not date_c:
+        return None
+    if not isinstance(date_c, str):
+        return date_c
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+        try:
+            return datetime.strptime(date_c, fmt)
+        except ValueError:
+            pass
+    return None
+
+def is_cours_lycee(classe_entry, mots_lycee_kw):
+    if not classe_entry:
+        return False
+    cycle_str = f"{getattr(classe_entry, 'cycle', '')} {getattr(classe_entry, 'libelle', '')}".lower()
+    cycle_db = str(getattr(classe_entry, 'cycle', '')).lower()
+    cond_kw = any(kw in cycle_str for kw in mots_lycee_kw)
+    cond_tag = any(k in cycle_str for k in ["tle", "2de", "2nd", "seconde", "1ere", "1ère", "premiere", "terminale"])
+    cond_db = cycle_db in ["lycee", "lycée"]
+    return cond_kw or cond_tag or cond_db
 
 def afficher_etat_paie_administration(mois, date_paie):
     school_id = st.session_state.get("school_id")
@@ -43,7 +63,7 @@ def afficher_etat_paie_administration(mois, date_paie):
         total_net_global = 0
 
         if not personnels:
-            lignes_html = '<tr><td colspan="8" style="text-align: center; color: gray;">Aucun personnel administratif enregistré.</td></tr>'
+            lignes_html = '<tr><td colspan="8" style="text-align: center; color: gray;">Aucun personnel administratif enregistre.</td></tr>'
         else:
             for i, p in enumerate(personnels, 1):
                 salaire_base = float(getattr(p, "salaire_base", 0.0) or 0.0)
@@ -51,16 +71,13 @@ def afficher_etat_paie_administration(mois, date_paie):
                 nom_complet = getattr(p, "username", f"Agent {i}")
                 
                 acompte_depenses = 0.0
-                try:
-                    depenses_query = db.query(Depense).filter(Depense.school_id == school_id) if school_id else db.query(Depense)
-                    for dep in depenses_query.all():
-                        libelle_dep = str(getattr(dep, "libelle", "") or getattr(dep, "motif", "") or "").lower()
-                        beneficiaire_dep = str(getattr(dep, "beneficiaire", "") or "").lower()
-                        if nom_complet.lower() in libelle_dep or nom_complet.lower() in beneficiaire_dep:
-                            if any(k in libelle_dep for k in ["acompte", "avance", "paie"]):
-                                acompte_depenses += float(getattr(dep, "montant", 0.0) or 0.0)
-                except Exception:
-                    db.rollback()
+                depenses_query = db.query(Depense).filter(Depense.school_id == school_id) if school_id else db.query(Depense)
+                for dep in depenses_query.all():
+                    libelle_dep = str(getattr(dep, "libelle", "") or getattr(dep, "motif", "") or "").lower()
+                    beneficiaire_dep = str(getattr(dep, "beneficiaire", "") or "").lower()
+                    if nom_complet.lower() in libelle_dep or nom_complet.lower() in beneficiaire_dep:
+                        if any(k in libelle_dep for k in ["acompte", "avance", "paie"]):
+                            acompte_depenses += float(getattr(dep, "montant", 0.0) or 0.0)
 
                 acompte = float(getattr(p, "acompte", 0.0) or 0.0) + acompte_depenses
                 poste = getattr(p, "role", "Administratif")
@@ -102,18 +119,18 @@ def afficher_etat_paie_administration(mois, date_paie):
             </style>
         </head>
         <body>
-            <div class="print-container no-print"><button class="print-btn" onclick="window.print()">🖨️ Imprimer l'État de Paie Administration</button></div>
+            <div class="print-container no-print"><button class="print-btn" onclick="window.print()">🖨️ Imprimer l'Etat de Paie Administration</button></div>
             <div class="page">
                 <table>
                     <tr>
                         <td style="border: none; font-size: 0.8rem; font-weight: bold;">{ecole}<br>{adresse}</td>
-                        <td style="border: none; text-align: right; font-size: 0.8rem;"><b>ÉTAT DE PAIE — ADMINISTRATIF</b><br>Mois : <b>{mois}</b><br>Date : <b>{date_format}</b></td>
+                        <td style="border: none; text-align: right; font-size: 0.8rem;"><b>ETAT DE PAIE — ADMINISTRATIF</b><br>Mois : <b>{mois}</b><br>Date : <b>{date_format}</b></td>
                     </tr>
                 </table>
                 <table>
-                    <thead><tr><th>N°</th><th>Nom & Prénom</th><th>Poste</th><th>Salaire de Base</th><th>Primes</th><th>Acomptes</th><th>Net à Payer</th><th>Signature</th></tr></thead>
+                    <thead><tr><th>N°</th><th>Nom & Prenom</th><th>Poste</th><th>Salaire de Base</th><th>Primes</th><th>Acomptes</th><th>Net à Payer</th><th>Signature</th></tr></thead>
                     <tbody>{lignes}</tbody>
-                    <tfoot><tr style="background-color: #000080; color: #FFFFFF; font-weight: bold;"><td colspan="6" style="text-align: right;">TOTAL GÉNÉRAL :</td><td style="text-align: right; white-space: nowrap;">{total_net} FCFA</td><td></td></tr></tfoot>
+                    <tfoot><tr style="background-color: #000080; color: #FFFFFF; font-weight: bold;"><td colspan="6" style="text-align: right;">TOTAL GENERAL :</td><td style="text-align: right; white-space: nowrap;">{total_net} FCFA</td><td></td></tr></tfoot>
                 </table>
             </div>
         </body>
@@ -126,7 +143,6 @@ def afficher_etat_paie_administration(mois, date_paie):
         )
         components.html(html_content, height=620, scrolling=True)
     except Exception as e:
-        db.rollback()
         st.error(f"Erreur technique (Administration) : {e}")
     finally:
         db.close()
@@ -171,47 +187,26 @@ def afficher_etat_paie_vacataires(mois, date_paie, cycle_filtre="Tous les cycles
         cahier_entries = cahier_query.all()
 
         heures_par_cycle = {ens.id: {"Collège": 0.0, "Lycée": 0.0} for ens in tous_enseignants}
+        matieres_par_cycle = {ens.id: {"Collège": set(), "Lycée": set()} for ens in tous_enseignants}
         cycles_detectes = {ens.id: set() for ens in tous_enseignants}
 
         mots_lycee_kw = ["lycée", "lycee", "2de", "2nd", "seconde", "1ere", "1ère", "premiere", "terminale", "tle"]
         mots_college_kw = ["collège", "college", "6eme", "6ème", "5eme", "5ème", "4eme", "4ème", "3eme", "3ème"]
 
-        # ÉTAPE 1 : Détection intelligente des cycles par enseignant (autorise la multi-appartenance si l'professeur enseigne dans les deux)
-        for ens in tous_enseignants:
-            txt_prof = f"{getattr(ens, 'classes_attribuees', '')} {getattr(ens, 'classes', '')} {getattr(ens, 'matieres_attribuees', '')}".lower()
-            is_lycee = any(kw in txt_prof for kw in mots_lycee_kw) or any(k in txt_prof for k in ["tle", "2de", "2nd", "seconde", "1ere", "1ère", "premiere", "terminale"])
-            is_college = any(kw in txt_prof for kw in mots_college_kw) or any(k in txt_prof for k in ["6eme", "6ème", "5eme", "5ème", "4eme", "4ème", "3eme", "3ème"])
-            
-            if is_lycee:
-                cycles_detectes[ens.id].add("Lycée")
-            if is_college:
-                cycles_detectes[ens.id].add("Collège")
-
-        # ÉTAPE 2 : Analyse du cahier de texte pour ventiler les heures dans les cycles réels
         for entry in cahier_entries:
-            date_c = getattr(entry, "date_cours", None)
-            if not date_c:
-                continue
-            
-            if isinstance(date_c, str):
-                parsed_date = None
-                for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
-                    try:
-                        parsed_date = datetime.strptime(date_c, fmt)
-                        break
-                    except ValueError:
-                        continue
-                date_c = parsed_date
-
-            if not date_c or not hasattr(date_c, "month") or not hasattr(date_c, "year"):
-                continue
-
-            if date_c.month != num_mois or date_c.year != annee_mois:
+            date_c = parse_date_securisee(getattr(entry, "date_cours", None))
+            if not date_c or date_c.month != num_mois or date_c.year != annee_mois:
                 continue
 
             classe_entry = dict_classes_id.get(getattr(entry, "classe_id", None))
             matched_ens_id = getattr(entry, "enseignant_id", None)
+            nom_mat_entry = ""
             
+            if entry.matiere_id:
+                mat_obj = dict_matieres_id.get(entry.matiere_id)
+                if mat_obj:
+                    nom_mat_entry = getattr(mat_obj, "libelle", "") or getattr(mat_obj, "nom", "")
+
             if not matched_ens_id or str(getattr(entry, "auteur_saisie", "")).lower() in ["admin", "admin_rahmat", "directeur", "censeur"]:
                 matiere_entree_id = getattr(entry, "matiere_id", None)
                 classe_entree_id = getattr(entry, "classe_id", None)
@@ -237,8 +232,7 @@ def afficher_etat_paie_vacataires(mois, date_paie, cycle_filtre="Tous les cycles
             if not matched_ens_id:
                 continue
 
-            classe_str = f"{getattr(classe_entry, 'cycle', '')} {getattr(classe_entry, 'libelle', '')}".lower() if classe_entry else ""
-            is_lycee_cours = any(kw in classe_str for kw in mots_lycee_kw) or any(k in classe_str for k in ["tle", "2de", "2nd", "seconde", "1ere", "1ère", "premiere", "terminale"]) or (classe_entry and str(getattr(classe_entry, "cycle", "")).lower() == "lycée")
+            is_lycee_cours = is_cours_lycee(classe_entry, mots_lycee_kw)
             cycle_nom = "Lycée" if is_lycee_cours else "Collège"
 
             duree_str = str(getattr(entry, "duree_seance", "1"))
@@ -249,8 +243,25 @@ def afficher_etat_paie_vacataires(mois, date_paie, cycle_filtre="Tous les cycles
                 heures_par_cycle[matched_ens_id] = {"Collège": 0.0, "Lycée": 0.0}
             heures_par_cycle[matched_ens_id][cycle_nom] += duree_val
             cycles_detectes[matched_ens_id].add(cycle_nom)
+            
+            if nom_mat_entry:
+                matieres_par_cycle[matched_ens_id][cycle_nom].add(nom_mat_entry)
 
-        # Si aucun cycle textuel ni heure n'est détecté, on attribue un cycle par défaut basé sur la classe unique
+        for ens in tous_enseignants:
+            txt_prof = f"{getattr(ens, 'classes_attribuees', '')} {getattr(ens, 'classes', '')} {getattr(ens, 'matieres_attribuees', '')}".lower()
+            is_lycee = any(kw in txt_prof for kw in mots_lycee_kw) or any(k in txt_prof for k in ["tle", "2de", "2nd", "seconde", "1ere", "1ère", "premiere", "terminale"])
+            is_college = any(kw in txt_prof for kw in mots_college_kw) or any(k in txt_prof for k in ["6eme", "6ème", "5eme", "5ème", "4eme", "4ème", "3eme", "3ème"])
+            mat_base = getattr(ens, 'matieres_attribuees', '') or getattr(ens, 'matieres', '')
+            
+            if is_lycee:
+                cycles_detectes[ens.id].add("Lycée")
+                if mat_base and not matieres_par_cycle[ens.id]["Lycée"]:
+                    matieres_par_cycle[ens.id]["Lycée"].add(mat_base)
+            if is_college:
+                cycles_detectes[ens.id].add("Collège")
+                if mat_base and not matieres_par_cycle[ens.id]["Collège"]:
+                    matieres_par_cycle[ens.id]["Collège"].add(mat_base)
+
         for ens_id, cycles_dict in heures_par_cycle.items():
             if not cycles_detectes[ens_id]:
                 if cycles_dict["Lycée"] > 0 and cycles_dict["Collège"] == 0:
@@ -260,25 +271,22 @@ def afficher_etat_paie_vacataires(mois, date_paie, cycle_filtre="Tous les cycles
                 else:
                     cycles_detectes[ens_id].add("Collège")
 
-        # ÉTAPE 3 : Récupération globale des acomptes depuis la table Depense
         acomptes_depenses_dict = {}
-        try:
-            depenses_query = db.query(Depense).filter(Depense.school_id == school_id) if school_id else db.query(Depense)
-            for dep in depenses_query.all():
-                libelle_dep = str(getattr(dep, "libelle", "") or getattr(dep, "motif", "") or "").lower()
-                beneficiaire_dep = str(getattr(dep, "beneficiaire", "") or "").lower()
-                if any(k in libelle_dep for k in ["acompte", "avance", "paie"]):
-                    montant_dep = float(getattr(dep, "montant", 0.0) or 0.0)
-                    for ens in tous_enseignants:
-                        nom_p = str(getattr(ens, "nom", "")).strip().lower()
-                        prenom_p = str(getattr(ens, "prenom", "")).strip().lower()
-                        nom_complet_ens = f"{nom_p} {prenom_p}".strip()
-                        if (nom_p and nom_p in libelle_dep) or (nom_p and nom_p in beneficiaire_dep) or \
-                           (prenom_p and prenom_p in libelle_dep) or (prenom_p and prenom_p in beneficiaire_dep) or \
-                           (nom_complet_ens and nom_complet_ens in libelle_dep):
-                            acomptes_depenses_dict[ens.id] = acomptes_depenses_dict.get(ens.id, 0.0) + montant_dep
-        except Exception:
-            db.rollback()
+        depenses_query = db.query(Depense).filter(Depense.school_id == school_id) if school_id else db.query(Depense)
+        depenses_list = depenses_query.all() if depenses_query else []
+        for dep in depenses_list:
+            libelle_dep = str(getattr(dep, "libelle", "") or getattr(dep, "motif", "") or "").lower()
+            beneficiaire_dep = str(getattr(dep, "beneficiaire", "") or "").lower()
+            if any(k in libelle_dep for k in ["acompte", "avance", "paie"]):
+                montant_dep = float(getattr(dep, "montant", 0.0) or 0.0)
+                for ens in tous_enseignants:
+                    nom_p = str(getattr(ens, "nom", "")).strip().lower()
+                    prenom_p = str(getattr(ens, "prenom", "")).strip().lower()
+                    nom_complet_ens = f"{nom_p} {prenom_p}".strip()
+                    if (nom_p and nom_p in libelle_dep) or (nom_p and nom_p in beneficiaire_dep) or \
+                       (prenom_p and prenom_p in libelle_dep) or (prenom_p and prenom_p in beneficiaire_dep) or \
+                       (nom_complet_ens and nom_complet_ens in libelle_dep):
+                        acomptes_depenses_dict[ens.id] = acomptes_depenses_dict.get(ens.id, 0.0) + montant_dep
 
         lignes_paie_data = []
         for ens_id, cycles_dict in heures_par_cycle.items():
@@ -286,7 +294,7 @@ def afficher_etat_paie_vacataires(mois, date_paie, cycle_filtre="Tous les cycles
             if not ens:
                 continue
             nom_ens = f"{getattr(ens, 'nom', '')} {getattr(ens, 'prenom', '')}".strip() or "Enseignant"
-            mat_attr = getattr(ens, "matieres_attribuees", None) or getattr(ens, "matieres", None) or "Matière non spécifiée"
+            
             retenue = float(getattr(ens, "retenue", 0.0) or 0.0)
             acompte_base = float(getattr(ens, "acompte", 0.0) or 0.0)
             acompte_total = acompte_base + acomptes_depenses_dict.get(ens.id, 0.0)
@@ -312,6 +320,13 @@ def afficher_etat_paie_vacataires(mois, date_paie, cycle_filtre="Tous les cycles
                     doit_afficher = True
 
                 if doit_afficher:
+                    mats_cycle = list(matieres_par_cycle.get(ens_id, {}).get(cycle_nom, set()))
+                    if not mats_cycle:
+                        mat_attr = getattr(ens, "matieres_attribuees", None) or getattr(ens, "matieres", None) or ""
+                        if mat_attr:
+                            mats_cycle = [m.strip() for m in mat_attr.split(",")]
+                    
+                    matiere_str = ", ".join(mats_cycle) if mats_cycle else "Matière non spécifiée"
                     taux_horaire = 2000.0 if cycle_nom == "Lycée" else 1500.0
                     brut = heures * taux_horaire
                     net_a_payer = max(0.0, brut - retenue - (acompte_total if cycle_nom == list(cycles_valides)[0] else 0.0))
@@ -319,7 +334,7 @@ def afficher_etat_paie_vacataires(mois, date_paie, cycle_filtre="Tous les cycles
                     lignes_paie_data.append({
                         'cycle_ligne': cycle_nom,
                         'nom': f"{nom_ens} ({cycle_nom})",
-                        'matiere': f"{mat_attr} — {cycle_nom}",
+                        'matiere': f"{matiere_str} — {cycle_nom}",
                         'heures': heures,
                         'taux': taux_horaire,
                         'brut': brut,
@@ -424,7 +439,6 @@ def afficher_etat_paie_vacataires(mois, date_paie, cycle_filtre="Tous les cycles
 
         components.html(html_content, height=620, scrolling=True)
     except Exception as e:
-        db.rollback()
         st.error(f"Erreur technique (Vacataires) : {e}")
     finally:
         db.close()

@@ -6,7 +6,6 @@ from database.audit import log_action_erp
 from database.db_config import SessionLocal
 from database.models import Classe, Enseignant, Matiere, School, User
 
-
 SYNONYMES_MATIERES = {
     "sciences physiques": "physique chimie",
     "physique chimie": "physique chimie",
@@ -81,7 +80,7 @@ def get_matieres_dynamiques(selected_classes_labels, classes_cycle, ecole_active
 
 def afficher_enseignants():
     st.subheader("👥 Gestion du Corps Professoral & Enseignants")
-    st.markdown("Suivi, administration et affectations pédagogiques des enseignants.")
+    st.markdown("Suivi, administration et affectations pédagogiques ciblées des enseignants.")
     st.markdown("---")
 
     school_id = st.session_state.get("school_id")
@@ -176,6 +175,7 @@ def afficher_enseignants():
 
                     if st.session_state.get(f"editing_prof_{prof.id}", False):
                         st.markdown(f"**Modification : {prof.nom} {prof.prenom}**")
+                        
                         col_edit1, col_edit2 = st.columns(2)
                         with col_edit1:
                             new_nom = st.text_input("Nom", value=prof.nom, key=f"edit_nom_{prof.id}")
@@ -185,16 +185,23 @@ def afficher_enseignants():
                             new_tel = st.text_input("Téléphone", value=prof.telephone or "", key=f"edit_tel_{prof.id}")
 
                         classes_str_actuelle = getattr(prof, "classes_attribuees", getattr(prof, "classes", "")) or ""
-                        matieres_str_actuelle = getattr(prof, "matieres_attribuees", getattr(prof, "matieres", "")) or ""
                         current_classes = [c.strip() for c in classes_str_actuelle.split(",") if c.strip()]
-                        current_matieres = [m.strip().title() for m in matieres_str_actuelle.split(",") if m.strip()]
 
                         opt_classes = sorted(list(set(noms_classes + current_classes)))
                         new_classes = st.multiselect("Classes tenues", options=opt_classes, default=[c for c in current_classes if c in opt_classes], key=f"edit_cls_{prof.id}")
 
-                        dyn_mats = get_matieres_dynamiques(new_classes, classes_cycle, ecole_active_id, cycle_en_cours, db)
-                        opt_matieres = sorted(list(set(dyn_mats + current_matieres)))
-                        new_matieres = st.multiselect("Matières dispensées", options=opt_matieres, default=[m for m in current_matieres if m in opt_matieres], key=f"edit_mats_{prof.id}")
+                        st.markdown("##### 🔗 Précision des matières par classe")
+                        affectations_detaillees = {}
+                        for cls in new_classes:
+                            mats_dispo_cls = get_matieres_dynamiques([cls], classes_cycle, ecole_active_id, cycle_en_cours, db)
+                            # Correction clé : Pas de pré-sélection globale en bloc pour éviter l'écrasement des modifications ciblées
+                            mats_choisies = st.multiselect(
+                                f"Matières enseignées par le professeur en **{cls}**",
+                                options=mats_dispo_cls,
+                                key=f"edit_mats_cls_{prof.id}_{cls}"
+                            )
+                            if mats_choisies:
+                                affectations_detaillees[cls] = mats_choisies
 
                         col_btn1, col_btn2 = st.columns(2)
                         with col_btn1:
@@ -208,8 +215,11 @@ def afficher_enseignants():
                             prof.telephone = new_tel
                             if hasattr(prof, "email"):
                                 prof.email = new_email
+                            
                             str_classes_new = ", ".join(new_classes) if new_classes else "Aucune"
-                            str_matieres_new = ", ".join(new_matieres) if new_matieres else "Aucune"
+                            toutes_mats_apres = list(set([m for mats in affectations_detaillees.values() for m in mats]))
+                            str_matieres_new = ", ".join(toutes_mats_apres) if toutes_mats_apres else "Aucune"
+
                             if hasattr(prof, "classes_attribuees"):
                                 prof.classes_attribuees = str_classes_new
                             if hasattr(prof, "classes"):
@@ -218,6 +228,7 @@ def afficher_enseignants():
                                 prof.matieres_attribuees = str_matieres_new
                             if hasattr(prof, "matieres"):
                                 prof.matieres = str_matieres_new
+                                
                             db.commit()
                             st.success("Mis à jour avec succès !")
                             st.session_state[f"editing_prof_{prof.id}"] = False
@@ -241,9 +252,19 @@ def afficher_enseignants():
                         prenom_prof = st.text_input("Prénom *", key="add_prenom")
                         tel_prof = st.text_input("Téléphone (WhatsApp)", key="add_tel")
 
-                    classes_attribuees = st.multiselect("Classes", noms_classes, key="add_classes")
-                    dyn_mats_add = get_matieres_dynamiques(classes_attribuees, classes_cycle, ecole_active_id, cycle_en_cours, db)
-                    matieres_attribuees = st.multiselect("Matières", dyn_mats_add, key="add_matieres")
+                    classes_attribuees = st.multiselect("Classes tenues", noms_classes, key="add_classes")
+                    
+                    st.markdown("##### 🔗 Précision des matières par classe")
+                    affectations_ajout = {}
+                    for cls in classes_attribuees:
+                        mats_dispo_cls = get_matieres_dynamiques([cls], classes_cycle, ecole_active_id, cycle_en_cours, db)
+                        mats_choisies = st.multiselect(
+                            f"Matières enseignées par le professeur en **{cls}**",
+                            options=mats_dispo_cls,
+                            key=f"add_mats_cls_{cls}"
+                        )
+                        if mats_choisies:
+                            affectations_ajout[cls] = mats_choisies
 
                     submitted_prof = st.form_submit_button("💾 Enregistrer", type="primary")
                     if submitted_prof:
@@ -261,7 +282,8 @@ def afficher_enseignants():
                                     nouvel_enseignant.email = email_prof.strip() if email_prof else None
 
                                 str_classes = ", ".join(classes_attribuees) if classes_attribuees else "Aucune"
-                                str_matieres = ", ".join(matieres_attribuees) if matieres_attribuees else "Aucune"
+                                toutes_mats_ajout = list(set([m for mats in affectations_ajout.values() for m in mats]))
+                                str_matieres = ", ".join(toutes_mats_ajout) if toutes_mats_ajout else "Aucune"
                                 
                                 if hasattr(nouvel_enseignant, "classes_attribuees"):
                                     nouvel_enseignant.classes_attribuees = str_classes

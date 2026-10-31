@@ -3,7 +3,6 @@ from io import BytesIO
 import unicodedata
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 from database.db_config import SessionLocal
 from database.models import (
     ActivityLog,
@@ -20,14 +19,14 @@ SYNONYMES_MATIERES = {
     "physique chimie": "physique chimie",
     "svt": "science de la vie et de la terre",
     "science de la vie et de la terre": "science de la vie et de la terre",
-    "eps": "education physique et sportive",
-    "education physique et sportive": "education physique et sportive",
+    "eps": "eps",
+    "education physique": "eps",
+    "education physique et sportive": "eps",
     "economie familiale": "economie familiale et sociale",
     "economie familiale et sociale": "economie familiale et sociale",
     "histoire geographie": "histoire geographie",
     "histoire-geographie": "histoire geographie",
 }
-
 
 def normaliser_chaine(texte):
     if not texte or pd.isna(texte):
@@ -38,7 +37,6 @@ def normaliser_chaine(texte):
         sans_accent.lower().replace("-", " ").replace("_", " ").split()
     )
     return SYNONYMES_MATIERES.get(nettoye, nettoye)
-
 
 def afficher_supervision_cahier():
     st.markdown("""
@@ -63,13 +61,6 @@ def afficher_supervision_cahier():
             padding: 15px 20px;
             margin-bottom: 20px;
         }
-        @media print {
-            body { background-color: white !important; color: black !important; }
-            .stButton, .stSelectbox, sidebar, header, footer, [data-testid="stSidebar"], .filter-box { display: none !important; }
-            .printable-area { width: 100% !important; padding: 10px !important; margin: 0 !important; }
-            .audit-card { background: white !important; color: black !important; border: 2px solid black; border-left: none; box-shadow: none; }
-            .audit-card h2, .audit-card p { color: black !important; }
-        }
     </style>
     """, unsafe_allow_html=True)
 
@@ -79,7 +70,6 @@ def afficher_supervision_cahier():
 
     school_id = st.session_state.get("school_id")
     is_super_admin = st.session_state.get("is_super_admin", False)
-    username = st.session_state.get("username", "admin")
     cycle_en_cours = st.session_state.get("cycle_actif", "Collège")
 
     if not school_id and not is_super_admin:
@@ -106,8 +96,6 @@ def afficher_supervision_cahier():
         ).first()
         libelle_annee = annee_active.libelle if annee_active else "2026-2027"
 
-        st.markdown('<div class="printable-area">', unsafe_allow_html=True)
-        
         st.markdown(f"""
             <div class="audit-card">
                 <div style="font-size: 3.5rem; margin-right: 25px;">🏛️</div>
@@ -123,8 +111,7 @@ def afficher_supervision_cahier():
         ).all()
 
         if not classes_cycle:
-            st.warning(f"⚠️ Aucune classe enregistrée pour cet établissement.")
-            st.markdown("</div>", unsafe_allow_html=True)
+            st.warning("⚠️ Aucune classe enregistrée pour cet établissement.")
             return
 
         st.markdown('<div class="filter-box">', unsafe_allow_html=True)
@@ -140,7 +127,6 @@ def afficher_supervision_cahier():
         
         if not classe_obj:
             st.warning("⚠️ Classe sélectionnée invalide.")
-            st.markdown("</div>", unsafe_allow_html=True)
             return
 
         matieres_query = db.query(Matiere).filter(
@@ -155,7 +141,6 @@ def afficher_supervision_cahier():
 
         if not matieres_classe:
             st.info(f"Aucune matière configurée pour la classe de **{classe_suivie}**.")
-            st.markdown("</div>", unsafe_allow_html=True)
             return
 
         libelle_classe_norm = normaliser_chaine(classe_suivie)
@@ -171,9 +156,9 @@ def afficher_supervision_cahier():
         total_heures_prevues_globale = 0.0
         total_heures_realisees_globale = 0.0
 
-        # Récupération de TOUTES les entrées du cahier de texte de l'établissement
-        toutes_entrees_ecole = db.query(CahierTexte).filter(
+        toutes_entrees_classe = db.query(CahierTexte).filter(
             CahierTexte.school_id == resolved_school_id,
+            CahierTexte.classe_id == classe_obj.id
         ).all()
 
         for mat in matieres_classe:
@@ -222,24 +207,10 @@ def afficher_supervision_cahier():
             else:
                 heures_prevues_periode = heures_prevues
 
-            # CORRECTION SANS ERREUR D'ATTRIBUT : Utilisation sécurisée de l'auteur et des liaisons
-            entrees_cahier = []
-            for e in toutes_entrees_ecole:
-                e_classe_id = getattr(e, 'classe_id', None)
-                appartient_classe = (e_classe_id == classe_obj.id)
-                if not appartient_classe and e_classe_id:
-                    cls_entree = db.query(Classe).filter(Classe.id == e_classe_id).first()
-                    if cls_entree and normaliser_chaine(cls_entree.libelle) == libelle_classe_norm:
-                        appartient_classe = True
-
-                if appartient_classe:
-                    e_mat_id = getattr(e, 'matiere_id', None)
-                    matiere_entree = db.query(Matiere).filter(Matiere.id == e_mat_id).first() if e_mat_id else None
-                    nom_matiere_entree = normaliser_chaine(getattr(matiere_entree, 'libelle', None) or getattr(matiere_entree, 'nom', '')) if matiere_entree else ""
-                    texte_entree = normaliser_chaine(f"{getattr(e, 'titre', '')} {getattr(e, 'contenu', '')}")
-
-                    if (e_mat_id == mat.id) or (nom_matiere_entree == norm_key) or (norm_key in texte_entree) or (e_mat_id is None):
-                        entrees_cahier.append(e)
+            entrees_cahier = [
+                e for e in toutes_entrees_classe
+                if getattr(e, 'matiere_id', None) == mat.id
+            ]
 
             heures_realisees = 0.0
             for e in entrees_cahier:
@@ -290,7 +261,7 @@ def afficher_supervision_cahier():
                 "Dernier Chapitre / Notions": dernier_chapitre,
                 "Appréciation Inspection": appreciation,
             })
-            
+        
         taux_global_classe = (total_heures_realisees_globale / total_heures_prevues_globale * 100) if total_heures_prevues_globale > 0 else 0.0
         
         st.markdown("#### 📊 Synthèse Globale de la Classe")
@@ -302,13 +273,13 @@ def afficher_supervision_cahier():
 
         col_btn1, col_btn2 = st.columns([1, 1])
         with col_btn1:
-            components.html(
+            st.markdown(
                 """
                 <div style="display: flex; align-items: center; height: 38px;">
                     <button onclick="parent.window.print()" style="background-color: #2b5876; color: white; border: none; padding: 0.5rem 1.2rem; font-size: 0.9rem; font-weight: 600; border-radius: 6px; cursor: pointer; font-family: sans-serif; white-space: nowrap; width: 100%;">🖨️ Imprimer le Rapport Pédagogique</button>
                 </div>
                 """,
-                height=45,
+                unsafe_allow_html=True,
             )
         with col_btn2:
             df_suivi = pd.DataFrame(data_suivi)
@@ -323,8 +294,5 @@ def afficher_supervision_cahier():
         st.markdown("#### Détail par Discipline")
         st.dataframe(df_suivi, use_container_width=True)
 
-        st.markdown("</div>", unsafe_allow_html=True)
     finally:
         db.close()
-
-afficher_supervision_cahier = afficher_supervision_cahier
