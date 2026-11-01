@@ -180,6 +180,37 @@ def afficher_cahier_texte():
                                 st.markdown("---")
                                 st.markdown("##### ⚙️ Administration : Gérer la séance")
                                 
+                                # Ajout direct du sélecteur pour réassigner le professeur sans recréer la séance
+                                list_noms_ens = list(dict_ens_options.keys())
+                                current_ens_index = 0
+                                if hasattr(e, "enseignant_id") and e.enseignant_id:
+                                    for idx, nom_opt in enumerate(list_noms_ens):
+                                        if dict_ens_options.get(nom_opt) == e.enseignant_id:
+                                            current_ens_index = idx
+                                            break
+
+                                col_reassign1, col_reassign2 = st.columns([2, 1])
+                                with col_reassign1:
+                                    nouveau_prof_nom = st.selectbox(
+                                        "Réassigner l'enseignant",
+                                        options=list_noms_ens,
+                                        index=current_ens_index,
+                                        key=f"reassign_ens_{e.id}"
+                                    )
+                                with col_reassign2:
+                                    st.write("")
+                                    st.write("")
+                                    if st.button("👤 Changer prof", key=f"btn_reassign_prof_{e.id}"):
+                                        try:
+                                            e.enseignant_id = dict_ens_options.get(nouveau_prof_nom)
+                                            db.commit()
+                                            st.success("✅ Enseignant réassigné avec succès !")
+                                            st.rerun()
+                                        except Exception as err:
+                                            db.rollback()
+                                            st.error(f"Erreur : {err}")
+
+                                st.markdown("---")
                                 current_date_val = e.date_cours.date() if isinstance(e.date_cours, datetime) else datetime.now().date()
                                 current_time_val = e.date_cours.time() if isinstance(e.date_cours, datetime) else datetime.now().time()
                                 
