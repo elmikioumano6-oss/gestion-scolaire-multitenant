@@ -95,7 +95,6 @@ def afficher_cahier_texte():
     school_name = st.session_state.get("school_name", "Établissement")
     cycle_en_cours = st.session_state.get("cycle_actif", "Collège")
 
-    # Détermination stricte du statut Admin
     est_admin = is_super_admin or "admin" in role_utilisateur or "directeur" in role_utilisateur
 
     if not school_id and not is_super_admin:
@@ -177,15 +176,13 @@ def afficher_cahier_texte():
                             st.write(f"**Contenu :**")
                             st.write(e.contenu)
 
-                            # --- SECTION RÉSERVÉE UNIQUEMENT À L'ADMIN : MODIFICATION DE L'HEURE ET DE LA DURÉE ---
                             if est_admin:
                                 st.markdown("---")
-                                st.markdown("##### ⚙️ Administration : Modifier la séance")
+                                st.markdown("##### ⚙️ Administration : Gérer la séance")
                                 
                                 current_date_val = e.date_cours.date() if isinstance(e.date_cours, datetime) else datetime.now().date()
                                 current_time_val = e.date_cours.time() if isinstance(e.date_cours, datetime) else datetime.now().time()
                                 
-                                # Extraction de la valeur numérique de la durée actuelle (ex: "2 heures" -> 2.0)
                                 duree_actuelle_str = str(getattr(e, "duree_seance", "1 heure"))
                                 default_duree_index = 0
                                 try:
@@ -209,16 +206,41 @@ def afficher_cahier_texte():
                                         key=f"edit_duree_{e.id}"
                                     )
 
-                                if st.button("💾 Mettre à jour la séance", key=f"btn_update_seance_{e.id}"):
-                                    try:
-                                        e.date_cours = datetime.combine(nouvelle_date, nouvelle_heure)
-                                        e.duree_seance = f"{int(nouvelle_duree)} heure{'s' if nouvelle_duree > 1 else ''}"
-                                        db.commit()
-                                        st.success("✅ Séance mise à jour avec succès !")
-                                        st.rerun()
-                                    except Exception as err:
-                                        db.rollback()
-                                        st.error(f"Erreur lors de la mise à jour : {err}")
+                                col_btn_mod, col_btn_supp = st.columns(2)
+                                with col_btn_mod:
+                                    if st.button("💾 Mettre à jour", key=f"btn_update_seance_{e.id}"):
+                                        try:
+                                            e.date_cours = datetime.combine(nouvelle_date, nouvelle_heure)
+                                            e.duree_seance = f"{int(nouvelle_duree)} heure{'s' if nouvelle_duree > 1 else ''}"
+                                            db.commit()
+                                            st.success("✅ Séance mise à jour avec succès !")
+                                            st.rerun()
+                                        except Exception as err:
+                                            db.rollback()
+                                            st.error(f"Erreur lors de la mise à jour : {err}")
+
+                                with col_btn_supp:
+                                    if st.button("🗑️ Supprimer la séance", key=f"btn_delete_seance_{e.id}", type="secondary"):
+                                        st.session_state[f"confirm_del_seance_{e.id}"] = True
+
+                                if st.session_state.get(f"confirm_del_seance_{e.id}", False):
+                                    st.warning("⚠️ Voulez-vous vraiment supprimer définitivement cette entrée du cahier de texte ?")
+                                    col_c1, col_c2 = st.columns(2)
+                                    with col_c1:
+                                        if st.button("Oui, supprimer", key=f"yes_del_seance_{e.id}", type="primary"):
+                                            try:
+                                                db.delete(e)
+                                                db.commit()
+                                                st.success("✅ Séance supprimée avec succès !")
+                                                st.session_state[f"confirm_del_seance_{e.id}"] = False
+                                                st.rerun()
+                                            except Exception as err:
+                                                db.rollback()
+                                                st.error(f"Erreur lors de la suppression : {err}")
+                                    with col_c2:
+                                        if st.button("Annuler", key=f"cancel_del_seance_{e.id}"):
+                                            st.session_state[f"confirm_del_seance_{e.id}"] = False
+                                            st.rerun()
 
         with tab2:
             st.markdown("#### Saisie de Cours")
@@ -231,7 +253,6 @@ def afficher_cahier_texte():
                 date_cours = st.date_input("Date du cours", value=datetime.now().date(), key="form_cahier_date")
                 duree_cours = st.selectbox("Durée de la séance", options=[1.0, 2.0, 3.0, 4.0], format_func=lambda x: f"{int(x)} heure{'s' if x > 1 else ''}", key="form_cahier_duree")
 
-            # --- DÉTECTION STRICTE CLASSE + MATIÈRE ---
             enseignant_suggere_nom = "Aucun titulaire détecté"
             enseignant_id_final = None
             
@@ -309,6 +330,8 @@ def afficher_cahier_texte():
                     st.success("✅ Entrée enregistrée avec succès !")
                     st.rerun()
 
+    except Exception as e:
+        st.error(f"Une erreur est survenue lors de l'exécution : {e}")
     finally:
         db.close()
 
