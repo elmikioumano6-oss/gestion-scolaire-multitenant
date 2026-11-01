@@ -95,6 +95,9 @@ def afficher_cahier_texte():
     school_name = st.session_state.get("school_name", "Établissement")
     cycle_en_cours = st.session_state.get("cycle_actif", "Collège")
 
+    # Détermination stricte du statut Admin
+    est_admin = is_super_admin or "admin" in role_utilisateur or "directeur" in role_utilisateur
+
     if not school_id and not is_super_admin:
         st.warning("⚠️ Veuillez vous connecter pour accéder à cette section.")
         return
@@ -165,7 +168,7 @@ def afficher_cahier_texte():
                             if ens_lie:
                                 nom_enseignant_affiche = f"{getattr(ens_lie, 'nom', '')} {getattr(ens_lie, 'prenom', '')}".strip()
 
-                        date_str = e.date_cours.strftime("%d/%m/%Y") if e.date_cours else "N/D"
+                        date_str = e.date_cours.strftime("%d/%m/%Y %H:%M") if isinstance(e.date_cours, datetime) else (str(e.date_cours) if e.date_cours else "N/D")
                         duree_val = getattr(e, "duree_seance", "1 heure")
                         titre = e.titre or 'Séance sans titre'
 
@@ -173,6 +176,49 @@ def afficher_cahier_texte():
                             st.write(f"**Enseignant(e) :** {nom_enseignant_affiche}")
                             st.write(f"**Contenu :**")
                             st.write(e.contenu)
+
+                            # --- SECTION RÉSERVÉE UNIQUEMENT À L'ADMIN : MODIFICATION DE L'HEURE ET DE LA DURÉE ---
+                            if est_admin:
+                                st.markdown("---")
+                                st.markdown("##### ⚙️ Administration : Modifier la séance")
+                                
+                                current_date_val = e.date_cours.date() if isinstance(e.date_cours, datetime) else datetime.now().date()
+                                current_time_val = e.date_cours.time() if isinstance(e.date_cours, datetime) else datetime.now().time()
+                                
+                                # Extraction de la valeur numérique de la durée actuelle (ex: "2 heures" -> 2.0)
+                                duree_actuelle_str = str(getattr(e, "duree_seance", "1 heure"))
+                                default_duree_index = 0
+                                try:
+                                    val_num = float(''.join([c for c in duree_actuelle_str if c.isdigit() or c == '.']))
+                                    if val_num in [1.0, 2.0, 3.0, 4.0]:
+                                        default_duree_index = [1.0, 2.0, 3.0, 4.0].index(val_num)
+                                except Exception:
+                                    default_duree_index = 0
+
+                                col_m1, col_m2, col_m3 = st.columns(3)
+                                with col_m1:
+                                    nouvelle_date = st.date_input("Date", value=current_date_val, key=f"edit_date_{e.id}")
+                                with col_m2:
+                                    nouvelle_heure = st.time_input("Heure", value=current_time_val, key=f"edit_time_{e.id}")
+                                with col_m3:
+                                    nouvelle_duree = st.selectbox(
+                                        "Durée", 
+                                        options=[1.0, 2.0, 3.0, 4.0], 
+                                        index=default_duree_index,
+                                        format_func=lambda x: f"{int(x)} heure{'s' if x > 1 else ''}", 
+                                        key=f"edit_duree_{e.id}"
+                                    )
+
+                                if st.button("💾 Mettre à jour la séance", key=f"btn_update_seance_{e.id}"):
+                                    try:
+                                        e.date_cours = datetime.combine(nouvelle_date, nouvelle_heure)
+                                        e.duree_seance = f"{int(nouvelle_duree)} heure{'s' if nouvelle_duree > 1 else ''}"
+                                        db.commit()
+                                        st.success("✅ Séance mise à jour avec succès !")
+                                        st.rerun()
+                                    except Exception as err:
+                                        db.rollback()
+                                        st.error(f"Erreur lors de la mise à jour : {err}")
 
         with tab2:
             st.markdown("#### Saisie de Cours")
