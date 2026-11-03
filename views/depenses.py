@@ -154,81 +154,90 @@ def afficher_depenses():
                                 st.rerun()
 
             elif type_saisie == "Salaire Vacation (Horaire)":
-                col1, col2 = st.columns(2)
-                with col1:
-                    enseignant_concerne = st.selectbox(
-                        "Enseignant / Vacataire *",
-                        options=(liste_profs if liste_profs else ["Aucun enseignant enregistré"]),
-                    )
-                    cycle_vacation = st.selectbox("Cycle d'enseignement (Vacation)", ["Collège", "Lycée"], index=0 if cycle_en_cours == "Collège" else 1)
+                with st.form("form_valider_vacation"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        enseignant_concerne = st.selectbox(
+                            "Enseignant / Vacataire *",
+                            options=(liste_profs if liste_profs else ["Aucun enseignant enregistré"]),
+                        )
+                        index_defaut_cycle = 0 if cycle_en_cours == "Collège" else 1
+                        cycle_vacation = st.selectbox("Cycle d'enseignement (Vacation)", ["Collège", "Lycée"], index=index_defaut_cycle)
 
-                    # --- MOTEUR DE CALCUL UNIFIÉ (Identique à la Fiche de Paie) ---
-                    heures_auto = 0.0
-                    if enseignants_db and enseignant_concerne != "Aucun enseignant enregistré":
-                        prof_obj = next((e for e in enseignants_db if f"{e.nom} {e.prenom}".strip() == enseignant_concerne or e.nom in enseignant_concerne), None)
-                        if prof_obj:
-                            cahier_entries = db.query(CahierTexte).filter(CahierTexte.school_id == target_school_id).all()
-                            classes_db = db.query(Classe).filter(Classe.school_id == target_school_id).all()
-                            dict_classes_id = {c.id: c for c in classes_db}
-                            matieres_db = db.query(Matiere).filter(Matiere.school_id == target_school_id).all()
-                            dict_matieres_id = {m.id: m for m in matieres_db}
+                        # --- MOTEUR DE CALCUL UNIFIÉ ---
+                        heures_auto = 0.0
+                        if enseignants_db and enseignant_concerne != "Aucun enseignant enregistré":
+                            prof_obj = next((e for e in enseignants_db if f"{e.nom} {e.prenom}".strip() == enseignant_concerne or e.nom in enseignant_concerne), None)
+                            if prof_obj:
+                                cahier_entries = db.query(CahierTexte).filter(CahierTexte.school_id == target_school_id).all()
+                                classes_db = db.query(Classe).filter(Classe.school_id == target_school_id).all()
+                                dict_classes_id = {c.id: c for c in classes_db}
+                                matieres_db = db.query(Matiere).filter(Matiere.school_id == target_school_id).all()
+                                dict_matieres_id = {m.id: m for m in matieres_db}
 
-                            for entry in cahier_entries:
-                                matched_ens_id = getattr(entry, "enseignant_id", None)
-                                classe_entry = dict_classes_id.get(getattr(entry, "classe_id", None))
+                                for entry in cahier_entries:
+                                    matched_ens_id = getattr(entry, "enseignant_id", None)
+                                    classe_entry = dict_classes_id.get(getattr(entry, "classe_id", None))
 
-                                # Recours par matière et classe si l'ID direct est absent ou saisi par admin
-                                if not matched_ens_id or str(getattr(entry, "auteur_saisie", "")).lower() in ["admin", "admin_rahmat", "directeur", "censeur"]:
-                                    matiere_entree_id = getattr(entry, "matiere_id", None)
-                                    classe_entree_id = getattr(entry, "classe_id", None)
-                                    if matiere_entree_id and classe_entree_id:
-                                        matiere_obj_db = dict_matieres_id.get(matiere_entree_id)
-                                        nom_mat_db = str(getattr(matiere_obj_db, "libelle", "") or getattr(matiere_obj_db, "nom", "")).lower() if matiere_obj_db else ""
-                                        mat_attr = str(getattr(prof_obj, "matieres_attribuees", "") or getattr(prof_obj, "matieres", "")).lower()
-                                        cls_attr = str(getattr(prof_obj, "classes_attribuees", "") or getattr(prof_obj, "classes", "")).lower()
-                                        if classe_entry and (classe_entry.libelle.lower() in cls_attr) and (nom_mat_db and nom_mat_db in mat_attr):
+                                    if not matched_ens_id or str(getattr(entry, "auteur_saisie", "")).lower() in ["admin", "admin_rahmat", "directeur", "censeur"]:
+                                        matiere_entree_id = getattr(entry, "matiere_id", None)
+                                        classe_entree_id = getattr(entry, "classe_id", None)
+                                        if matiere_entree_id and classe_entree_id:
+                                            matiere_obj_db = dict_matieres_id.get(matiere_entree_id)
+                                            nom_mat_db = str(getattr(matiere_obj_db, "libelle", "") or getattr(matiere_obj_db, "nom", "")).lower() if matiere_obj_db else ""
+                                            mat_attr = str(getattr(prof_obj, "matieres_attribuees", "") or getattr(prof_obj, "matieres", "")).lower()
+                                            cls_attr = str(getattr(prof_obj, "classes_attribuees", "") or getattr(prof_obj, "classes", "")).lower()
+                                            if classe_entry and (classe_entry.libelle.lower() in cls_attr) and (nom_mat_db and nom_mat_db in mat_attr):
+                                                matched_ens_id = prof_obj.id
+
+                                    if not matched_ens_id:
+                                        texte_entree = f"{getattr(entry, 'auteur_saisie', '')} {getattr(entry, 'cours', '')} {getattr(entry, 'contenu', '')}".lower()
+                                        nom = str(getattr(prof_obj, "nom", "")).strip().lower()
+                                        prenom = str(getattr(prof_obj, "prenom", "")).strip().lower()
+                                        if (nom and nom in texte_entree) or (prenom and prenom in texte_entree):
                                             matched_ens_id = prof_obj.id
 
-                                # Recours textuel global par nom/prénom
-                                if not matched_ens_id:
-                                    texte_entree = f"{getattr(entry, 'auteur_saisie', '')} {getattr(entry, 'cours', '')} {getattr(entry, 'contenu', '')}".lower()
-                                    nom = str(getattr(prof_obj, "nom", "")).strip().lower()
-                                    prenom = str(getattr(prof_obj, "prenom", "")).strip().lower()
-                                    if (nom and nom in texte_entree) or (prenom and prenom in texte_entree):
-                                        matched_ens_id = prof_obj.id
+                                    if matched_ens_id == prof_obj.id:
+                                        classe_str = f"{getattr(classe_entry, 'cycle', '')} {getattr(classe_entry, 'libelle', '')}".lower() if classe_entry else ""
+                                        mots_lycee = ["lycée", "lycee", "2de", "2nd", "seconde", "1ere", "1ère", "premiere", "terminale", "tle"]
+                                        is_lycee_cours = any(kw in classe_str for kw in mots_lycee) or (classe_entry and str(getattr(classe_entry, "cycle", "")).lower() == "lycée")
+                                        cycle_nom = "Lycée" if is_lycee_cours else "Collège"
 
-                                if matched_ens_id == prof_obj.id:
-                                    classe_str = f"{getattr(classe_entry, 'cycle', '')} {getattr(classe_entry, 'libelle', '')}".lower() if classe_entry else ""
-                                    mots_lycee = ["lycée", "lycee", "2de", "2nd", "seconde", "1ere", "1ère", "premiere", "terminale", "tle"]
-                                    is_lycee_cours = any(kw in classe_str for kw in mots_lycee) or (classe_entry and str(getattr(classe_entry, "cycle", "")).lower() == "lycée")
-                                    cycle_nom = "Lycée" if is_lycee_cours else "Collège"
+                                        if cycle_nom == cycle_vacation:
+                                            duree_str = str(getattr(entry, "duree_seance", "1"))
+                                            chiffres = "".join([c for c in duree_str if c.isdigit() or c == '.'])
+                                            heures_auto += float(chiffres) if chiffres else 1.0
 
-                                    if cycle_nom == cycle_vacation:
-                                        duree_str = str(getattr(entry, "duree_seance", "1"))
-                                        chiffres = "".join([c for c in duree_str if c.isdigit() or c == '.'])
-                                        heures_auto += float(chiffres) if chiffres else 1.0
+                        taux_defaut = 1500.0 if cycle_vacation == "Collège" else 2000.0
+                        taux_horaire = st.number_input("Taux Horaire (FCFA)", min_value=0.0, step=100.0, value=taux_defaut)
 
-                    taux_defaut = 1500.0 if cycle_vacation == "Collège" else 2000.0
-                    taux_horaire = st.number_input("Taux Horaire (FCFA)", min_value=0.0, step=100.0, value=taux_defaut)
+                    with col2:
+                        mode_saisie_heures = st.radio("Source du volume horaire", ["Automatique (Cahier de texte)", "Saisie / Ajustement Manuel"], horizontal=True)
+                        if mode_saisie_heures == "Automatique (Cahier de texte)":
+                            nombre_heures = float(heures_auto)
+                            st.info(f"📖 **Heures détectées :** {nombre_heures:g} h")
+                        else:
+                            nombre_heures = st.number_input("Nombre d'heures (Ajustement manuel) *", min_value=0.0, step=0.5, value=float(heures_auto))
 
-                with col2:
-                    mode_saisie_heures = st.radio("Source du volume horaire", ["Automatique (Cahier de texte)", "Saisie / Ajustement Manuel"], horizontal=True)
-                    if mode_saisie_heures == "Automatique (Cahier de texte)":
-                        nombre_heures = float(heures_auto)
-                        st.info(f"📖 **Heures détectées :** {nombre_heures:g} h")
-                    else:
-                        nombre_heures = st.number_input("Nombre d'heures (Ajustement manuel) *", min_value=0.0, step=0.5, value=float(heures_auto))
+                        montant_calcule = taux_horaire * nombre_heures
+                        st.markdown(f"💰 **Montant Total Calculé :** `{formater_fcfa(montant_calcule)} FCFA`")
 
-                    montant_calcule = taux_horaire * nombre_heures
-                    st.markdown(f"💰 **Montant Total Calculé :** `{formater_fcfa(montant_calcule)} FCFA`")
+                        # --- GÉNÉRATION AUTOMATIQUE DU BON DE CAISSE ---
+                        dernier_bon = db.query(Depense).filter(Depense.school_id == target_school_id, Depense.reference_piece.like("BC-VAC-%")).order_by(Depense.id.desc()).first()
+                        if dernier_bon and dernier_bon.reference_piece:
+                            try:
+                                dernier_num = int(dernier_bon.reference_piece.split("-")[-1])
+                                prochain_num = dernier_num + 1
+                            except ValueError:
+                                prochain_num = 1
+                        else:
+                            prochain_num = 1
+                        
+                        defaut_ref_vac = f"BC-VAC-{prochain_num:03d}"
+                        ref_piece = st.text_input("N° de Bon de Caisse / Pièce de paie *", value=defaut_ref_vac)
 
-                with st.form("form_valider_vacation"):
-                    col_f1, col_f2 = st.columns(2)
-                    with col_f1:
-                        ref_piece = st.text_input("N° de Bon de Caisse / Pièce de paie *", value="", placeholder="Ex: BC-VAC-001")
-                    with col_f2:
                         mode_paiement = st.selectbox("Mode de décaissement", ["Espèces (Caisse)", "Virement Bancaire", "Mobile Money (Orange/Moov)"])
-                    date_depense = st.date_input("Date du versement", value=datetime.now())
+                        date_depense = st.date_input("Date du versement", value=datetime.now())
 
                     submitted_vac = st.form_submit_button("💾 Valider et Enregistrer la Vacation", type="primary")
                     if submitted_vac:
@@ -310,33 +319,58 @@ def afficher_depenses():
                 total_depenses = sum(d.montant for d in depenses_list)
                 st.metric("💵 Total des Charges & Salaires du Cycle", f"{formater_fcfa(total_depenses)} FCFA")
                 st.markdown("---")
+                
                 for d in depenses_list:
                     ref_p = d.reference_piece if hasattr(d, "reference_piece") and d.reference_piece else "Sans référence"
-                    col_d1, col_d2, col_d3, col_d4 = st.columns([2, 1.5, 2.5, 1])
+                    col_d1, col_d2, col_d3, col_d4 = st.columns([2, 1.5, 2.5, 1.5])
                     col_d1.write(f"**Pièce :** `{ref_p}`")
                     col_d2.write(f"**Montant :** {formater_fcfa(d.montant)} F")
                     col_d3.write(f"**Motif :** {d.libelle} *({d.categorie})*")
+                    
                     with col_d4:
                         if not ref_p.startswith("AVOIR-"):
-                            if st.button("🔄 Contre-passer", key=f"contrepasser_depense_{d.id}"):
-                                if not profil_autorise_annulation:
-                                    st.error("🔒 Accès restreint.")
-                                else:
-                                    montant_d = float(d.montant)
-                                    depense_avoir = Depense(
-                                        school_id=target_school_id,
-                                        cycle=cycle_en_cours,
-                                        libelle=f"CONTRE-PASSATION (Avoir) - Réf: {ref_p} ({d.libelle})",
-                                        montant=-montant_d,
-                                        categorie=d.categorie,
-                                        reference_piece=f"AVOIR-{ref_p}",
-                                        date_depense=datetime.utcnow(),
-                                        auteur=username_connecte,
-                                    )
-                                    db.add(depense_avoir)
-                                    db.commit()
-                                    st.success("✅ Contre-passation effectuée !")
-                                    st.rerun()
+                            if profil_autorise_annulation:
+                                sub_col1, sub_col2 = st.columns(2)
+                                with sub_col1:
+                                    if st.button("🔄", key=f"contre_{d.id}", help="Contre-passer (Avoir)"):
+                                        montant_d = float(d.montant)
+                                        depense_avoir = Depense(
+                                            school_id=target_school_id,
+                                            cycle=cycle_en_cours,
+                                            libelle=f"CONTRE-PASSATION (Avoir) - Réf: {ref_p} ({d.libelle})",
+                                            montant=-montant_d,
+                                            categorie=d.categorie,
+                                            reference_piece=f"AVOIR-{ref_p}",
+                                            date_depense=datetime.utcnow(),
+                                            auteur=username_connecte,
+                                        )
+                                        db.add(depense_avoir)
+                                        log_action_erp(
+                                            module="Gestion des Dépenses & Acomptes",
+                                            action=f"Contre-passation pièce {ref_p} ({formater_fcfa(montant_d)} FCFA)",
+                                            statut="Critique",
+                                            valeur_avant=f"{formater_fcfa(montant_d)} FCFA",
+                                            valeur_apres=f"-{formater_fcfa(montant_d)} FCFA",
+                                        )
+                                        db.commit()
+                                        st.success("✅ Contre-passation effectuée !")
+                                        st.rerun()
+                                with sub_col2:
+                                    if st.button("🗑️", key=f"suppr_{d.id}", help="Supprimer définitivement (Admin uniquement)"):
+                                        log_action_erp(
+                                            module="Gestion des Dépenses & Acomptes",
+                                            action=f"Suppression dépense {ref_p} ({formater_fcfa(d.montant)} FCFA)",
+                                            statut="Critique",
+                                            valeur_avant=f"{formater_fcfa(d.montant)} FCFA",
+                                            valeur_apres="Supprimé",
+                                        )
+                                        db.delete(d)
+                                        db.commit()
+                                        st.success("✅ Dépense supprimée !")
+                                        st.rerun()
+                            else:
+                                st.caption("🔒 Consultation seule")
+
     except Exception as e:
         st.error(f"Erreur technique : {e}")
     finally:

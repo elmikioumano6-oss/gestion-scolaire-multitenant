@@ -75,7 +75,7 @@ def afficher_etat_paie_administration(mois, date_paie):
         total_net_global = 0
 
         if not personnels:
-            lignes_html = '<tr><td colspan="8" style="text-align: center; color: gray;">Aucun personnel administratif enregistre.</td></tr>'
+            lignes_html = '<tr><td colspan="8" style="text-align: center; color: gray;">Aucun personnel administratif enregistré.</td></tr>'
         else:
             for i, p in enumerate(personnels, 1):
                 salaire_base = float(getattr(p, "salaire_base", 0.0) or 0.0)
@@ -140,7 +140,7 @@ def afficher_etat_paie_administration(mois, date_paie):
                     </tr>
                 </table>
                 <table>
-                    <thead><tr><th>N°</th><th>Nom & Prenom</th><th>Poste</th><th>Salaire de Base</th><th>Primes</th><th>Acomptes</th><th>Net à Payer</th><th>Signature</th></tr></thead>
+                    <thead><tr><th>N°</th><th>Nom & Prénom</th><th>Poste</th><th>Salaire de Base</th><th>Primes</th><th>Acomptes</th><th>Net à Payer</th><th>Signature</th></tr></thead>
                     <tbody>{lignes}</tbody>
                     <tfoot><tr style="background-color: #000080; color: #FFFFFF; font-weight: bold;"><td colspan="6" style="text-align: right;">TOTAL GENERAL :</td><td style="text-align: right; white-space: nowrap;">{total_net} FCFA</td><td></td></tr></tfoot>
                 </table>
