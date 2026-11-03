@@ -3,7 +3,7 @@ import unicodedata
 import pandas as pd
 import streamlit as st
 from database.db_config import SessionLocal
-from database.models import ActivityLog, CahierTexte, Classe, Enseignant, Matiere, School, User
+from database.models import Affectation, ActivityLog, CahierTexte, Classe, Enseignant, Matiere, School, User
 
 SYNONYMES_MATIERES = {
     "sciences physiques": "physique chimie",
@@ -116,6 +116,7 @@ def afficher_cahier_texte():
             enseignants_query = enseignants_query.filter(Enseignant.deleted_at.is_(None))
         tous_enseignants = enseignants_query.all()
         dict_ens_options = {f"{e.nom} {e.prenom}".strip(): e.id for e in tous_enseignants}
+        dict_ens_par_id = {e.id: f"{e.nom} {e.prenom}".strip() for e in tous_enseignants}
 
         classes_query = db.query(Classe).filter(Classe.cycle == cycle_en_cours)
         if not is_super_admin and school_id:
@@ -180,7 +181,6 @@ def afficher_cahier_texte():
                                 st.markdown("---")
                                 st.markdown("##### ⚙️ Administration : Gérer la séance")
                                 
-                                # Ajout direct du sélecteur pour réassigner le professeur sans recréer la séance
                                 list_noms_ens = list(dict_ens_options.keys())
                                 current_ens_index = 0
                                 if hasattr(e, "enseignant_id") and e.enseignant_id:
@@ -278,56 +278,64 @@ def afficher_cahier_texte():
             col1, col2 = st.columns(2)
             with col1:
                 classe_choisie = st.selectbox("Classe", noms_classes, key="form_cahier_classe")
+                classe_obj_s = next((c for c in classes_cycle if c.libelle == classe_choisie), None)
+
                 noms_matieres = get_matieres_dynamiques_cahier([classe_choisie], classes_cycle, target_school_id, cycle_en_cours, db)
                 matiere_choisie = st.selectbox("Matière", noms_matieres if noms_matieres else ["Aucune matière"], key="form_cahier_matiere")
             with col2:
                 date_cours = st.date_input("Date du cours", value=datetime.now().date(), key="form_cahier_date")
                 duree_cours = st.selectbox("Durée de la séance", options=[1.0, 2.0, 3.0, 4.0], format_func=lambda x: f"{int(x)} heure{'s' if x > 1 else ''}", key="form_cahier_duree")
 
-            enseignant_suggere_nom = "Aucun titulaire détecté"
-            enseignant_id_final = None
-            
-            if dict_ens_options and classe_choisie and matiere_choisie:
-                matiere_norm = normaliser_chaine(matiere_choisie)
-                cls_cherche_lower = classe_choisie.strip().lower()
+            # --- DÉTECTION AUTOMATIQUE DE L'ENSEIGNANT ---
+            enseignant_trouve_id = None
+            enseignant_nom_affiche = ""
+
+            if classe_obj_s and matiere_choisie:
+                affectations_q = db.query(Affectation).filter(
+                    Affectation.classe_id == classe_obj_s.id,
+                    Affectation.school_id == target_school_id
+                ).all()
                 
-                for e in tous_enseignants:
-                    mat_attr = str(getattr(e, "matieres_attribuees", "") or getattr(e, "matieres", "")).lower()
-                    cls_attr = str(getattr(e, "classes_attribuees", "") or getattr(e, "classes", "")).lower()
+                for aff in affectations_q:
+                    mat_obj = db.query(Matiere).filter(Matiere.id == aff.matiere_id).first() if hasattr(aff, "matiere_id") and aff.matiere_id else None
+                    nom_mat_aff = (mat_obj.libelle if mat_obj and hasattr(mat_obj, "libelle") else getattr(mat_obj, "nom", "")) if mat_obj else str(getattr(aff, "matiere", ""))
                     
-                    liste_classes = [c.strip().lower() for c in cls_attr.split(",") if c.strip()]
-                    liste_matieres = [normaliser_chaine(m.strip()) for m in mat_attr.split(",") if m.strip()]
-                    
-                    classe_match = cls_cherche_lower in liste_classes
-                    matiere_match = matiere_norm in liste_matieres or any(matiere_norm in m for m in liste_matieres)
-                    
-                    if classe_match and matiere_match:
-                        enseignant_suggere_nom = f"{e.nom} {e.prenom}".strip()
-                        enseignant_id_final = e.id
+                    if normaliser_chaine(nom_mat_aff) == normaliser_chaine(matiere_choisie):
+                        enseignant_trouve_id = getattr(aff, "enseignant_id", None)
                         break
+                
+                if not enseignant_trouve_id:
+                    for ens in tous_enseignants:
+                        mat_attr = str(getattr(ens, "matieres_attribuees", "") or getattr(ens, "matieres", "")).lower()
+                        cls_attr = str(getattr(ens, "classes_attribuees", "") or getattr(ens, "classes", "")).lower()
+                        if classe_obj_s.libelle.lower() in cls_attr and normaliser_chaine(matiere_choisie) in normaliser_chaine(mat_attr):
+                            enseignant_trouve_id = ens.id
+                            break
 
-            if "last_classe_matiere_cahier" not in st.session_state:
-                st.session_state["last_classe_matiere_cahier"] = ("", "")
+            if enseignant_trouve_id and enseignant_trouve_id in dict_ens_par_id:
+                enseignant_nom_affiche = dict_ens_par_id[enseignant_trouve_id]
+            elif tous_enseignants:
+                enseignant_nom_affiche = f"{tous_enseignants[0].nom} {tous_enseignants[0].prenom}".strip()
+                enseignant_trouve_id = tous_enseignants[0].id
 
-            current_combo = (classe_choisie, matiere_choisie)
-            if st.session_state["last_classe_matiere_cahier"] != current_combo:
-                st.session_state["last_classe_matiere_cahier"] = current_combo
-                if enseignant_suggere_nom in dict_ens_options:
-                    st.session_state["form_cahier_enseignant"] = enseignant_suggere_nom
-
-            if enseignant_suggere_nom in dict_ens_options:
-                st.info(f"💡 **Enseignant affecté sélectionné automatiquement :** {enseignant_suggere_nom}")
-            else:
-                st.warning("⚠️ Aucun enseignant n'a pu être automatiquement rattaché à cette combinaison classe/matière.")
+            if enseignant_nom_affiche:
+                st.info(f"💡 Enseignant affecté sélectionné automatiquement : **{enseignant_nom_affiche}**")
 
             liste_noms_ens = list(dict_ens_options.keys())
+            defaut_idx = 0
+            if enseignant_nom_affiche in liste_noms_ens:
+                defaut_idx = liste_noms_ens.index(enseignant_nom_affiche)
+
+            cle_selectbox_ens = f"form_cahier_enseignant_libre_{classe_choisie}_{matiere_choisie}"
+
             enseignant_nom_selectionne = st.selectbox(
                 "Enseignant dispensant le cours (Modifiable si remplacement) *",
-                options=liste_noms_ens,
-                key="form_cahier_enseignant",
-                help="Le professeur est sélectionné automatiquement selon la classe et la matière."
+                options=liste_noms_ens if liste_noms_ens else [enseignant_nom_affiche],
+                index=defaut_idx,
+                key=cle_selectbox_ens,
+                help="Sélectionnez librement l'enseignant de votre choix pour ce cours."
             )
-            enseignant_id_final = dict_ens_options.get(enseignant_nom_selectionne)
+            enseignant_id_final = dict_ens_options.get(enseignant_nom_selectionne, enseignant_trouve_id)
 
             titre_cours = st.text_input("Titre du cours *", key="form_cahier_titre")
             contenu = st.text_area("Contenu détaillé de la séance *", key="form_cahier_contenu")

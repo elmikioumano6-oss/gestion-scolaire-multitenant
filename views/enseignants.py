@@ -47,6 +47,8 @@ def get_matieres_dynamiques(selected_classes_labels, classes_cycle, ecole_active
 
         if ids_cibles and hasattr(Matiere, "classe_id"):
             mat_q = db.query(Matiere).filter(Matiere.classe_id.in_(ids_cibles))
+            if hasattr(Matiere, "school_id"):
+                mat_q = mat_q.filter(Matiere.school_id == ecole_active_id)
             if hasattr(Matiere, "deleted_at"):
                 mat_q = mat_q.filter(Matiere.deleted_at.is_(None))
             m_brutes = mat_q.all()
@@ -191,13 +193,20 @@ def afficher_enseignants():
                         new_classes = st.multiselect("Classes tenues", options=opt_classes, default=[c for c in current_classes if c in opt_classes], key=f"edit_cls_{prof.id}")
 
                         st.markdown("##### 🔗 Précision des matières par classe")
+                        
+                        matieres_str_actuelle = getattr(prof, "matieres_attribuees", getattr(prof, "matieres", "")) or ""
+                        current_matieres_list = [m.strip().title() for m in matieres_str_actuelle.split(",") if m.strip()]
+
                         affectations_detaillees = {}
                         for cls in new_classes:
                             mats_dispo_cls = get_matieres_dynamiques([cls], classes_cycle, ecole_active_id, cycle_en_cours, db)
-                            # Correction clé : Pas de pré-sélection globale en bloc pour éviter l'écrasement des modifications ciblées
+                            
+                            default_mats = [m for m in current_matieres_list if m in mats_dispo_cls]
+                            
                             mats_choisies = st.multiselect(
                                 f"Matières enseignées par le professeur en **{cls}**",
                                 options=mats_dispo_cls,
+                                default=default_mats,
                                 key=f"edit_mats_cls_{prof.id}_{cls}"
                             )
                             if mats_choisies:
@@ -217,6 +226,7 @@ def afficher_enseignants():
                                 prof.email = new_email
                             
                             str_classes_new = ", ".join(new_classes) if new_classes else "Aucune"
+                            
                             toutes_mats_apres = list(set([m for mats in affectations_detaillees.values() for m in mats]))
                             str_matieres_new = ", ".join(toutes_mats_apres) if toutes_mats_apres else "Aucune"
 
