@@ -1,4 +1,5 @@
 from datetime import datetime
+import re
 import unicodedata
 import pandas as pd
 import streamlit as st
@@ -31,6 +32,15 @@ def normaliser_chaine(texte):
     sans_accent = "".join([c for c in nfkd if not unicodedata.combining(c)])
     nettoye = " ".join(sans_accent.lower().replace("-", " ").replace("_", " ").replace("è", "e").replace("é", " e").split())
     return SYNONYMES_MATIERES.get(nettoye, nettoye)
+
+def nettoyer_texte_strict(texte):
+    if not texte:
+        return ""
+    nfkd = unicodedata.normalize("NFKD", str(texte))
+    sans_accent = "".join([c for c in nfkd if not unicodedata.combining(c)])
+    # Supprime toute la ponctuation et normalise les espaces
+    nettoye = re.sub(r'[^a-z0-9]', ' ', sans_accent.lower())
+    return " ".join(nettoye.split())
 
 def get_matieres_dynamiques_cahier(selected_classes_labels, classes_cycle, ecole_active_id, cycle_en_cours, db):
     m_brutes = []
@@ -314,9 +324,6 @@ def afficher_cahier_texte():
 
             if enseignant_trouve_id and enseignant_trouve_id in dict_ens_par_id:
                 enseignant_nom_affiche = dict_ens_par_id[enseignant_trouve_id]
-            elif tous_enseignants:
-                enseignant_nom_affiche = f"{tous_enseignants[0].nom} {tous_enseignants[0].prenom}".strip()
-                enseignant_trouve_id = tous_enseignants[0].id
 
             if enseignant_nom_affiche:
                 st.info(f"💡 Enseignant affecté sélectionné automatiquement : **{enseignant_nom_affiche}**")
@@ -330,12 +337,12 @@ def afficher_cahier_texte():
 
             enseignant_nom_selectionne = st.selectbox(
                 "Enseignant dispensant le cours (Modifiable si remplacement) *",
-                options=liste_noms_ens if liste_noms_ens else [enseignant_nom_affiche],
+                options=liste_noms_ens,
                 index=defaut_idx,
                 key=cle_selectbox_ens,
                 help="Sélectionnez librement l'enseignant de votre choix pour ce cours."
             )
-            enseignant_id_final = dict_ens_options.get(enseignant_nom_selectionne, enseignant_trouve_id)
+            enseignant_id_final = dict_ens_options.get(enseignant_nom_selectionne)
 
             titre_cours = st.text_input("Titre du cours *", key="form_cahier_titre")
             contenu = st.text_area("Contenu détaillé de la séance *", key="form_cahier_contenu")
@@ -350,24 +357,47 @@ def afficher_cahier_texte():
                     mat_brutes_all = db.query(Matiere).filter(Matiere.school_id == target_school_id).all()
                     mat_obj = next((m for m in mat_brutes_all if (m.libelle if hasattr(m, "libelle") and m.libelle else getattr(m, "nom", "")).strip().title() == matiere_choisie), None)
 
-                    nouvelle_entree = CahierTexte(
-                        school_id=target_school_id,
-                        cycle=cycle_en_cours,
-                        classe_id=cls_obj.id if cls_obj else None,
-                        matiere_id=mat_obj.id if mat_obj else None,
-                        enseignant_id=enseignant_id_final,
-                        user_id=user_id_val,
-                        date_cours=datetime.combine(date_cours, datetime.now().time()),
-                        duree_seance=f"{int(duree_cours)} heure{'s' if duree_cours > 1 else ''}",
-                        titre=titre_cours.strip(),
-                        contenu=contenu.strip(),
-                        auteur_saisie=username,
-                        statut_validation="Validé",
-                    )
-                    db.add(nouvelle_entree)
-                    db.commit()
-                    st.success("✅ Entrée enregistrée avec succès !")
-                    st.rerun()
+                    # --- VÉRIFICATION ANTI-DOUBLON STRICTE AVEC NETTOYAGE PROFOND ---
+                    titre_saisi_net = nettoyer_texte_strict(titre_cours)
+                    contenu_saisi_net = nettoyer_texte_strict(contenu)
+
+                    entrees_existantes = db.query(CahierTexte).filter(
+                        CahierTexte.school_id == target_school_id,
+                        CahierTexte.classe_id == (cls_obj.id if cls_obj else None),
+                        CahierTexte.matiere_id == (mat_obj.id if mat_obj else None)
+                    ).all()
+
+                    doublon_trouve = False
+                    for ent in entrees_existantes:
+                        date_ent_obj = ent.date_cours.date() if isinstance(ent.date_cours, datetime) else None
+                        if date_ent_obj == date_cours:
+                            t_ex = nettoyer_texte_strict(getattr(ent, 'titre', ''))
+                            c_ex = nettoyer_texte_strict(getattr(ent, 'contenu', ''))
+                            if t_ex == titre_saisi_net and c_ex == contenu_saisi_net:
+                                doublon_trouve = True
+                                break
+
+                    if doublon_trouve:
+                        st.error("⚠️ Un cours identique avec la même date, le même titre et le même contenu existe déjà pour cette classe et cette matière.")
+                    else:
+                        nouvelle_entree = CahierTexte(
+                            school_id=target_school_id,
+                            cycle=cycle_en_cours,
+                            classe_id=cls_obj.id if cls_obj else None,
+                            matiere_id=mat_obj.id if mat_obj else None,
+                            enseignant_id=enseignant_id_final,
+                            user_id=user_id_val,
+                            date_cours=datetime.combine(date_cours, datetime.now().time()),
+                            duree_seance=f"{int(duree_cours)} heure{'s' if duree_cours > 1 else ''}",
+                            titre=titre_cours.strip(),
+                            contenu=contenu.strip(),
+                            auteur_saisie=username,
+                            statut_validation="Validé",
+                        )
+                        db.add(nouvelle_entree)
+                        db.commit()
+                        st.success("✅ Entrée enregistrée avec succès !")
+                        st.rerun()
 
     except Exception as e:
         st.error(f"Une erreur est survenue lors de l'exécution : {e}")

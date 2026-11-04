@@ -9,6 +9,7 @@ from database.models import (
     AnneeScolaire,
     CahierTexte,
     Classe,
+    Enseignant,
     Matiere,
     Programme,
     School,
@@ -138,6 +139,8 @@ def afficher_supervision_cahier():
         matieres_classe = matieres_query.all()
 
         all_programmes = db.query(Programme).filter(Programme.school_id == resolved_school_id).all()
+        enseignants_db = db.query(Enseignant).filter(Enseignant.school_id == resolved_school_id).all()
+        dict_enseignants = {e.id: f"{e.nom} {e.prenom}".strip() for e in enseignants_db}
 
         if not matieres_classe:
             st.info(f"Aucune matière configurée pour la classe de **{classe_suivie}**.")
@@ -236,7 +239,16 @@ def afficher_supervision_cahier():
                 dernier_cours = entrees_cahier[-1]
                 contenu_cours = getattr(dernier_cours, "contenu", "") or ""
                 dernier_chapitre = contenu_cours[:60] + "..." if len(contenu_cours) > 60 else (contenu_cours if contenu_cours else "N/D")
-                enseignant_ref = getattr(dernier_cours, "auteur_saisie", "Corps professoral") or "Corps professoral"
+                
+                ens_id = getattr(dernier_cours, "enseignant_id", None)
+                if ens_id and ens_id in dict_enseignants:
+                    enseignant_ref = dict_enseignants[ens_id]
+                else:
+                    auteur = getattr(dernier_cours, "auteur_saisie", "")
+                    if auteur and auteur.lower() not in ["admin", "direction", "censeur", ""]:
+                        enseignant_ref = auteur
+                    else:
+                        enseignant_ref = "Enseignant titulaire"
             else:
                 dernier_chapitre = "Aucun cours enregistré"
                 enseignant_ref = "Non assigné"
