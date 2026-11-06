@@ -1,19 +1,10 @@
 from datetime import datetime
-from io import BytesIO
 import unicodedata
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 from database.db_config import SessionLocal
-from database.models import (
-    ActivityLog,
-    AnneeScolaire,
-    CahierTexte,
-    Classe,
-    Enseignant,
-    Matiere,
-    Programme,
-    School,
-)
+from database.models import AnneeScolaire, CahierTexte, Classe, Enseignant, Matiere, Programme, School
 
 SYNONYMES_MATIERES = {
     "sciences physiques": "physique chimie",
@@ -25,8 +16,25 @@ SYNONYMES_MATIERES = {
     "education physique et sportive": "eps",
     "economie familiale": "economie familiale et sociale",
     "economie familiale et sociale": "economie familiale et sociale",
+    "economie familiale sociale": "economie familiale et sociale",
+    "efs": "economie familiale et sociale",
     "histoire geographie": "histoire geographie",
     "histoire-geographie": "histoire geographie",
+    "education civique et morale": "education civique et morale",
+    "education civique": "education civique et morale",
+}
+
+BAREME_STANDARD = {
+    "mathematiques": 175,
+    "francais": 140,
+    "anglais": 140,
+    "physique chimie": 105,
+    "science de la vie et de la terre": 105,
+    "histoire geographie": 70,
+    "eps": 70,
+    "economie familiale et sociale": 35,
+    "education civique et morale": 35,
+    "conduite": 0
 }
 
 def normaliser_chaine(texte):
@@ -34,10 +42,17 @@ def normaliser_chaine(texte):
         return ""
     nfkd = unicodedata.normalize("NFKD", str(texte))
     sans_accent = "".join([c for c in nfkd if not unicodedata.combining(c)])
-    nettoye = " ".join(
-        sans_accent.lower().replace("-", " ").replace("_", " ").split()
-    )
-    return SYNONYMES_MATIERES.get(nettoye, nettoye)
+    return " ".join(sans_accent.lower().replace("-", " ").replace("_", " ").split())
+
+def parse_duree_seance(duree_c):
+    if not duree_c:
+        return 1.0
+    chiffres = "".join([c for c in str(duree_c) if c.isdigit() or c == '.'])
+    try:
+        val = float(chiffres)
+        return val if val > 0 else 1.0
+    except ValueError:
+        return 1.0
 
 def afficher_supervision_cahier():
     st.markdown("""
@@ -79,17 +94,16 @@ def afficher_supervision_cahier():
 
     db = SessionLocal()
     try:
-        target_school_id = school_id
-        if is_super_admin and not target_school_id:
+        resolved_school_id = school_id if school_id else 1
+        if is_super_admin and not school_id:
             ecole_defaut = db.query(School).first()
-            target_school_id = ecole_defaut.id if ecole_defaut else 1
-
-        resolved_school_id = school_id if school_id else target_school_id
+            if ecole_defaut:
+                resolved_school_id = ecole_defaut.id
 
         ecole_courante = db.query(School).filter(School.id == resolved_school_id).first()
-        school_name = ecole_courante.nom if ecole_courante else st.session_state.get("school_name", "Établissement")
+        school_name = ecole_courante.nom.upper() if ecole_courante else "COMPLEXE SCOLAIRE PRIVE RAHMAT-FH"
         school_devise = ecole_courante.devise if ecole_courante else "Excellence - Persévérance - Réussite"
-        school_adresse = ecole_courante.adresse if ecole_courante and ecole_courante.adresse else "Niamey - Niger"
+        school_adresse = getattr(ecole_courante, "adresse", "QUARTIER AEROPORT NIAMEY-NIGER").upper() if ecole_courante else "QUARTIER AEROPORT NIAMEY-NIGER"
 
         annee_active = db.query(AnneeScolaire).filter(
             AnneeScolaire.school_id == resolved_school_id,
@@ -107,13 +121,12 @@ def afficher_supervision_cahier():
             </div>
         """, unsafe_allow_html=True)
 
-        classes_cycle = db.query(Classe).filter(
-            Classe.school_id == resolved_school_id,
-        ).all()
-
+        classes_cycle = db.query(Classe).filter(Classe.school_id == resolved_school_id, Classe.cycle == cycle_en_cours).all()
         if not classes_cycle:
-            st.warning("⚠️ Aucune classe enregistrée pour cet établissement.")
+            st.warning(f"⚠️ Aucune classe enregistrée pour le cycle **{cycle_en_cours}**.")
             return
+
+        dict_classes_id = {c.id: c for c in classes_cycle}
 
         st.markdown('<div class="filter-box">', unsafe_allow_html=True)
         col_f1, col_f2 = st.columns(2)
@@ -125,108 +138,138 @@ def afficher_supervision_cahier():
         st.markdown('</div>', unsafe_allow_html=True)
 
         classe_obj = next((c for c in classes_cycle if (c.libelle or getattr(c, "nom", f"Classe {c.id}")) == classe_suivie), None)
-        
         if not classe_obj:
             st.warning("⚠️ Classe sélectionnée invalide.")
             return
 
-        matieres_query = db.query(Matiere).filter(
-            Matiere.classe_id == classe_obj.id,
-            Matiere.school_id == resolved_school_id,
-        )
-        if hasattr(Matiere, "deleted_at"):
-            matieres_query = matieres_query.filter(Matiere.deleted_at.is_(None))
-        matieres_classe = matieres_query.all()
+        matieres_classe = db.query(Matiere).filter(Matiere.classe_id == classe_obj.id, Matiere.school_id == resolved_school_id).all()
+        if not matieres_classe:
+            matieres_classe = db.query(Matiere).filter(Matiere.cycle == cycle_en_cours, Matiere.school_id == resolved_school_id).all()
 
         all_programmes = db.query(Programme).filter(Programme.school_id == resolved_school_id).all()
         enseignants_db = db.query(Enseignant).filter(Enseignant.school_id == resolved_school_id).all()
-        dict_enseignants = {e.id: f"{e.nom} {e.prenom}".strip() for e in enseignants_db}
+        dict_enseignants = {e.id: e for e in enseignants_db}
+        toutes_matieres_db = db.query(Matiere).filter(Matiere.school_id == resolved_school_id).all()
+        dict_matieres_id = {m.id: m for m in toutes_matieres_db}
 
         if not matieres_classe:
             st.info(f"Aucune matière configurée pour la classe de **{classe_suivie}**.")
             return
 
+        # Association officielle des enseignants par matière
+        enseignant_par_mat = {}
+        for mat in matieres_classe:
+            nom_ens_officiel = "Non assigné"
+            ens_id_mat = getattr(mat, "enseignant_id", None)
+            if ens_id_mat and ens_id_mat in dict_enseignants:
+                e_obj = dict_enseignants[ens_id_mat]
+                nom_ens_officiel = f"{str(getattr(e_obj, 'nom', '')).strip().upper()} {str(getattr(e_obj, 'prenom', '')).strip().title()}".strip()
+            enseignant_par_mat[mat.id] = nom_ens_officiel
+
         libelle_classe_norm = normaliser_chaine(classe_suivie)
         niveau_cible = ""
         for mot, lib_long in [("6", "6ème"), ("5", "5ème"), ("4", "4ème"), ("3", "3ème")]:
-            if mot in libelle_classe_norm or mot + "e" in libelle_classe_norm or mot + "è" in libelle_classe_norm:
+            if mot in libelle_classe_norm or mot + "e" in libelle_classe_norm:
                 niveau_cible = lib_long
                 break
 
+        map_norm_matieres_classe = {}
+        for mat in matieres_classe:
+            m_lib = mat.libelle if hasattr(mat, "libelle") and mat.libelle else getattr(mat, "nom", "")
+            norm_k = normaliser_chaine(m_lib)
+            map_norm_matieres_classe[norm_k] = mat.id
+            if norm_k in SYNONYMES_MATIERES:
+                map_norm_matieres_classe[SYNONYMES_MATIERES[norm_k]] = mat.id
+
+        heures_realisees_par_mat = {mat.id: 0.0 for mat in matieres_classe}
+        entrees_par_mat = {mat.id: [] for mat in matieres_classe}
+
+        cahier_entries = db.query(CahierTexte).filter(CahierTexte.school_id == resolved_school_id).all()
+
+        for entry in cahier_entries:
+            cls_entry = dict_classes_id.get(getattr(entry, "classe_id", None))
+            match_cls = False
+            if cls_entry and cls_entry.id == classe_obj.id:
+                match_cls = True
+            else:
+                txt_e = normaliser_chaine(f"{getattr(entry, 'titre', '')} {getattr(entry, 'contenu', '')}")
+                if libelle_classe_norm in txt_e:
+                    match_cls = True
+
+            if not match_cls:
+                continue
+
+            matched_mat_id = None
+            mat_id_e = getattr(entry, "matiere_id", None)
+            if mat_id_e in dict_matieres_id:
+                m_obj = dict_matieres_id[mat_id_e]
+                m_name = normaliser_chaine(getattr(m_obj, "libelle", "") or getattr(m_obj, "nom", ""))
+                if m_name in map_norm_matieres_classe:
+                    matched_mat_id = map_norm_matieres_classe[m_name]
+                elif m_name in SYNONYMES_MATIERES and SYNONYMES_MATIERES[m_name] in map_norm_matieres_classe:
+                    matched_mat_id = map_norm_matieres_classe[SYNONYMES_MATIERES[m_name]]
+
+            if not matched_mat_id:
+                txt_e = normaliser_chaine(f"{getattr(entry, 'titre', '')} {getattr(entry, 'contenu', '')}")
+                for norm_k, m_id in map_norm_matieres_classe.items():
+                    if norm_k in txt_e:
+                        matched_mat_id = m_id
+                        break
+
+            if not matched_mat_id or matched_mat_id not in heures_realisees_par_mat:
+                continue
+
+            if enseignant_par_mat[matched_mat_id] == "Non assigné":
+                matched_ens_id = getattr(entry, "enseignant_id", None)
+                if matched_ens_id and matched_ens_id in dict_enseignants:
+                    ens_obj = dict_enseignants[matched_ens_id]
+                    enseignant_par_mat[matched_mat_id] = f"{str(getattr(ens_obj, 'nom', '')).strip().upper()} {str(getattr(ens_obj, 'prenom', '')).strip().title()}".strip()
+
+            duree_val = parse_duree_seance(getattr(entry, 'duree_seance', getattr(entry, 'duree', 1.0)))
+            heures_realisees_par_mat[matched_mat_id] += duree_val
+            entrees_par_mat[matched_mat_id].append(entry)
+
         data_suivi = []
-        is_college = cycle_en_cours.lower() in ["collège", "college"]
-        
         total_heures_prevues_globale = 0.0
         total_heures_realisees_globale = 0.0
-
-        toutes_entrees_classe = db.query(CahierTexte).filter(
-            CahierTexte.school_id == resolved_school_id,
-            CahierTexte.classe_id == classe_obj.id
-        ).all()
 
         for mat in matieres_classe:
             mat_lib = mat.libelle if hasattr(mat, "libelle") and mat.libelle else getattr(mat, "nom", "Matière")
             norm_key = normaliser_chaine(mat_lib)
+            canonical_key = SYNONYMES_MATIERES.get(norm_key, norm_key)
 
             heures_prevues = 0.0
-            if not is_college:
+            if hasattr(mat, "volume_horaire") and mat.volume_horaire and float(mat.volume_horaire) > 0:
+                heures_prevues = float(mat.volume_horaire)
+            else:
                 prog_obj = None
                 for p in all_programmes:
-                    p_nom = normaliser_chaine(getattr(p, 'nom_matiere', getattr(p, 'matiere', '')))
-                    texte_ligne = normaliser_chaine(f"{getattr(p, 'classe', '')} {getattr(p, 'code_matiere', '')} {getattr(p, 'matiere', '')} {getattr(p, 'nom_matiere', '')}")
-                    if p_nom == norm_key and (libelle_classe_norm in texte_ligne):
+                    p_classe = str(getattr(p, 'classe', ''))
+                    p_code = str(getattr(p, 'code_matiere', ''))
+                    p_mat = str(getattr(p, 'matiere', ''))
+                    p_nom_mat = str(getattr(p, 'nom_matiere', ''))
+                    texte_ligne = normaliser_chaine(p_classe + " " + p_code + " " + p_mat + " " + p_nom_mat)
+                    
+                    p_nom = normaliser_chaine(p_nom_mat or p_mat)
+                    p_norm_canon = SYNONYMES_MATIERES.get(p_nom, p_nom)
+                    
+                    if (p_norm_canon == canonical_key or p_nom == norm_key) and (libelle_classe_norm in texte_ligne or (niveau_cible and niveau_cible.lower() in texte_ligne)):
                         prog_obj = p
                         break
-                if not prog_obj:
-                    for p in all_programmes:
-                        p_nom = normaliser_chaine(getattr(p, 'nom_matiere', getattr(p, 'matiere', '')))
-                        if p_nom == norm_key:
-                            prog_obj = p
-                            break
-                heures_prevues = float(prog_obj.volume_horaire) if prog_obj and prog_obj.volume_horaire else float(getattr(mat, "volume_horaire", 0) or 0)
-            else:
-                prog_classe = next(
-                    (p for p in all_programmes if normaliser_chaine(getattr(p, 'nom_matiere', '')) == norm_key and (not niveau_cible or normaliser_chaine(niveau_cible) in normaliser_chaine(getattr(p, 'code_matiere', '')))),
-                    None
-                )
-                if prog_classe and prog_classe.volume_horaire and prog_classe.volume_horaire > 0:
-                    heures_prevues = prog_classe.volume_horaire
-                else:
-                    BAREME_COLLEGE = {
-                        "6ème": {"francais": 205, "anglais": 140, "histoire geographie": 70, "mathematiques": 240, "physique chimie": 35, "science de la vie et de la terre": 70, "economie familiale et sociale": 35, "education physique et sportive": 70, "education civique": 35},
-                        "5ème": {"francais": 140, "anglais": 140, "histoire geographie": 70, "mathematiques": 175, "physique chimie": 35, "science de la vie et de la terre": 70, "economie familiale et sociale": 35, "education physique et sportive": 70, "education civique": 35},
-                        "4ème": {"francais": 140, "anglais": 140, "histoire geographie": 70, "mathematiques": 175, "physique chimie": 105, "science de la vie et de la terre": 70, "economie familiale et sociale": 35, "education physique et sportive": 70, "education civique": 35},
-                        "3ème": {"francais": 140, "anglais": 140, "histoire geographie": 70, "mathematiques": 175, "physique chimie": 105, "science de la vie et de la terre": 105, "economie familiale et sociale": 35, "education physique et sportive": 70, "education civique": 35},
-                    }
-                    if niveau_cible in BAREME_COLLEGE and norm_key in BAREME_COLLEGE[niveau_cible]:
-                        heures_prevues = float(BAREME_COLLEGE[niveau_cible][norm_key])
-                    elif mat.volume_horaire and mat.volume_horaire > 0:
-                        heures_prevues = mat.volume_horaire
-                    else:
-                        heures_prevues = 0.0
+                
+                if prog_obj and prog_obj.volume_horaire and float(prog_obj.volume_horaire) > 0:
+                    heures_prevues = float(prog_obj.volume_horaire)
+                elif canonical_key in BAREME_STANDARD:
+                    heures_prevues = float(BAREME_STANDARD[canonical_key])
 
             if periode_inspection in ["Semestre 1", "Semestre 2"]:
                 heures_prevues_periode = round(heures_prevues / 2.0, 1)
             else:
                 heures_prevues_periode = heures_prevues
 
-            entrees_cahier = [
-                e for e in toutes_entrees_classe
-                if getattr(e, 'matiere_id', None) == mat.id
-            ]
-
-            heures_realisees = 0.0
-            for e in entrees_cahier:
-                duree_val = float(getattr(e, 'duree', 0.0) or 0.0)
-                if duree_val > 0:
-                    heures_realisees += duree_val
-                else:
-                    d_str = str(getattr(e, "duree_seance", "1 heure"))
-                    try:
-                        chiffre = float("".join(filter(str.isdigit, d_str)) or 1)
-                        heures_realisees += chiffre
-                    except Exception:
-                        heures_realisees += 1.0
+            heures_realisees = heures_realisees_par_mat[mat.id]
+            entrees_mat = entrees_par_mat[mat.id]
+            enseignant_ref = enseignant_par_mat[mat.id]
 
             total_heures_prevues_globale += heures_prevues_periode
             total_heures_realisees_globale += heures_realisees
@@ -235,23 +278,11 @@ def afficher_supervision_cahier():
             if progression_pct > 100.0:
                 progression_pct = 100.0
 
-            if entrees_cahier:
-                dernier_cours = entrees_cahier[-1]
-                contenu_cours = getattr(dernier_cours, "contenu", "") or ""
-                dernier_chapitre = contenu_cours[:60] + "..." if len(contenu_cours) > 60 else (contenu_cours if contenu_cours else "N/D")
-                
-                ens_id = getattr(dernier_cours, "enseignant_id", None)
-                if ens_id and ens_id in dict_enseignants:
-                    enseignant_ref = dict_enseignants[ens_id]
-                else:
-                    auteur = getattr(dernier_cours, "auteur_saisie", "")
-                    if auteur and auteur.lower() not in ["admin", "direction", "censeur", ""]:
-                        enseignant_ref = auteur
-                    else:
-                        enseignant_ref = "Enseignant titulaire"
+            if entrees_mat:
+                contenu_cours = getattr(entrees_mat[-1], "contenu", "") or ""
+                dernier_chapitre = contenu_cours[:60] + "..." if len(contenu_cours) > 60 else (contenu_cours or "N/D")
             else:
                 dernier_chapitre = "Aucun cours enregistré"
-                enseignant_ref = "Non assigné"
 
             if heures_prevues_periode == 0.0:
                 appreciation = "⚠️ Volume horaire non défini"
@@ -267,8 +298,8 @@ def afficher_supervision_cahier():
             data_suivi.append({
                 "Matière": mat_lib.title(),
                 "Enseignant(e)": enseignant_ref,
-                "Heures Prévues": f"{heures_prevues_periode}h",
-                "Heures Réalisées": f"{heures_realisees}h",
+                "Heures Prévues": f"{heures_prevues_periode:g} h",
+                "Heures Réalisées": f"{heures_realisees:g} h",
                 "Progression (%)": f"{progression_pct}%",
                 "Dernier Chapitre / Notions": dernier_chapitre,
                 "Appréciation Inspection": appreciation,
@@ -283,28 +314,116 @@ def afficher_supervision_cahier():
         col_k3.metric("Taux d'Exécution Moyen", f"{taux_global_classe:.1f} %")
         st.markdown("<br>", unsafe_allow_html=True)
 
-        col_btn1, col_btn2 = st.columns([1, 1])
-        with col_btn1:
-            st.markdown(
-                """
-                <div style="display: flex; align-items: center; height: 38px;">
-                    <button onclick="parent.window.print()" style="background-color: #2b5876; color: white; border: none; padding: 0.5rem 1.2rem; font-size: 0.9rem; font-weight: 600; border-radius: 6px; cursor: pointer; font-family: sans-serif; white-space: nowrap; width: 100%;">🖨️ Imprimer le Rapport Pédagogique</button>
-                </div>
-                """,
-                unsafe_allow_html=True,
+        lignes_html = ""
+        for i, row in enumerate(data_suivi, 1):
+            lignes_html += (
+                f"<tr>"
+                f"<td style='text-align: center;'>{i}</td>"
+                f"<td><b>{row['Matière']}</b></td>"
+                f"<td>{row['Enseignant(e)']}</td>"
+                f"<td style='text-align: center;'>{row['Heures Prévues']}</td>"
+                f"<td style='text-align: center;'>{row['Heures Réalisées']}</td>"
+                f"<td style='text-align: center;'>{row['Progression (%)']}</td>"
+                f"<td>{row['Dernier Chapitre / Notions']}</td>"
+                f"<td>{row['Appréciation Inspection']}</td>"
+                f"<td></td>"
+                f"</tr>"
             )
-        with col_btn2:
-            df_suivi = pd.DataFrame(data_suivi)
-            st.download_button(
-                label="📥 Exporter au format Excel (CSV)",
-                data=df_suivi.to_csv(index=False).encode("utf-8"),
-                file_name=f"rapport_inspection_{classe_suivie}_{datetime.now().strftime('%Y%m%d')}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
+
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset='utf-8'>
+            <style>
+                @page {{ 
+                    size: A4 landscape; 
+                    margin: 5mm; 
+                }}
+                html, body {{
+                    margin: 0;
+                    padding: 0;
+                    background: #FFF;
+                    font-family: Arial, sans-serif;
+                    color: #000;
+                }}
+                body {{ 
+                    box-sizing: border-box;
+                }}
+                table {{ 
+                    width: 100%; 
+                    border-collapse: collapse; 
+                    font-size: 0.75rem; 
+                    margin-top: 10px; 
+                }}
+                th, td {{ 
+                    border: 1px solid #000080; 
+                    padding: 4px 6px; 
+                }}
+                th {{ 
+                    background-color: #800020; 
+                    color: #FFFFFF; 
+                    text-align: center; 
+                }}
+                @media print {{
+                    button {{ display: none !important; }}
+                    body {{ -webkit-print-color-adjust: exact; }}
+                }}
+            </style>
+        </head>
+        <body>
+            <div style='text-align:center; margin-bottom:10px;'>
+                <button onclick='window.print()' style='background:#000080; color:white; padding:8px 20px; font-weight:bold; border:none; border-radius:6px; cursor:pointer;'>🖨️ Imprimer le Rapport Pédagogique (A4 Paysage)</button>
+            </div>
+            <div style='width:277mm; margin:0 auto; background:#FFF; padding:8mm; border:1.5px solid #000080;'>
+                <table>
+                    <tr>
+                        <td style='border:none; font-weight:bold; font-size: 0.85rem;'>{school_name}<br>{school_adresse}</td>
+                        <td style='border:none; text-align:right; font-size: 0.85rem;'><b>RAPPORT D'INSPECTION PÉDAGOGIQUE</b><br>Classe : <b>{classe_suivie}</b> | Période : <b>{periode_inspection}</b><br>Date d'édition : <b>{datetime.today().strftime('%d/%m/%Y')}</b></td>
+                    </tr>
+                </table>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>N°</th>
+                            <th>Matière</th>
+                            <th>Enseignant(e)</th>
+                            <th>Heures Prévues</th>
+                            <th>Heures Réalisées</th>
+                            <th>Progression</th>
+                            <th>Dernier Chapitre / Notions</th>
+                            <th>Appréciation Inspection</th>
+                            <th>Visa / Observations</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {lignes_html}
+                    </tbody>
+                    <tfoot>
+                        <tr style='background:#000080; color:#FFF; font-weight:bold;'>
+                            <td colspan='3' style='text-align:right;'>TOTAUX GLOBAUX / MOYENNE :</td>
+                            <td style='text-align:center;'>{total_heures_prevues_globale:g} h</td>
+                            <td style='text-align:center;'>{total_heures_realisees_globale:g} h</td>
+                            <td style='text-align:center;' colspan='4'>Taux d'exécution moyen : {taux_global_classe:.1f} %</td>
+                            <td></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </body>
+        </html>
+        """
+        
+        components.html(html_content, height=480, scrolling=True)
 
         st.markdown("#### Détail par Discipline")
-        st.dataframe(df_suivi, use_container_width=True)
+        df_suivi = pd.DataFrame(data_suivi)
+        st.dataframe(df_suivi, use_container_width=True, column_config={
+            "Enseignant(e)": st.column_config.TextColumn("Enseignant(e)", width="large"),
+            "Dernier Chapitre / Notions": st.column_config.TextColumn("Dernier Chapitre / Notions", width="large")
+        })
 
+    except Exception as e:
+        st.error(f"Une erreur technique est survenue : {e}")
     finally:
         db.close()

@@ -1,14 +1,8 @@
 from datetime import datetime
 from database.db_config import SessionLocal
-from database.models import ActivityLog, AnneeScolaire, Classe, Eleve, Matiere, Note, School
+from database.models import AnneeScolaire, Classe, Eleve, Matiere, Note, School
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
-import reportlab
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4, landscape
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 import unicodedata
 
 # Dictionnaire de correspondance universel pour unifier les synonymes de matières
@@ -60,14 +54,8 @@ def afficher_consultation_notes():
         if school_id:
             ecole_courante = db.query(School).filter(School.id == school_id).first()
             school_name = ecole_courante.nom if ecole_courante else st.session_state.get("school_name", "Établissement")
-            school_devise = ecole_courante.devise if ecole_courante else "Excellence - Persévérance - Réussite"
-            school_adresse = ecole_courante.adresse if ecole_courante and ecole_courante.adresse else "Niamey - Niger"
-            school_contacts = ecole_courante.contacts if ecole_courante and ecole_courante.contacts else "N/D"
         else:
             school_name = st.session_state.get("school_name", "Établissement")
-            school_devise = "Excellence - Persévérance - Réussite"
-            school_adresse = "Niamey - Niger"
-            school_contacts = "N/D"
 
         annee_active = db.query(AnneeScolaire).filter(AnneeScolaire.school_id == school_id, AnneeScolaire.active == True).first()
         libelle_annee = annee_active.libelle if annee_active else str(datetime.now().year)
@@ -115,7 +103,6 @@ def afficher_consultation_notes():
 
         classe_obj = next((c for c in classes_cycle if c.libelle == classe_choisie), None)
         if classe_obj:
-            # --- RÉCUPÉRATION STRICTE DES MATIÈRES DE LA CLASSE SÉLECTIONNÉE ---
             matieres_query = db.query(Matiere).filter(Matiere.classe_id == classe_obj.id)
             if not is_super_admin and school_id:
                 matieres_query = matieres_query.filter(Matiere.school_id == school_id)
@@ -147,7 +134,7 @@ def afficher_consultation_notes():
                         Note.school_id == target_school_id,
                         Eleve.classe_id == classe_obj.id,
                         Note.semestre == semestre_choisi,
-                        Note.type_evaluation == type_vue,
+                        Note.type_evaluation == type_vue
                     ).all()
 
                     dict_notes = {(n.eleve_id, n.matiere_id): float(n.valeur) for n in notes_db if n.valeur is not None}
@@ -173,14 +160,24 @@ def afficher_consultation_notes():
                         ligne["Moyenne"] = f"{moy_val:.2f}/20"
                         data_tableau.append(ligne)
 
+                    # --- TRI ET ATTRIBUTION SÉCURISÉE DES RANGS AVEC EX-ÆQUO ---
                     data_tableau = sorted(data_tableau, key=lambda x: x["_moy_val"], reverse=True)
-                    for r_idx, item in enumerate(data_tableau, start=1):
+                    
+                    rang_actuel = 1
+                    for idx, item in enumerate(data_tableau):
+                        if idx > 0 and item["_moy_val"] != data_tableau[idx - 1]["_moy_val"]:
+                            rang_actuel = idx + 1
+                        
                         sexe_val = item.get("_sexe", "M")
                         is_feminin = sexe_val in ["F", "FÉMININ", "FEMININ", "FILLE"]
-                        if r_idx == 1:
+                        
+                        if rang_actuel == 1:
                             item["Rang"] = "1ère" if is_feminin else "1er"
                         else:
-                            item["Rang"] = f"{r_idx}ème" if is_feminin else f"{r_idx}è"
+                            item["Rang"] = f"{rang_actuel}ère" if is_feminin else f"{rang_actuel}ème"
+                            
+                    # Nettoyage des champs techniques après l'attribution des rangs
+                    for item in data_tableau:
                         item.pop("_moy_val", None)
                         item.pop("_sexe", None)
 

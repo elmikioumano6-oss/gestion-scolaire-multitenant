@@ -518,10 +518,9 @@ def main():
             st.info(f"Connecté : **{nom_utilisateur}**")
             options_menu = [
                 "Espace Inspection",
-                "Suivi des Programmes",
                 "Supervision cahier",
             ]
-            icons_menu = ["clipboard-check", "graph-up", "eye"]
+            icons_menu = ["clipboard-check", "eye"]
             menu_key_val = "menu_inspecteur"
 
         elif role_utilisateur == "censeur":
@@ -553,7 +552,6 @@ def main():
                 "Conseil de classe",
                 "Bulletins",
                 "Alerte Performance",
-                "Suivi des Programmes",
                 "Enseignants",
                 "Paramètres",
                 "Messages",
@@ -573,7 +571,6 @@ def main():
                 "award",
                 "journal-richtext",
                 "exclamation-triangle",
-                "graph-up",
                 "person-badge",
                 "gear",
                 "chat-dots",
@@ -633,7 +630,6 @@ def main():
                 "Bulletins",
                 "Alerte Performance",
                 "Espace Enseignants",
-                "Suivi des Programmes",
                 "Enseignants",
                 "Personnels et rôles",
                 "Gestion Comptes",
@@ -676,7 +672,6 @@ def main():
                 "journal-richtext",
                 "exclamation-triangle",
                 "person-video3",
-                "graph-up",
                 "person-badge",
                 "shield-lock",
                 "people",
@@ -805,10 +800,6 @@ def main():
         "Espace Enseignants": (
             "views.espace_enseignants",
             "afficher_espace_enseignants",
-        ),
-        "Suivi des Programmes": (
-            "views.supervision_progression",
-            "afficher_supervision_progression",
         ),
         "Enseignants": ("views.enseignants", "afficher_enseignants"),
         "Personnels et rôles": ("views.personnels_roles", "afficher_personnels"),

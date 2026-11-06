@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit as st
 from database.audit import log_action_erp
 from database.db_config import SessionLocal
-from database.models import CahierTexte, Classe, Enseignant, School, Note, Eleve, Programme, Matiere
+from database.models import CahierTexte, Classe, Enseignant, School, Note, Eleve, Programme, Matiere, User
 
 SYNONYMES_MATIERES = {
     "pc": "physique chimie",
@@ -33,60 +33,6 @@ def normaliser_chaine(texte):
     sans_accent = "".join([c for c in nfkd if not unicodedata.combining(c)])
     nettoye = " ".join(sans_accent.lower().replace("-", " ").replace("_", " ").replace("è", "e").replace("é", " e").split())
     return SYNONYMES_MATIERES.get(nettoye, nettoye)
-
-def get_matieres_dynamiques_inspection(classes_cycle, ecole_active_id, cycle_en_cours, db):
-    m_brutes = []
-    try:
-        ids_classes_cycle = [c.id for c in classes_cycle if c.id]
-        if ids_classes_cycle and hasattr(Matiere, "classe_id"):
-            mat_q = db.query(Matiere).filter(
-                Matiere.school_id == ecole_active_id,
-                Matiere.classe_id.in_(ids_classes_cycle)
-            )
-            if hasattr(Matiere, "deleted_at"):
-                mat_q = mat_q.filter(Matiere.deleted_at.is_(None))
-            m_brutes = mat_q.all()
-    except Exception:
-        m_brutes = []
-
-    if not m_brutes and cycle_en_cours:
-        try:
-            mat_q_cycle = db.query(Matiere).filter(Matiere.school_id == ecole_active_id)
-            if hasattr(Matiere, "cycle"):
-                mat_q_cycle = mat_q_cycle.filter(Matiere.cycle.ilike(f"%{cycle_en_cours}%"))
-            if hasattr(Matiere, "deleted_at"):
-                mat_q_cycle = mat_q_cycle.filter(Matiere.deleted_at.is_(None))
-            m_brutes = mat_q_cycle.all()
-        except Exception:
-            m_brutes = []
-
-    if not m_brutes:
-        try:
-            mat_q_all = db.query(Matiere).filter(Matiere.school_id == ecole_active_id)
-            if hasattr(Matiere, "deleted_at"):
-                mat_q_all = mat_q_all.filter(Matiere.deleted_at.is_(None))
-            m_brutes = mat_q_all.all()
-        except Exception:
-            m_brutes = []
-
-    m_dict = {}
-    cycle_actuel_lower = str(cycle_en_cours).lower()
-    
-    for m in m_brutes:
-        n_brut = m.libelle if hasattr(m, "libelle") and m.libelle else getattr(m, "nom", "Matière")
-        n_key = normaliser_chaine(n_brut)
-        
-        if "collège" in cycle_actuel_lower or "college" in cycle_actuel_lower:
-            if "philosophie" in n_key or "philo" in n_key:
-                continue
-
-        if n_key and n_key not in m_dict:
-            libelle_propre = n_brut.strip().title()
-            if "economie familiale" in n_key:
-                libelle_propre = "Économie Familiale Et Sociale"
-            m_dict[n_key] = libelle_propre
-            
-    return sorted(list(m_dict.values()))
 
 def afficher_espace_inspection():
     st.markdown("""
@@ -174,6 +120,61 @@ def afficher_espace_inspection():
 
         classes_cycle = db.query(Classe).filter(Classe.school_id == target_school_id, Classe.cycle == cycle_en_cours, Classe.deleted_at.is_(None)).all()
         noms_classes = [c.libelle for c in classes_cycle]
+        
+        dict_classes_toutes = {c.id: c for c in db.query(Classe).filter(Classe.school_id == resolved_school_id).all()}
+        dict_matieres_toutes = {m.id: m for m in db.query(Matiere).filter(Matiere.school_id == resolved_school_id).all()}
+
+        enseignants_query = db.query(Enseignant).filter(Enseignant.school_id == resolved_school_id)
+        if hasattr(Enseignant, "deleted_at"):
+            enseignants_query = enseignants_query.filter(Enseignant.deleted_at.is_(None))
+        liste_enseignants = enseignants_query.all()
+        
+        dict_profs_par_id = {p.id: f"{getattr(p, 'nom', '')} {getattr(p, 'prenom', '')}".strip() for p in liste_enseignants}
+
+        noms_enseignants_set = set()
+        for prof in liste_enseignants:
+            nom_complet = f"{getattr(prof, 'nom', '')} {getattr(prof, 'prenom', '')}".strip()
+            if nom_complet:
+                noms_enseignants_set.add(nom_complet)
+
+        toutes_entrees_cahier = db.query(CahierTexte).filter(CahierTexte.school_id == resolved_school_id).all()
+        for ent in toutes_entrees_cahier:
+            auteur = getattr(ent, 'auteur_saisie', None)
+            if auteur and str(auteur).strip():
+                noms_enseignants_set.add(str(auteur).strip().title())
+
+        noms_enseignants_final = sorted(list(noms_enseignants_set)) if noms_enseignants_set else ["Aucun enseignant"]
+
+        def trouver_enseignant_dispensant(entree_cours):
+            # 1. Vérifier si un enseignant est directement lié par ID
+            for attr in ['enseignant_id', 'professeur_id', 'prof_id']:
+                val_id = getattr(entree_cours, attr, None)
+                if val_id and val_id in dict_profs_par_id:
+                    return dict_profs_par_id[val_id]
+            
+            # 2. Vérifier via la matière associée
+            mat_id = getattr(entree_cours, 'matiere_id', None)
+            if mat_id and mat_id in dict_matieres_toutes:
+                mat_obj = dict_matieres_toutes[mat_id]
+                for attr_mat in ['enseignant_id', 'professeur_id', 'prof_id']:
+                    prof_id_mat = getattr(mat_obj, attr_mat, None)
+                    if prof_id_mat and prof_id_mat in dict_profs_par_id:
+                        return dict_profs_par_id[prof_id_mat]
+            
+            # 3. Analyser l'auteur de la saisie : si ce n'est pas un compte admin pur, on l'affiche directement
+            auteur = str(getattr(entree_cours, 'auteur_saisie', '')).strip()
+            if auteur:
+                if "admin" not in auteur.lower():
+                    return auteur.title()
+                else:
+                    # Si c'est un admin qui a saisi, on regarde si la matière ou le contenu mentionne un prof, 
+                    # sinon on renvoie un libellé neutre mais explicite basé sur la matière
+                    if mat_id and mat_id in dict_matieres_toutes:
+                        m_nom = getattr(dict_matieres_toutes[mat_id], 'libelle', '') or getattr(dict_matieres_toutes[mat_id], 'nom', '')
+                        if m_nom:
+                            return f"Prof. de {m_nom.title()}"
+            
+            return "Enseignant de la matière"
 
         with tab_cours:
             st.markdown("<h4 class='tab-title'>📖 Contrôle des Séances & Visa Pédagogique</h4>", unsafe_allow_html=True)
@@ -186,14 +187,18 @@ def afficher_espace_inspection():
                 
                 classe_obj = next((c for c in classes_cycle if c.libelle == classe_sel), None)
                 if classe_obj:
-                    entrees = db.query(CahierTexte).filter(CahierTexte.school_id == target_school_id, CahierTexte.classe_id == classe_obj.id).order_by(CahierTexte.date_cours.desc()).all()
+                    entrees = [e for e in toutes_entrees_cahier if e.classe_id == classe_obj.id]
+                    entrees.sort(key=lambda x: getattr(x, 'date_cours', datetime.min), reverse=True)
+                    
                     if not entrees:
                         st.markdown("<div class='empty-state'><h4>Cahier de texte vierge</h4></div>", unsafe_allow_html=True)
                     else:
                         for ent in entrees:
                             date_str = ent.date_cours.strftime('%d/%m/%Y') if getattr(ent, 'date_cours', None) else "N/D"
                             visa_actuel = getattr(ent, 'visa_inspecteur', None)
-                            auteur_cours = getattr(ent, 'auteur_saisie', None) or "Corps professoral"
+                            
+                            auteur_cours = trouver_enseignant_dispensant(ent)
+
                             with st.expander(f"Cours du {date_str} — {auteur_cours}"):
                                 st.write(f"**Contenu :** {getattr(ent, 'contenu', 'N/D')}")
                                 if not visa_actuel:
@@ -215,17 +220,15 @@ def afficher_espace_inspection():
                 classe_obj_men = next((c for c in classes_cycle if c.libelle == classe_suivie_men), None)
 
                 if classe_obj_men:
-                    matieres_cls = db.query(Matiere).filter(Matiere.classe_id == classe_obj_men.id, Matiere.school_id == resolved_school_id).all()
-                    
+                    matieres_cls = [m for m in dict_matieres_toutes.values() if m.classe_id == classe_obj_men.id]
                     libelle_classe_norm = normaliser_chaine(classe_suivie_men)
-                    toutes_entrees_ecole = db.query(CahierTexte).filter(CahierTexte.school_id == resolved_school_id).all()
                     
                     toutes_entrees_cls = []
-                    for e in toutes_entrees_ecole:
+                    for e in toutes_entrees_cahier:
                         e_cls_id = getattr(e, 'classe_id', None)
                         appartient = (e_cls_id == classe_obj_men.id)
-                        if not appartient and e_cls_id:
-                            cls_ref = db.query(Classe).filter(Classe.id == e_cls_id).first()
+                        if not appartient and e_cls_id in dict_classes_toutes:
+                            cls_ref = dict_classes_toutes[e_cls_id]
                             if cls_ref and normaliser_chaine(cls_ref.libelle) == libelle_classe_norm:
                                 appartient = True
                         if appartient:
@@ -255,7 +258,7 @@ def afficher_espace_inspection():
                         hr = 0.0
                         for e in toutes_entrees_cls:
                             e_mat_id = getattr(e, 'matiere_id', None)
-                            matiere_entree = db.query(Matiere).filter(Matiere.id == e_mat_id).first() if e_mat_id else None
+                            matiere_entree = dict_matieres_toutes.get(e_mat_id) if e_mat_id else None
                             nom_matiere_entree = normaliser_chaine(getattr(matiere_entree, 'libelle', None) or getattr(matiere_entree, 'nom', '')) if matiere_entree else ""
                             texte_entree = normaliser_chaine(f"{getattr(e, 'matiere', '')} {getattr(e, 'titre', '')} {getattr(e, 'contenu', '')}")
 
@@ -299,61 +302,67 @@ def afficher_espace_inspection():
 
         with tab_visite:
             st.markdown("<h4 class='tab-title'>📋 Grille Numérisée de Visite de Classe</h4>", unsafe_allow_html=True)
-            enseignants_query = db.query(Enseignant).filter(Enseignant.school_id == resolved_school_id)
-            if hasattr(Enseignant, "deleted_at"):
-                enseignants_query = enseignants_query.filter(Enseignant.deleted_at.is_(None))
-            liste_enseignants = enseignants_query.all()
-            noms_enseignants = sorted([f"{prof.nom} {prof.prenom}" for prof in liste_enseignants])
+            
+            prof_inspecte = st.selectbox("Nom de l'enseignant inspecté *", options=noms_enseignants_final, key="select_prof_inspecte")
+            
+            matieres_trouvees = set()
+            classes_trouvees = set()
+            cycles_trouves = set()
+
+            if prof_inspecte and prof_inspecte != "Aucun enseignant":
+                prof_obj = next((p for p in liste_enseignants if f"{getattr(p, 'nom', '')} {getattr(p, 'prenom', '')}".strip().lower() == prof_inspecte.lower() or f"{getattr(p, 'prenom', '')} {getattr(p, 'nom', '')}".strip().lower() == prof_inspecte.lower()), None)
+                
+                if prof_obj:
+                    for attr_rel in ['enseignant_id', 'professeur_id', 'prof_id', 'user_id']:
+                        if hasattr(Matiere, attr_rel):
+                            try:
+                                m_list = [m for m in dict_matieres_toutes.values() if getattr(m, attr_rel) == prof_obj.id]
+                                for m in m_list:
+                                    nom_m = getattr(m, 'libelle', None) or getattr(m, 'nom', '')
+                                    if nom_m:
+                                        matieres_trouvees.add(nom_m.strip().title())
+                                    cls_id = getattr(m, 'classe_id', None)
+                                    if cls_id and cls_id in dict_classes_toutes:
+                                        cls_obj = dict_classes_toutes[cls_id]
+                                        if getattr(cls_obj, 'libelle', None):
+                                            classes_trouvees.add(cls_obj.libelle)
+                                        if getattr(cls_obj, 'cycle', None):
+                                            cycles_trouves.add(cls_obj.cycle)
+                            except Exception:
+                                pass
+
+                entrees_prof = [e for e in toutes_entrees_cahier if str(getattr(e, 'auteur_saisie', '')).strip().lower() == prof_inspecte.lower() or (prof_obj and getattr(e, 'enseignant_id', None) == prof_obj.id)]
+                
+                for ep in entrees_prof:
+                    if ep.matiere_id:
+                        m_obj = dict_matieres_toutes.get(ep.matiere_id)
+                        if m_obj:
+                            m_nom = getattr(m_obj, 'libelle', None) or getattr(m_obj, 'nom', '')
+                            if m_nom:
+                                matieres_trouvees.add(m_nom.strip().title())
+                    elif hasattr(ep, 'matiere') and ep.matiere:
+                        matieres_trouvees.add(str(ep.matiere).strip().title())
+                    
+                    e_cls_id = getattr(ep, 'classe_id', None)
+                    if e_cls_id and e_cls_id in dict_classes_toutes:
+                        cls_obj = dict_classes_toutes[e_cls_id]
+                        if cls_obj:
+                            if getattr(cls_obj, 'libelle', None):
+                                classes_trouvees.add(cls_obj.libelle)
+                            if getattr(cls_obj, 'cycle', None):
+                                cycles_trouves.add(cls_obj.cycle)
+
+            toutes_matieres_noms = sorted(list(set([m.libelle.strip().title() for m in dict_matieres_toutes.values() if hasattr(m, 'libelle') and m.libelle])))
+            options_matieres = sorted(list(matieres_trouvees)) if matieres_trouvees else (toutes_matieres_noms if toutes_matieres_noms else ["Aucune matière"])
+            options_classes = sorted(list(classes_trouvees)) if classes_trouvees else noms_classes
+            options_cycles = sorted(list(cycles_trouves)) if cycles_trouves else [cycle_en_cours, "Collège", "Lycée"]
 
             with st.form("form_fiche_visite"):
                 col_f1, col_f2 = st.columns(2)
                 with col_f1:
-                    prof_inspecte = st.selectbox("Nom de l'enseignant inspecté *", options=noms_enseignants if noms_enseignants else ["Aucun enseignant"], key="select_prof_inspecte")
-                    
-                    matieres_enseignant = set()
-                    if prof_inspecte and prof_inspecte != "Aucun enseignant":
-                        prof_obj = next((p for p in liste_enseignants if f"{p.nom} {p.prenom}" == prof_inspecte or f"{p.prenom} {p.nom}" == prof_inspecte), None)
-                        
-                        # 1. Vérification par affectation directe dans la table Matiere si les colonnes existent
-                        matieres_db = []
-                        for attr_rel in ['enseignant_id', 'professeur_id', 'prof_id', 'user_id']:
-                            if prof_obj and hasattr(Matiere, attr_rel):
-                                try:
-                                    m_list = db.query(Matiere).filter(getattr(Matiere, attr_rel) == prof_obj.id, Matiere.school_id == resolved_school_id).all()
-                                    matieres_db.extend(m_list)
-                                except Exception:
-                                    pass
-                        
-                        for m in matieres_db:
-                            nom_m = getattr(m, 'libelle', None) or getattr(m, 'nom', '')
-                            if nom_m:
-                                matieres_enseignant.add(nom_m.strip().title())
-
-                        # 2. Vérification par le Cahier de Texte (cours déjà dispensés par l'enseignant)
-                        entrees_prof = db.query(CahierTexte).filter(
-                            CahierTexte.school_id == resolved_school_id,
-                            (CahierTexte.auteur_saisie == prof_inspecte) | 
-                            (CahierTexte.auteur_saisie.ilike(f"%{prof_inspecte}%")) |
-                            (CahierTexte.enseignant_id == prof_obj.id if prof_obj and hasattr(CahierTexte, 'enseignant_id') else False)
-                        ).all()
-                        
-                        for ep in entrees_prof:
-                            if ep.matiere_id:
-                                m_obj = db.query(Matiere).filter(Matiere.id == ep.matiere_id).first()
-                                if m_obj:
-                                    m_nom = getattr(m_obj, 'libelle', None) or getattr(m_obj, 'nom', '')
-                                    if m_nom:
-                                        matieres_enseignant.add(m_nom.strip().title())
-                            elif hasattr(ep, 'matiere') and ep.matiere:
-                                matieres_enseignant.add(str(ep.matiere).strip().title())
-                    
-                    # 3. Fallback intelligent : Si l'enseignant n'a pas encore de cours ou d'affectation explicite enregistrée, on cherche via les synonymes normalisés (ex: Physique Chimie)
-                    if not matieres_enseignant:
-                        classes_cycle_insp = db.query(Classe).filter(Classe.school_id == resolved_school_id, Classe.cycle == cycle_en_cours).all()
-                        matieres_enseignant = set(get_matieres_dynamiques_inspection(classes_cycle_insp, resolved_school_id, cycle_en_cours, db))
-
-                    liste_matieres_finaux = sorted(list(matieres_enseignant)) if matieres_enseignant else ["Aucune matière assignée"]
-                    discipline_eval = st.selectbox("Discipline / Matière *", options=liste_matieres_finaux)
+                    discipline_eval = st.selectbox("Discipline / Matière *", options=options_matieres, key="select_disc_visite")
+                    classe_eval = st.selectbox("Classe associée *", options=options_classes, key="select_classe_visite")
+                    cycle_eval = st.selectbox("Cycle concerné *", options=options_cycles, key="select_cycle_visite")
 
                 with col_f2:
                     note_pedagogique = st.slider("Note pédagogique (/20)", 0.0, 20.0, 14.0, 0.5)
@@ -368,7 +377,7 @@ def afficher_espace_inspection():
 
         with tab_stats:
             st.markdown("<h4 class='tab-title'>📊 Indicateurs de Gouvernance & Sécurité</h4>", unsafe_allow_html=True)
-            total_cours = db.query(CahierTexte).filter(CahierTexte.school_id == target_school_id).count()
+            total_cours = db.query(CahierTexte).filter(CahierTexte.school_id == target_school_id).count() if 'CahierTexte' in globals() else 0
             st.metric("Total Séances Enregistrées", total_cours)
 
     finally:

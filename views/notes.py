@@ -28,6 +28,16 @@ def normaliser_chaine(texte):
     return SYNONYMES_MATIERES.get(nettoye, nettoye)
 
 def afficher_notes():
+    st.markdown("""
+        <style>
+            .main .block-container {
+                max-width: 100% !important;
+                padding-left: 1rem;
+                padding-right: 1rem;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+
     st.subheader("📝 Saisie Globale des Notes (Mode Grille Matricielle)")
     st.markdown("Interface matricielle : les élèves en lignes, les matières en colonnes unifiées.")
     st.markdown("---")
@@ -85,7 +95,6 @@ def afficher_notes():
 
         classe_obj = next((c for c in classes_cycle if c.libelle == classe_choisie), None)
         if classe_obj:
-            # --- RÉCUPÉRATION STRICTE DES MATIÈRES DE LA CLASSE SÉLECTIONNÉE ---
             matieres_query = db.query(Matiere).filter(
                 Matiere.classe_id == classe_obj.id,
                 Matiere.school_id == resolved_school_id
@@ -108,6 +117,7 @@ def afficher_notes():
             else:
                 st.success(f"Grille active pour **{classe_choisie}** | **{semestre_choisi}** | **{type_eval}** ({len(eleves)} élèves).")
 
+                # Récupération sécurisée des notes existantes
                 notes_existantes = db.query(Note).join(Eleve).filter(
                     Note.school_id == target_school_id,
                     Eleve.classe_id == classe_obj.id,
@@ -115,14 +125,18 @@ def afficher_notes():
                     Note.type_evaluation == type_eval,
                 ).all()
 
-                dict_notes = {(n.eleve_id, n.matiere_id): n.valeur for n in notes_existantes}
+                dict_notes = {(n.eleve_id, n.matiere_id): float(n.valeur) if n.valeur is not None else 0.0 for n in notes_existantes}
+
+                map_libelle_matiere = {}
+                for mat in matieres_classe:
+                    mat_lib = (mat.libelle if hasattr(mat, 'libelle') and mat.libelle else getattr(mat, 'nom', '')).title()
+                    map_libelle_matiere[mat_lib] = mat.id
 
                 data_matrice = []
                 for e in eleves:
                     ligne = {"eleve_id": e.id, "Matricule": e.matricule, "Nom & Prénom": f"{e.nom} {e.prenom}"}
-                    for mat in matieres_classe:
-                        mat_lib = (mat.libelle if hasattr(mat, 'libelle') and mat.libelle else getattr(mat, 'nom', '')).title()
-                        val_note = float(dict_notes.get((e.id, mat.id), 0.0))
+                    for mat_lib, mat_id in map_libelle_matiere.items():
+                        val_note = dict_notes.get((e.id, mat_id), 0.0)
                         ligne[mat_lib] = val_note
                     data_matrice.append(ligne)
 
@@ -132,56 +146,67 @@ def afficher_notes():
                     "Matricule": st.column_config.TextColumn("Matricule", disabled=True),
                     "Nom & Prénom": st.column_config.TextColumn("Nom & Prénom", disabled=True),
                 }
-                for mat in matieres_classe:
-                    mat_lib = (mat.libelle if hasattr(mat, 'libelle') and mat.libelle else getattr(mat, 'nom', '')).title()
+                for mat_lib in map_libelle_matiere.keys():
                     max_val = 18.0 if "conduite" in mat_lib.lower() else 20.0
                     column_config[mat_lib] = st.column_config.NumberColumn(mat_lib, min_value=0.0, max_value=max_val, step=0.25, format="%.2f")
 
-                editor_key = f"editor_matrix_{classe_choisie}_{semestre_choisi}_{type_eval}"
-                edited_df = st.data_editor(df_matrice, column_config=column_config, hide_index=True, use_container_width=True, key=editor_key)
+                editor_key = f"editor_matrix_{classe_obj.id}_{semestre_choisi}_{type_eval}"
+                
+                # --- UTILISATION D'UN FORMULAIRE STREAMLIT POUR GARANTIR LA SYNRONISATION ---
+                with st.form(key=f"form_notes_{classe_obj.id}_{semestre_choisi}_{type_eval}"):
+                    edited_df = st.data_editor(df_matrice, column_config=column_config, hide_index=True, use_container_width=True, key=editor_key)
+                    submitted = st.form_submit_button("💾 Enregistrer toutes les notes de la classe", type="primary")
 
-                if st.button("💾 Enregistrer toutes les notes de la classe", type="primary"):
+                if submitted:
                     modifications_count = 0
-                    for _, row in edited_df.iterrows():
-                        eleve_id = row["eleve_id"]
-                        nom_eleve = row["Nom & Prénom"]
-                        for mat in matieres_classe:
-                            mat_lib = (mat.libelle if hasattr(mat, 'libelle') and mat.libelle else getattr(mat, 'nom', '')).title()
-                            valeur_saisie = float(row[mat_lib])
-                            ancienne_valeur = dict_notes.get((eleve_id, mat.id), 0.0)
+                    try:
+                        for _, row in edited_df.iterrows():
+                            eleve_id = int(row["eleve_id"])
+                            nom_eleve = row["Nom & Prénom"]
+                            
+                            for mat_lib, mat_id in map_libelle_matiere.items():
+                                valeur_saisie = float(row[mat_lib]) if pd.notna(row[mat_lib]) else 0.0
+                                ancienne_valeur = dict_notes.get((eleve_id, mat_id), 0.0)
 
-                            if ancienne_valeur != valeur_saisie:
-                                note_obj = db.query(Note).filter(
-                                    Note.school_id == target_school_id,
-                                    Note.eleve_id == eleve_id,
-                                    Note.matiere_id == mat.id,
-                                    Note.semestre == semestre_choisi,
-                                    Note.type_evaluation == type_eval,
-                                ).first()
+                                # On persiste si la note est modifiée ou si elle possède une valeur significative (> 0)
+                                if ancienne_valeur != valeur_saisie or valeur_saisie > 0.0:
+                                    note_obj = db.query(Note).filter(
+                                        Note.school_id == target_school_id,
+                                        Note.eleve_id == eleve_id,
+                                        Note.matiere_id == mat_id,
+                                        Note.semestre == semestre_choisi,
+                                        Note.type_evaluation == type_eval,
+                                    ).first()
 
-                                if note_obj:
-                                    note_obj.valeur = valeur_saisie
-                                    action_desc = f"Modification de note ({type_eval} - {mat_lib}) pour {nom_eleve}"
-                                    statut_log = "Critique"
-                                else:
-                                    note_obj = Note(
-                                        school_id=target_school_id,
-                                        eleve_id=eleve_id,
-                                        matiere_id=mat.id,
-                                        valeur=valeur_saisie,
-                                        semestre=semestre_choisi,
-                                        type_evaluation=type_eval,
-                                    )
-                                    db.add(note_obj)
-                                    action_desc = f"Attribution de note ({type_eval} - {mat_lib}) à {nom_eleve}"
-                                    statut_log = "Succès"
+                                    if note_obj:
+                                        note_obj.valeur = valeur_saisie
+                                        action_desc = f"Modification de note ({type_eval} - {mat_lib}) pour {nom_eleve}"
+                                        statut_log = "Critique"
+                                    else:
+                                        note_obj = Note(
+                                            school_id=target_school_id,
+                                            eleve_id=eleve_id,
+                                            matiere_id=mat_id,
+                                            valeur=valeur_saisie,
+                                            semestre=semestre_choisi,
+                                            type_evaluation=type_eval,
+                                        )
+                                        db.add(note_obj)
+                                        action_desc = f"Attribution de note ({type_eval} - {mat_lib}) à {nom_eleve}"
+                                        statut_log = "Succès"
 
-                                modifications_count += 1
-                                log_action_erp(module="Saisie des notes", action=action_desc, statut=statut_log, valeur_avant=f"{ancienne_valeur} / 20", valeur_apres=f"{valeur_saisie} / 20")
+                                    modifications_count += 1
+                                    try:
+                                        log_action_erp(module="Saisie des notes", action=action_desc, statut=statut_log, valeur_avant=f"{ancienne_valeur} / 20", valeur_apres=f"{valeur_saisie} / 20")
+                                    except Exception:
+                                        pass
 
-                    db.commit()
-                    st.success(f"✅ Enregistrement réussi ! {modifications_count} modification(s) tracée(s).")
-                    st.rerun()
+                        db.commit()
+                        st.success(f"✅ Enregistrement réussi ! {modifications_count} valeur(s) enregistrée(s) en base de données.")
+                        st.balloons()
+                    except Exception as e:
+                        db.rollback()
+                        st.error(f"❌ Erreur critique lors de l'enregistrement : {e}")
 
     finally:
         db.close()

@@ -2,6 +2,7 @@ from datetime import datetime
 from io import BytesIO
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 from database.db_config import SessionLocal
 from database.models import ActivityLog, CahierTexte, Classe, Enseignant, Matiere, Programme, School
 import unicodedata
@@ -25,9 +26,8 @@ SYNONYMES_MATIERES = {
     "conduite": "conduite",
 }
 
-# Grille de secours officielle MEN pour les volumes horaires du collège par matière normalisée
 BAREME_OFFICIEL_COLLEGE = {
-    "francis": 140.0,
+    "francais": 140.0,
     "anglais": 140.0,
     "histoire geographie": 70.0,
     "mathematiques": 175.0,
@@ -46,6 +46,16 @@ def normaliser_chaine(texte):
     sans_accent = "".join([c for c in nfkd if not unicodedata.combining(c)])
     nettoye = " ".join(sans_accent.lower().replace("-", " ").replace("_", " ").replace("è", "e").replace("é", " e").split())
     return SYNONYMES_MATIERES.get(nettoye, nettoye)
+
+def parse_duree_seance(duree_c):
+    if not duree_c:
+        return 1.0
+    chiffres = "".join([c for c in str(duree_c) if c.isdigit() or c == '.'])
+    try:
+        val = float(chiffres)
+        return val if val > 0 else 1.0
+    except ValueError:
+        return 1.0
 
 
 def afficher_supervision_progression():
@@ -71,8 +81,10 @@ def afficher_supervision_progression():
                 if ecole_courante
                 else st.session_state.get("school_name", "Établissement")
             )
+            school_adresse = getattr(ecole_courante, "adresse", "QUARTIER AEROPORT NIAMEY-NIGER") if ecole_courante else "QUARTIER AEROPORT NIAMEY-NIGER"
         else:
             school_name = st.session_state.get("school_name", "Établissement")
+            school_adresse = "QUARTIER AEROPORT NIAMEY-NIGER"
     finally:
         db.close()
 
@@ -91,7 +103,6 @@ def afficher_supervision_progression():
 
         ecole_active_id = school_id if school_id else target_school_id
 
-        # 1. Sélection de la classe pour un suivi précis par niveau
         classes_query = db.query(Classe).filter(
             Classe.cycle == cycle_en_cours, Classe.school_id == ecole_active_id
         )
@@ -124,7 +135,6 @@ def afficher_supervision_progression():
             None,
         )
 
-        # --- RÉCUPÉRATION STRICTE DES MATIÈRES DE LA CLASSE SÉLECTIONNÉE ---
         matieres_query = db.query(Matiere).filter(
             Matiere.classe_id == classe_obj.id if classe_obj else True,
             Matiere.school_id == ecole_active_id
@@ -172,6 +182,9 @@ def afficher_supervision_progression():
         tous_enseignants = db.query(Enseignant).filter(Enseignant.school_id == ecole_active_id).all()
 
         data_suivi = []
+        total_prevu_globale = 0.0
+        total_realise_globale = 0.0
+
         for mat in matieres_cycle:
             mat_lib = (
                 mat.libelle
@@ -180,19 +193,16 @@ def afficher_supervision_progression():
             )
             mat_norm = normaliser_chaine(mat_lib)
 
-            # --- DÉTECTION INTELLIGENTE DE L'ENSEIGNANT ASSIGNÉ ---
             enseignant_affecte = "Non assigné"
             for ens in tous_enseignants:
                 mat_attr = str(getattr(ens, "matieres_attribuees", "") or getattr(ens, "matieres", "")).lower()
                 cls_attr = str(getattr(ens, "classes_attribuees", "") or getattr(ens, "classes", "")).lower()
                 
-                # Vérifier si l'enseignant enseigne cette matière dans cette classe
                 if (mat_norm in normaliser_chaine(mat_attr) or mat_lib.lower() in mat_attr) and \
                    (classe_selectionnee.lower() in cls_attr or not cls_attr):
                     enseignant_affecte = f"{getattr(ens, 'nom', '')} {getattr(ens, 'prenom', '')}".strip()
                     break
 
-            # Fallback : vérifier si une entrée récente dans le cahier de texte a été enregistrée par un enseignant pour cette matière
             if enseignant_affecte == "Non assigné":
                 seances_mat_check = [e for e in toutes_entrees if getattr(e, 'matiere_id', None) == mat.id]
                 for s in seances_mat_check:
@@ -224,7 +234,6 @@ def afficher_supervision_progression():
                             volume_prevu = float(p.volume_horaire)
                             break
                 
-                # Secours ultime par barème officiel si toujours à 0
                 if volume_prevu == 0.0 and mat_norm in BAREME_OFFICIEL_COLLEGE:
                     volume_prevu = BAREME_OFFICIEL_COLLEGE[mat_norm]
             else:
@@ -248,8 +257,125 @@ def afficher_supervision_progression():
                 if prog_obj and prog_obj.coefficient:
                     coefficient_val = int(prog_obj.coefficient)
 
-            # Filtrage des séances pour cette matière spécifique
             seances_mat = [e for e in toutes_entrees if getattr(e, 'matiere_id', None) == mat.id or normaliser_chaine(getattr(e, 'matiere', getattr(e, 'discipline', ''))) == mat_norm]
 
             volume_realise = 0.0
+            dernier_chapitre = "Aucun cours enregistré"
+            
             for seance in seances_mat:
+                duree_val = parse_duree_seance(getattr(seance, 'duree_seance', getattr(seance, 'duree', 1.0)))
+                volume_realise += duree_val
+
+            if seances_mat:
+                dernier_cours = seances_mat[-1]
+                contenu_cours = getattr(dernier_cours, "contenu", "") or ""
+                dernier_chapitre = contenu_cours[:60] + "..." if len(contenu_cours) > 60 else (contenu_cours if contenu_cours else "N/D")
+
+            total_prevu_globale += volume_prevu
+            total_realise_globale += volume_realise
+
+            progression_pct = round((volume_realise / volume_prevu) * 100, 1) if volume_prevu > 0 else 0.0
+            if progression_pct > 100.0:
+                progression_pct = 100.0
+
+            if volume_prevu == 0.0:
+                appreciation = "⚠️ Volume horaire non défini"
+            elif progression_pct >= 75:
+                appreciation = "🟢 Rythme excellent et conforme"
+            elif progression_pct >= 40:
+                appreciation = "🟡 Rythme satisfaisant"
+            elif progression_pct > 0:
+                appreciation = "🟠 Rythme insuffisant"
+            else:
+                appreciation = "🔴 En attente de première saisie"
+
+            data_suivi.append({
+                "Matière": mat_lib.title(),
+                "Enseignant(e)": enseignant_affecte,
+                "Heures Prévues": f"{volume_prevu:g} h",
+                "Heures Réalisées": f"{volume_realise:g} h",
+                "Progression (%)": f"{progression_pct}%",
+                "Dernier Chapitre / Notions": dernier_chapitre,
+                "Appréciation Inspection": appreciation,
+            })
+
+        taux_global = (total_realise_globale / total_prevu_globale * 100) if total_prevu_globale > 0 else 0.0
+
+        st.markdown("#### 📊 Synthèse Globale de la Classe")
+        col_k1, col_k2, col_k3 = st.columns(3)
+        col_k1.metric("Volume Prévu Global", f"{total_prevu_globale:g} h")
+        col_k2.metric("Volume Dispensé Global", f"{total_realise_globale:g} h")
+        col_k3.metric("Taux d'Exécution Moyen", f"{taux_global:.1f} %")
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        lignes_html = ""
+        for i, row in enumerate(data_suivi, 1):
+            lignes_html += f"<tr><td style='text-align: center;'>{i}</td><td><b>{row['Matière']}</b></td><td>{row['Enseignant(e)']}</td><td style='text-align: center;'>{row['Heures Prévues']}</td><td style='text-align: center;'>{row['Heures Réalisées']}</td><td style='text-align: center;'>{row['Progression (%)']}</td><td>{row['Dernier Chapitre / Notions']}</td><td>{row['Appréciation Inspection']}</td><td></td></tr>"
+
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset='utf-8'>
+            <style>
+                @page {{ size: A4 landscape; margin: 10mm; }}
+                body {{ font-family: Arial, sans-serif; color: #000; background: #FFF; }}
+                table {{ width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-top: 15px; }}
+                th, td {{ border: 1px solid #000080; padding: 6px 8px; }}
+                th {{ background-color: #800020; color: #FFFFFF; text-align: center; }}
+            </style>
+        </head>
+        <body>
+            <div style='text-align:center; margin-bottom:15px;'>
+                <button onclick='window.print()' style='background:#000080; color:white; padding:10px 24px; font-weight:bold; border:none; border-radius:6px; cursor:pointer;'>🖨️ Imprimer le Rapport d'Avancement (A4 Paysage)</button>
+            </div>
+            <div style='width:277mm; margin:0 auto; background:#FFF; padding:12mm; border:1.5px solid #000080;'>
+                <table>
+                    <tr>
+                        <td style='border:none; font-weight:bold; font-size: 0.9rem;'>{school_name}<br>{school_adresse}</td>
+                        <td style='border:none; text-align:right; font-size: 0.9rem;'><b>RAPPORT D'AVANCEMENT DES PROGRAMMES</b><br>Classe : <b>{classe_selectionnee}</b> | Cycle : <b>{cycle_en_cours}</b><br>Date d'édition : <b>{datetime.today().strftime('%d/%m/%Y')}</b></td>
+                    </tr>
+                </table>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>N°</th>
+                            <th>Matière</th>
+                            <th>Enseignant(e)</th>
+                            <th>Heures Prévues</th>
+                            <th>Heures Réalisées</th>
+                            <th>Progression</th>
+                            <th>Dernier Chapitre / Notions</th>
+                            <th>Appréciation / Statut</th>
+                            <th>Visa / Observations</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {lignes_html}
+                    </tbody>
+                    <tfoot>
+                        <tr style='background:#000080; color:#FFF; font-weight:bold;'>
+                            <td colspan='3' style='text-align:right;'>TOTAUX GLOBAUX / MOYENNE :</td>
+                            <td style='text-align:center;'>{total_prevu_globale:g} h</td>
+                            <td style='text-align:center;'>{total_realise_globale:g} h</td>
+                            <td style='text-align:center;' colspan='4'>Taux d'exécution moyen : {taux_global:.1f} %</td>
+                            <td></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </body>
+        </html>
+        """
+
+        components.html(html_content, height=520, scrolling=True)
+
+        st.markdown("#### Détail par Discipline")
+        df_suivi = pd.DataFrame(data_suivi)
+        st.dataframe(df_suivi, use_container_width=True, column_config={
+            "Enseignant(e)": st.column_config.TextColumn("Enseignant(e)", width="large"),
+            "Dernier Chapitre / Notions": st.column_config.TextColumn("Dernier Chapitre / Notions", width="large")
+        })
+
+    finally:
+        db.close()
