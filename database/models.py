@@ -31,6 +31,9 @@ class School(Base):
     matieres = relationship("Matiere", back_populates="school", cascade="all, delete-orphan")
     enseignants = relationship("Enseignant", back_populates="school", cascade="all, delete-orphan")
     programmes = relationship("Programme", back_populates="school", cascade="all, delete-orphan")
+    parents = relationship("Parent", back_populates="school", cascade="all, delete-orphan")
+    affectations = relationship("Affectation", back_populates="school", cascade="all, delete-orphan")
+    emplois_du_temps = relationship("EmploiDuTemps", back_populates="school", cascade="all, delete-orphan")
 
 
 class AnneeScolaire(Base):
@@ -70,6 +73,7 @@ class Classe(Base):
     eleves = relationship("Eleve", back_populates="classe", cascade="all, delete-orphan")
     cahiers_texte = relationship("CahierTexte", back_populates="classe", cascade="all, delete-orphan")
     matieres = relationship("Matiere", back_populates="classe", cascade="all, delete-orphan")
+    emplois_du_temps = relationship("EmploiDuTemps", back_populates="classe_rel", cascade="all, delete-orphan")
 
     @property
     def nom(self):
@@ -78,6 +82,23 @@ class Classe(Base):
     @nom.setter
     def nom(self, value):
         self.libelle = value
+
+
+class Parent(Base):
+    __tablename__ = 'parents'
+    __table_args__ = {'extend_existing': True}
+
+    id = Column(Integer, primary_key=True, index=True)
+    school_id = Column(Integer, ForeignKey('schools.id'), nullable=False, index=True)
+    nom = Column(String, index=True)
+    prenom = Column(String, index=True)
+    telephone = Column(String, nullable=True)
+    email = Column(String, nullable=True)
+    profession = Column(String, nullable=True)
+    adresse = Column(String, nullable=True)
+    deleted_at = Column(DateTime, nullable=True)
+
+    school = relationship("School", back_populates="parents")
 
 
 class Eleve(Base):
@@ -266,6 +287,7 @@ class Affectation(Base):
     classe_id = Column(Integer, ForeignKey("classes.id"), nullable=True, index=True)
     matiere_id = Column(Integer, ForeignKey("matieres.id"), nullable=True, index=True)
 
+    school = relationship("School", back_populates="affectations")
     enseignant = relationship("Enseignant")
     classe = relationship("Classe")
     matiere = relationship("Matiere")
@@ -299,7 +321,8 @@ class EmploiDuTemps(Base):
     enseignant = Column(String)
     contact = Column(String, nullable=True)
 
-    classe_rel = relationship("Classe")
+    school = relationship("School", back_populates="emplois_du_temps")
+    classe_rel = relationship("Classe", back_populates="emplois_du_temps")
 
 
 class CahierTexte(Base):

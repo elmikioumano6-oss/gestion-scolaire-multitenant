@@ -17,6 +17,7 @@ from database.models import (
     Presence,
     School,
     User,
+    Evaluation,
 )
 
 SYNONYMES_MATIERES = {
@@ -38,7 +39,6 @@ SYNONYMES_MATIERES = {
     "conduite": "conduite",
 }
 
-
 def normaliser_chaine(texte):
     if not texte or pd.isna(texte):
         return ""
@@ -46,7 +46,6 @@ def normaliser_chaine(texte):
     sans_accent = "".join([c for c in nfkd if not unicodedata.combining(c)])
     nettoye = " ".join(sans_accent.lower().replace("-", " ").replace("_", " ").replace("è", "e").replace("é", " e").split())
     return SYNONYMES_MATIERES.get(nettoye, nettoye)
-
 
 def get_matieres_classe_strict(classe_obj, ecole_active_id, db, enseignant_obj=None):
     if not classe_obj:
@@ -56,10 +55,7 @@ def get_matieres_classe_strict(classe_obj, ecole_active_id, db, enseignant_obj=N
         if enseignant_obj and hasattr(enseignant_obj, "matieres_attribuees") and enseignant_obj.matieres_attribuees:
             matieres_autorisees = [m.strip().title() for m in enseignant_obj.matieres_attribuees.split(",") if m.strip()]
 
-        mat_q = db.query(Matiere).filter(
-            Matiere.school_id == ecole_active_id,
-            Matiere.classe_id == classe_obj.id
-        )
+        mat_q = db.query(Matiere).filter(Matiere.school_id == ecole_active_id, Matiere.classe_id == classe_obj.id)
         if hasattr(Matiere, "deleted_at"):
             mat_q = mat_q.filter(Matiere.deleted_at.is_(None))
         matieres_brutes = mat_q.all()
@@ -84,7 +80,6 @@ def get_matieres_classe_strict(classe_obj, ecole_active_id, db, enseignant_obj=N
         return sorted(list(set(noms))) if noms else ["Matière Générale"]
     except Exception:
         return ["Matière Générale"]
-
 
 def afficher_espace_enseignants():
     st.markdown("""
@@ -134,7 +129,6 @@ def afficher_espace_enseignants():
     is_super_admin = st.session_state.get("is_super_admin", False)
     user_role = str(st.session_state.get("role", "enseignant")).lower()
     username = st.session_state.get("username", "enseignant")
-    cycle_en_cours = st.session_state.get("cycle_actif", "Collège / Lycée")
 
     if not school_id and not is_super_admin:
         st.warning("⚠️ Veuillez vous connecter pour accéder à cette section.")
@@ -176,20 +170,20 @@ def afficher_espace_enseignants():
                 classes_disponibles = []
 
             if not classes_disponibles:
-                st.warning("⚠️ Aucune classe ne vous est actuellement attribuée. Veuillez contacter l'administration.")
-                return
+                classes_disponibles = toutes_classes_ecole
 
         noms_classes = sorted(list(set(c.libelle for c in classes_disponibles if c.libelle)))
 
-        st.markdown(f"""
-            <div class="teacher-card">
-                <div style="font-size: 3.5rem; margin-right: 25px;">👨‍🏫</div>
-                <div>
-                    <h2>Bienvenue, Prof. {username.capitalize()}</h2>
-                    <p>Établissement : <b>{school_name}</b> &nbsp;|&nbsp; Accès : <b>Collège / Lycée (Multi-cycles)</b></p>
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
+        card_html = (
+            '<div class="teacher-card">'
+            '<div style="font-size: 3.5rem; margin-right: 25px;">👨‍🏫</div>'
+            '<div>'
+            f'<h2>Bienvenue, Prof. {username.capitalize()}</h2>'
+            f'<p>Établissement : <b>{school_name}</b> &nbsp;|&nbsp; Accès : <b>Collège / Lycée (Multi-cycles)</b></p>'
+            '</div>'
+            '</div>'
+        )
+        st.markdown(card_html, unsafe_allow_html=True)
 
         st.markdown('<div class="context-box">', unsafe_allow_html=True)
         st.markdown("#### 🎯 Paramètres de la séance (Basculement dynamique Collège / Lycée)")
@@ -217,16 +211,17 @@ def afficher_espace_enseignants():
                 eleves_query = eleves_query.filter(Eleve.deleted_at.is_(None))
             eleves = eleves_query.order_by(Eleve.nom).all()
 
-        tab_cahier, tab_notes, tab_appel, tab_charge, tab_edt = st.tabs([
+        tab_cahier, tab_notes, tab_appel, tab_charge, tab_edt, tab_eval = st.tabs([
             "📖 Cahier de Texte",
             "📝 Saisie des Notes",
             "📋 Feuille d'Appel",
             "📊 Horaires & Reste à faire",
             "📅 Emploi du Temps",
+            "📅 Planning des Évaluations",
         ])
 
         with tab_cahier:
-            st.markdown(f"<h4 class='tab-title'>📖 Remplir le Cahier de Texte — {classe_enseignant} ({matiere_enseignant})</h4>", unsafe_allow_html=True)
+            st.markdown(f'<h4 class="tab-title">📖 Remplir le Cahier de Texte — {classe_enseignant} ({matiere_enseignant})</h4>', unsafe_allow_html=True)
             with st.form("form_ens_cahier_texte_avance"):
                 col_c1, col_c2 = st.columns(2)
                 with col_c1:
@@ -251,7 +246,7 @@ def afficher_espace_enseignants():
                     else:
                         nouvelle_entree = CahierTexte(
                             school_id=ecole_active_id,
-                            cycle=getattr(classe_obj, 'cycle', 'Collège / Lycée'),
+                            cycle=getattr(classe_obj, "cycle", "Collège / Lycée"),
                             classe_id=classe_obj.id,
                             matiere_id=matiere_obj.id,
                             user_id=st.session_state.get("user_id"),
@@ -263,14 +258,14 @@ def afficher_espace_enseignants():
                             mesures_correctives=mesures_correctives.strip() if mesures_correctives else None,
                             est_substitue=0,
                             auteur_saisie=username,
-                            statut_validation="Validé",
+                            statut_validation="Validé"
                         )
                         db.add(nouvelle_entree)
                         db.commit()
                         st.success("✅ Entrée du cahier de texte enregistrée et transmise au registre de l'établissement avec succès !")
 
         with tab_notes:
-            st.markdown(f"<h4 class='tab-title'>📝 Grille d'Évaluation — {classe_enseignant} ({matiere_enseignant})</h4>", unsafe_allow_html=True)
+            st.markdown(f'<h4 class="tab-title">📝 Grille d\'Évaluation — {classe_enseignant} ({matiere_enseignant})</h4>', unsafe_allow_html=True)
             if not eleves:
                 st.markdown(f"""
                     <div class="empty-state">
@@ -314,7 +309,7 @@ def afficher_espace_enseignants():
                         st.success("✅ Notes synchronisées avec succès !")
 
         with tab_appel:
-            st.markdown(f"<h4 class='tab-title'>📋 Contrôle de Présence & Discipline — {classe_enseignant}</h4>", unsafe_allow_html=True)
+            st.markdown(f'<h4 class="tab-title">📋 Contrôle de Présence & Discipline — {classe_enseignant}</h4>', unsafe_allow_html=True)
             if not eleves:
                 st.markdown(f"""
                     <div class="empty-state">
@@ -383,7 +378,7 @@ def afficher_espace_enseignants():
                         st.success("✅ Feuille d'appel et de discipline validée et transmise avec succès !")
 
         with tab_charge:
-            st.markdown(f"<h4 class='tab-title'>📊 Progression et Heures — {matiere_enseignant} ({classe_enseignant})</h4>", unsafe_allow_html=True)
+            st.markdown(f'<h4 class="tab-title">📊 Progression et Heures — {matiere_enseignant} ({classe_enseignant})</h4>', unsafe_allow_html=True)
 
             if classe_obj and matiere_obj:
                 programmes_ecole = db.query(Programme).filter(Programme.school_id == ecole_active_id).all()
@@ -453,24 +448,31 @@ def afficher_espace_enseignants():
                 st.info("Veuillez sélectionner une classe et une matière valides.")
 
         with tab_edt:
-            st.markdown(f"<h4 class='tab-title'>📅 Emploi du Temps — Matière : {matiere_enseignant} (Classe : {classe_enseignant})</h4>", unsafe_allow_html=True)
+            st.markdown(f'<h4 class="tab-title">📅 Emploi du Temps — Matière : {matiere_enseignant} (Classe : {classe_enseignant})</h4>', unsafe_allow_html=True)
             
             query_edt_classe = db.query(EmploiDuTemps).filter(
-                EmploiDuTemps.school_id == ecole_active_id,
-                EmploiDuTemps.classe == classe_enseignant
+                EmploiDuTemps.school_id == ecole_active_id
             ).all()
 
             mat_norm_cible = normaliser_chaine(matiere_enseignant)
+            classe_norm_cible = classe_enseignant.strip().lower()
             
             edt_prof_exclusif = {}
             jours_presents = set()
             heures_presents = set()
 
             for item in query_edt_classe:
-                if item.matiere and (mat_norm_cible in normaliser_chaine(item.matiere) or normaliser_chaine(item.matiere) in mat_norm_cible):
-                    edt_prof_exclusif[(item.jour, item.heure)] = item
-                    jours_presents.add(item.jour)
-                    heures_presents.add(item.heure)
+                item_classe_str = str(getattr(item, 'classe', '')).strip().lower()
+                if classe_norm_cible in item_classe_str or item_classe_str in classe_norm_cible:
+                    item_mat_str = str(getattr(item, 'matiere', '')).strip()
+                    item_mat_norm = normaliser_chaine(item_mat_str)
+                    
+                    if not item_mat_str or mat_norm_cible in item_mat_norm or item_mat_norm in mat_norm_cible or any(terme in item_mat_norm for terme in mat_norm_cible.split()):
+                        j = getattr(item, 'jour', 'Lundi')
+                        h = getattr(item, 'heure', '08h00 - 09h00')
+                        edt_prof_exclusif[(j, h)] = item
+                        jours_presents.add(j)
+                        heures_presents.add(h)
 
             if not edt_prof_exclusif:
                 st.info(f"ℹ️ Aucun créneau horaire n'est planifié pour la matière **{matiere_enseignant}** dans la classe de **{classe_enseignant}**.")
@@ -487,6 +489,8 @@ def afficher_espace_enseignants():
                     "13h30 - 14h30",
                 ]
                 heures_actives = [h for h in creneaux_ordre if h in heures_presents]
+                if not heures_actives:
+                    heures_actives = sorted(list(heures_presents))
 
                 headers_html = "<th>Jour</th>" + "".join([f"<th>{h}</th>" for h in heures_actives])
 
@@ -497,7 +501,7 @@ def afficher_espace_enseignants():
                         match_c = edt_prof_exclusif.get((j, h))
                         if match_c:
                             contact_str = f"<br><span style='font-size: 0.7rem; color: #60a5fa;'>📞 {match_c.contact}</span>" if hasattr(match_c, 'contact') and match_c.contact else ""
-                            prof_str = f"<br><span style='font-size: 0.75rem; color: #94a3b8;'>👨‍🏫 {match_c.enseignant}</span>" if hasattr(match_c, 'enseignant') and match_c.enseignant else ""
+                            prof_str = f"<br><span style='font-size: 0.75rem; color: #94a3b8;'>👨‍🏫 {match_c.enseignant}</span>" if (hasattr(match_c, 'enseignant') and match_c.enseignant) else ""
                             lignes_tbody_ens += f"""
                             <td>
                                 <div style="color: #34d399; font-weight: 700; font-size: 0.85rem; margin-bottom: 3px;">📖 {match_c.matiere}</div>
@@ -548,7 +552,7 @@ def afficher_espace_enseignants():
                         color: #cbd5e0;
                         text-align: center;
                         padding: 12px 8px;
-                        font-size: 0.8rem;
+                        font-size: 0.80rem;
                         border-bottom: 1px solid #1f2937;
                         border-right: 1px solid #1f2937;
                         vertical-align: middle;
@@ -581,9 +585,73 @@ def afficher_espace_enseignants():
                 """
                 components.html(html_table_ens, height=250, scrolling=True)
 
+        with tab_eval:
+            st.markdown(f'<h4 class="tab-title">📅 Planning Officiel des Évaluations — Classe : {classe_enseignant} ({matiere_enseignant})</h4>', unsafe_allow_html=True)
+            st.markdown("Consultez ci-dessous les devoirs et compositions programmés pour votre classe et votre matière.")
+
+            if classe_obj:
+                mat_norm_cible = normaliser_chaine(matiere_enseignant)
+                data_evals = []
+                seen_evals = set()
+
+                evals_brutes = db.query(Evaluation).filter(
+                    Evaluation.school_id == ecole_active_id,
+                    Evaluation.classe_id == classe_obj.id
+                ).order_by(Evaluation.date_evaluation).all()
+
+                for ev in evals_brutes:
+                    correspond = False
+                    if matiere_obj and getattr(ev, 'matiere_id', None) == matiere_obj.id:
+                        correspond = True
+                    else:
+                        ev_mat_txt = getattr(ev, 'intitule', getattr(ev, 'matiere', getattr(ev, 'nom_matiere', '')))
+                        m_norm_ev = normaliser_chaine(ev_mat_txt)
+                        if ev_mat_txt and (mat_norm_cible == m_norm_ev or mat_norm_cible in m_norm_ev):
+                            correspond = True
+
+                    if correspond:
+                        date_ev_str = ev.date_evaluation.strftime("%d/%m/%Y") if ev.date_evaluation else "23/11/2026"
+                        horaire_ev_str = f"{ev.heure_debut} - {ev.heure_fin}" if hasattr(ev, 'heure_debut') and ev.heure_debut else "08h00 - 10h00"
+                        
+                        cle_unique = (date_ev_str, horaire_ev_str, matiere_enseignant)
+                        if cle_unique in seen_evals:
+                            continue
+                        seen_evals.add(cle_unique)
+
+                        duree_str = "2h"
+                        if hasattr(ev, 'heure_debut') and hasattr(ev, 'heure_fin') and ev.heure_debut and ev.heure_fin:
+                            try:
+                                t1 = datetime.strptime(str(ev.heure_debut).strip(), "%H:%M")
+                                t2 = datetime.strptime(str(ev.heure_fin).strip(), "%H:%M")
+                                diff = t2 - t1
+                                heures = diff.seconds // 3600
+                                minutes = (diff.seconds % 3600) // 60
+                                duree_str = f"{heures}h{minutes:02d}" if minutes > 0 else f"{heures}h"
+                            except Exception:
+                                duree_str = f"{ev.heure_debut} - {ev.heure_fin}"
+
+                        data_evals.append({
+                            "Semestre": getattr(ev, 'semestre', 'Semestre 1'),
+                            "Type d'Examen": getattr(ev, 'type_evaluation', 'Devoir'),
+                            "Date": date_ev_str,
+                            "Horaire": horaire_ev_str,
+                            "Durée": duree_str,
+                            "Matière": matiere_enseignant,
+                            "Salle": getattr(ev, 'salle', 'Salle Principale')
+                        })
+
+                if data_evals:
+                    st.dataframe(pd.DataFrame(data_evals), use_container_width=True)
+                else:
+                    st.info(f"ℹ️ Aucun planning d'évaluation n'a été publié pour la matière **{matiere_enseignant}** dans la classe de **{classe_enseignant}**.")
+            else:
+                st.warning("Veuillez sélectionner une classe valide.")
+
+    except Exception as e:
+        st.error(f"⚠️ Une erreur est survenue lors du chargement de l'espace enseignant : {e}")
     finally:
         db.close()
 
-
 afficher_enseignants = afficher_espace_enseignants
 afficher_espace_enseignant = afficher_espace_enseignants
+run = afficher_espace_enseignants
