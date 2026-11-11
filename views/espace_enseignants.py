@@ -5,7 +5,6 @@ import streamlit as st
 import streamlit.components.v1 as components
 from database.db_config import SessionLocal
 from database.models import (
-    ActivityLog,
     CahierTexte,
     Classe,
     Eleve,
@@ -21,6 +20,10 @@ from database.models import (
 )
 
 SYNONYMES_MATIERES = {
+    "efs": "economie familiale et sociale",
+    "economie familiale": "economie familiale et sociale",
+    "economie familiale et sociale": "economie familiale et sociale",
+    "economie familiale sociale": "economie familiale et sociale",
     "sciences physiques": "physique chimie",
     "physique chimie": "physique chimie",
     "svt": "science de la vie et de la terre",
@@ -28,14 +31,10 @@ SYNONYMES_MATIERES = {
     "eps": "eps",
     "education physique": "eps",
     "education physique et sportive": "eps",
-    "economie familiale": "economie familiale et sociale",
-    "economie familiale et sociale": "economie familiale et sociale",
-    "economie familiale sociale": "economie familiale et sociale",
     "histoire geographie": "histoire geographie",
     "histoire-geographie": "histoire geographie",
     "education civique": "education civique et morale",
     "education civique et morale": "education civique et morale",
-    "education civique morale": "education civique et morale",
     "conduite": "conduite",
 }
 
@@ -146,9 +145,7 @@ def afficher_espace_enseignants():
         school_name = ecole_courante.nom if ecole_courante else st.session_state.get("school_name", "Établissement")
 
         user_obj = db.query(User).filter(User.username == username).first() if username else None
-        enseignant_obj = None
-        if user_obj and hasattr(user_obj, "enseignant_id") and user_obj.enseignant_id:
-            enseignant_obj = db.query(Enseignant).filter(Enseignant.id == user_obj.enseignant_id).first()
+        enseignant_obj = db.query(Enseignant).filter(Enseignant.id == user_obj.enseignant_id).first() if user_obj and hasattr(user_obj, "enseignant_id") and user_obj.enseignant_id else None
 
         classes_query = db.query(Classe).filter(Classe.school_id == ecole_active_id)
         if hasattr(Classe, "deleted_at"):
@@ -200,7 +197,7 @@ def afficher_espace_enseignants():
 
         matieres_brutes_db = db.query(Matiere).filter(Matiere.school_id == ecole_active_id).all()
         matiere_obj = next(
-            (m for m in matieres_brutes_db if (m.libelle if hasattr(m, 'libelle') and m.libelle else getattr(m, 'nom', '')).title() == matiere_enseignant),
+            (m for m in matieres_brutes_db if normaliser_chaine(m.libelle if hasattr(m, 'libelle') and m.libelle else getattr(m, 'nom', '')) == normaliser_chaine(matiere_enseignant)),
             None,
         )
 
@@ -244,22 +241,7 @@ def afficher_espace_enseignants():
                     elif not classe_obj or not matiere_obj:
                         st.error("⚠️ Classe ou matière invalide.")
                     else:
-                        nouvelle_entree = CahierTexte(
-                            school_id=ecole_active_id,
-                            cycle=getattr(classe_obj, "cycle", "Collège / Lycée"),
-                            classe_id=classe_obj.id,
-                            matiere_id=matiere_obj.id,
-                            user_id=st.session_state.get("user_id"),
-                            date_cours=datetime.combine(date_seance, datetime.min.time()),
-                            duree_seance=duree_seance,
-                            titre=titre_seance.strip(),
-                            contenu=contenu_seance.strip(),
-                            difficultees=difficultees.strip() if difficultees else None,
-                            mesures_correctives=mesures_correctives.strip() if mesures_correctives else None,
-                            est_substitue=0,
-                            auteur_saisie=username,
-                            statut_validation="Validé"
-                        )
+                        nouvelle_entree = CahierTexte(school_id=ecole_active_id, cycle=getattr(classe_obj, "cycle", "Collège / Lycée"), classe_id=classe_obj.id, matiere_id=matiere_obj.id, user_id=st.session_state.get("user_id"), date_cours=datetime.combine(date_seance, datetime.min.time()), duree_seance=duree_seance, titre=titre_seance.strip(), contenu=contenu_seance.strip(), difficultees=difficultees.strip() if difficultees else None, mesures_correctives=mesures_correctives.strip() if mesures_correctives else None, est_substitue=0, auteur_saisie=username, statut_validation="Validé")
                         db.add(nouvelle_entree)
                         db.commit()
                         st.success("✅ Entrée du cahier de texte enregistrée et transmise au registre de l'établissement avec succès !")
@@ -267,11 +249,11 @@ def afficher_espace_enseignants():
         with tab_notes:
             st.markdown(f'<h4 class="tab-title">📝 Grille d\'Évaluation — {classe_enseignant} ({matiere_enseignant})</h4>', unsafe_allow_html=True)
             if not eleves:
-                st.markdown(f"""
+                st.markdown("""
                     <div class="empty-state">
                         <div style="font-size: 3rem; margin-bottom: 10px;">👥</div>
                         <h4>Aucun élève trouvé</h4>
-                        <p>Il n'y a actuellement aucun élève inscrit dans la classe de {classe_enseignant}.</p>
+                        <p>Il n'y a actuellement aucun élève inscrit dans cette classe.</p>
                     </div>
                 """, unsafe_allow_html=True)
             else:
@@ -311,7 +293,7 @@ def afficher_espace_enseignants():
         with tab_appel:
             st.markdown(f'<h4 class="tab-title">📋 Contrôle de Présence & Discipline — {classe_enseignant}</h4>', unsafe_allow_html=True)
             if not eleves:
-                st.markdown(f"""
+                st.markdown("""
                     <div class="empty-state">
                         <div style="font-size: 3rem; margin-bottom: 10px;">📋</div>
                         <h4>Liste d'appel indisponible</h4>
@@ -371,7 +353,7 @@ def afficher_espace_enseignants():
                                 eleve_id=eleve_id,
                                 date=date_appel,
                                 statut=statut_final,
-                                motif=precision_str.strip() if precision_str and precision_str != "—" else None,
+                                motif=precision_str.strip() if precision_str and precision_str != "—" else None
                             )
                             db.add(presence_obj)
                         db.commit()
@@ -410,14 +392,12 @@ def afficher_espace_enseignants():
                 volume_total_prevu = volume_prevu
                 tances_entrees = db.query(CahierTexte).filter(CahierTexte.school_id == ecole_active_id, CahierTexte.classe_id == classe_obj.id).all()
                 
-                seances_mat = [
-                    e for e in tances_entrees 
-                    if (getattr(e, 'matiere_id', None) == matiere_obj.id) or 
-                       (normaliser_chaine(getattr(e, 'matiere', getattr(e, 'discipline', ''))) == mat_norm) or
-                       (mat_norm in normaliser_chaine(getattr(e, 'matiere', getattr(e, 'discipline', '')))) or
-                       (mat_norm in normaliser_chaine(getattr(e, 'titre', ''))) or
-                       (mat_norm in normaliser_chaine(getattr(e, 'contenu', '')))
-                ]
+                seances_mat = []
+                for e in tances_entrees:
+                    m_id_match = getattr(e, 'matiere_id', None) == matiere_obj.id
+                    mat_champ = normaliser_chaine(getattr(e, 'matiere', getattr(e, 'discipline', '')))
+                    if m_id_match or mat_norm == mat_champ or mat_norm in mat_champ or mat_norm in normaliser_chaine(getattr(e, 'titre', '')) or mat_norm in normaliser_chaine(getattr(e, 'contenu', '')):
+                        seances_mat.append(e)
 
                 volume_dispense = 0.0
                 for seance in seances_mat:
@@ -450,9 +430,7 @@ def afficher_espace_enseignants():
         with tab_edt:
             st.markdown(f'<h4 class="tab-title">📅 Emploi du Temps — Matière : {matiere_enseignant} (Classe : {classe_enseignant})</h4>', unsafe_allow_html=True)
             
-            query_edt_classe = db.query(EmploiDuTemps).filter(
-                EmploiDuTemps.school_id == ecole_active_id
-            ).all()
+            query_edt_classe = db.query(EmploiDuTemps).filter(EmploiDuTemps.school_id == ecole_active_id).all()
 
             mat_norm_cible = normaliser_chaine(matiere_enseignant)
             classe_norm_cible = classe_enseignant.strip().lower()
@@ -502,52 +480,53 @@ def afficher_espace_enseignants():
                         if match_c:
                             contact_str = f"<br><span style='font-size: 0.7rem; color: #60a5fa;'>📞 {match_c.contact}</span>" if hasattr(match_c, 'contact') and match_c.contact else ""
                             prof_str = f"<br><span style='font-size: 0.75rem; color: #94a3b8;'>👨‍🏫 {match_c.enseignant}</span>" if (hasattr(match_c, 'enseignant') and match_c.enseignant) else ""
-                            lignes_tbody_ens += f"""
+                            lignes_html_cell = f"""
                             <td>
                                 <div style="color: #34d399; font-weight: 700; font-size: 0.85rem; margin-bottom: 3px;">📖 {match_c.matiere}</div>
                                 {prof_str}
                                 {contact_str}
                             </td>
                             """
+                            lignes_tbody_ens += lignes_html_cell
                         else:
                             lignes_tbody_ens += "<td>—</td>"
                     lignes_tbody_ens += "</tr>"
 
-                html_table_ens = f"""
+                html_table_ens = """
                 <!DOCTYPE html>
                 <html>
                 <head>
                 <meta charset="utf-8">
                 <style>
-                    body {{
+                    body {
                         background-color: #0e1117;
                         color: #f3f4f6;
                         font-family: sans-serif;
                         margin: 0;
                         padding: 0;
-                    }}
-                    .edt-container {{
+                    }
+                    .edt-container {
                         background-color: #0e1117;
                         padding: 0.5rem;
                         border-radius: 12px;
                         border: 1px solid rgba(255, 255, 255, 0.1);
-                    }}
-                    .styled-table {{
+                    }
+                    .styled-table {
                         width: 100%;
                         border-collapse: collapse;
                         border-radius: 8px;
                         overflow: hidden;
                         border: 1px solid #2d3748;
-                    }}
-                    .styled-table th {{
+                    }
+                    .styled-table th {
                         background-color: #1a202c;
                         color: #e2e8f0;
                         text-align: center;
                         padding: 12px 8px;
                         font-size: 0.85rem;
                         border-bottom: 2px solid #4a5568;
-                    }}
-                    .styled-table td {{
+                    }
+                    .styled-table td {
                         background-color: #111827;
                         color: #cbd5e0;
                         text-align: center;
@@ -558,13 +537,13 @@ def afficher_espace_enseignants():
                         vertical-align: middle;
                         height: 65px;
                         word-break: break-word;
-                    }}
-                    .styled-table td:first-child {{
+                    }
+                    .styled-table td:first-child {
                         font-weight: 600;
                         color: #60a5fa;
                         background-color: #161e2e;
                         width: 110px;
-                    }}
+                    }
                 </style>
                 </head>
                 <body>
@@ -572,11 +551,11 @@ def afficher_espace_enseignants():
                     <table class="styled-table">
                         <thead>
                             <tr>
-                                {headers_html}
+                                """ + headers_html + """
                             </tr>
                         </thead>
                         <tbody>
-                            {lignes_tbody_ens}
+                            """ + lignes_tbody_ens + """
                         </tbody>
                     </table>
                 </div>
@@ -606,7 +585,7 @@ def afficher_espace_enseignants():
                     else:
                         ev_mat_txt = getattr(ev, 'intitule', getattr(ev, 'matiere', getattr(ev, 'nom_matiere', '')))
                         m_norm_ev = normaliser_chaine(ev_mat_txt)
-                        if ev_mat_txt and (mat_norm_cible == m_norm_ev or mat_norm_cible in m_norm_ev):
+                        if ev_mat_txt and (mat_norm_cible == m_norm_ev or mat_norm_cible in m_norm_ev or m_norm_ev in mat_norm_cible):
                             correspond = True
 
                     if correspond:

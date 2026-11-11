@@ -378,6 +378,7 @@ def main():
                             st.error("Les mots de passe ne correspondent pas.")
                         else:
                             try:
+                                import bcrypt
                                 salt = bcrypt.gensalt()
                                 hashed = bcrypt.hashpw(
                                     nouveau_p.encode("utf-8"), salt
@@ -392,8 +393,9 @@ def main():
                                 st.error(f"Erreur : {ex}")
             return
 
-        current_user.derniere_activite = datetime.now(timezone.utc)
-        db_sec.commit()
+        # Commit d'écriture permanente neutralisé pour éliminer la lenteur sur VPS
+        # current_user.derniere_activite = datetime.now(timezone.utc)
+        # db_sec.commit()
 
     except Exception as e:
         db_sec.rollback()
@@ -747,7 +749,7 @@ def main():
         ):
             st.session_state.clear()
             st.query_params.clear()
-            st.success("Déconnexion réussie !")
+            st.success("Déconnexion réussية !")
             st.rerun()
 
     ROUTES = {
