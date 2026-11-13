@@ -98,6 +98,23 @@ def afficher_bulletins(niveau_actif="Collège"):
                     horizontal=True,
                 )
 
+            # --- NOUVELLES OPTIONS DE CHOIX (DEVOIRS & INTERROGATIONS) ---
+            with st.expander("🛠️ Options de calcul des notes (Devoirs & Interrogations)", expanded=False):
+                col_opt1, col_opt2 = st.columns(2)
+                with col_opt1:
+                    inclure_interrogations = st.checkbox(
+                        "Inclure les interrogations dans la note de classe",
+                        value=True,
+                        help="Si coché, les interrogations et devoirs sont combinés. Sinon, seuls les devoirs comptent."
+                    )
+                with col_opt2:
+                    mode_devoirs = st.radio(
+                        "Mode de prise en compte des devoirs :",
+                        options=["Moyenne de tous les devoirs", "Ne garder que le meilleur devoir"],
+                        index=0,
+                        help="Détermine si l'on calcule la moyenne de tous les devoirs ou si l'on retient la meilleure note."
+                    )
+
         eleves_query = db.query(Eleve).filter(Eleve.classe_id == classe_id)
         if hasattr(Eleve, "deleted_at"):
             eleves_query = eleves_query.filter(Eleve.deleted_at.is_(None))
@@ -175,7 +192,7 @@ def afficher_bulletins(niveau_actif="Collège"):
                 or "familiale et sociale" in nom_m_lower
             ):
                 continue
-            matieres_filtrees.append(m)
+            mat_filtrees.append(m) if 'mat_filtrees' in locals() else matieres_filtrees.append(m)
         matieres = matieres_filtrees
 
         # --- TRI PÉDAGOGIQUE STRICT ET HIÉRARCHISÉ DES MATIÈRES ---
@@ -225,11 +242,19 @@ def afficher_bulletins(niveau_actif="Collège"):
                 e_id = n.eleve_id
                 m_id = getattr(n, "matiere_id", None)
                 val = float(getattr(n, "valeur", 0.0))
+                # On peut distinguer le type si l'attribut existe (ex: type_evaluation = 'devoir' ou 'interrogation')
+                # S'il n'existe pas, on traite toutes les notes de la matière.
+                type_eval = str(getattr(n, "type_evaluation", "devoir")).lower()
+
                 if e_id not in matrice:
                     matrice[e_id] = {}
                 if m_id not in matrice[e_id]:
-                    matrice[e_id][m_id] = []
-                matrice[e_id][m_id].append(val)
+                    matrice[e_id][m_id] = {"devoirs": [], "interrogations": []}
+                
+                if "interro" in type_eval:
+                    matrice[e_id][m_id]["interrogations"].append(val)
+                else:
+                    matrice[e_id][m_id]["devoirs"].append(val)
 
             moy_dict = {}
             for e in eleves:
@@ -237,8 +262,29 @@ def afficher_bulletins(niveau_actif="Collège"):
                 if notes_e:
                     mots_moy = []
                     for m in matieres:
-                        if m.id in notes_e and notes_e[m.id]:
-                            mots_moy.append(sum(notes_e[m.id]) / len(notes_e[m.id]))
+                        if m.id in notes_e:
+                            devs = notes_e[m.id]["devoirs"]
+                            inters = notes_e[m.id]["interrogations"]
+
+                            # Application du choix des devoirs
+                            val_dev = 0.0
+                            if devs:
+                                if mode_devoirs == "Ne garder que le meilleur devoir":
+                                    val_dev = max(devs)
+                                else:
+                                    val_dev = sum(devs) / len(devs)
+
+                            # Application du choix des interrogations
+                            if inclure_interrogations and inters:
+                                val_inter = sum(inters) / len(inters)
+                                # Combinaison (ex: équilibrée ou simple moyenne globale)
+                                note_matiere = (val_dev + val_inter) / 2 if val_dev > 0 and val_inter > 0 else (val_dev or val_inter)
+                            else:
+                                note_matiere = val_dev
+
+                            if note_matiere > 0 or devs or inters:
+                                mots_moy.append(note_matiere)
+
                     moy_dict[e.id] = (
                         round(sum(mots_moy) / len(mots_moy), 2)
                         if mots_moy
@@ -360,7 +406,6 @@ def afficher_bulletins(niveau_actif="Collège"):
             box_checked = '<span style="display:inline-block; width:11px; height:11px; border:1px solid #000; text-align:center; line-height:10px; font-weight:bold; font-size:9px; background-color:#e2e8f0; margin-right:3px;">X</span>'
             box_unchecked = '<span style="display:inline-block; width:11px; height:11px; border:1px solid #000; margin-right:3px; vertical-align:middle;"></span>'
 
-            # Gestion dynamique de la conduite
             chk_bien = box_unchecked
             chk_passable = box_unchecked
             chk_mal = box_unchecked
@@ -368,9 +413,8 @@ def afficher_bulletins(niveau_actif="Collège"):
             chk_blame = box_unchecked
 
             if conduite_obj:
-                notes_cond_list = matrice_notes.get(eleve_obj.id, {}).get(
-                    conduite_obj.id, []
-                )
+                notes_cond_dict = matrice_notes.get(eleve_obj.id, {}).get(conduite_obj.id, {"devoirs": [], "interrogations": []})
+                notes_cond_list = notes_cond_dict["devoirs"] + notes_cond_dict["interrogations"]
                 if notes_cond_list:
                     note_conduite_eleve = sum(notes_cond_list) / len(notes_cond_list)
                     chk_bien = box_checked if note_conduite_eleve >= 14 else box_unchecked
@@ -379,14 +423,13 @@ def afficher_bulletins(niveau_actif="Collège"):
                     chk_avertissement = box_checked if 6 <= note_conduite_eleve < 8 else box_unchecked
                     chk_blame = box_checked if note_conduite_eleve < 6 else box_unchecked
 
-            # Gestion dynamique du tableau d'honneur
             chk_inscrit = box_unchecked
             chk_felicitations = box_unchecked
             chk_encouragements = box_unchecked
             chk_non_inscrit = box_unchecked
 
             notes_eleve = matrice_notes.get(eleve_obj.id, {})
-            has_notes = any(notes_eleve.get(m.id) for m in matieres if m.id != (conduite_obj.id if conduite_obj else None))
+            has_notes = any(notes_eleve.get(m.id, {}).get("devoirs") or notes_eleve.get(m.id, {}).get("interrogations") for m in matieres if m.id != (conduite_obj.id if conduite_obj else None))
 
             if has_notes:
                 chk_inscrit = box_checked if moy_eleve >= 10 else box_unchecked
@@ -400,11 +443,22 @@ def afficher_bulletins(niveau_actif="Collège"):
 
             for m in matieres:
                 m_nom = get_label(m)
-                notes_m = notes_eleve.get(m.id, [])
+                m_data = notes_eleve.get(m.id, {"devoirs": [], "interrogations": []})
+                devs = m_data["devoirs"]
+                inters = m_data["interrogations"]
                 coef = int(getattr(m, "coefficient", 2) or 2)
 
-                if notes_m:
-                    note_classe = sum(notes_m) / len(notes_m)
+                if devs or inters:
+                    val_dev = max(devs) if (devs and mode_devoirs == "Ne garder que le meilleur devoir") else (sum(devs) / len(devs) if devs else 0.0)
+                    val_inter = sum(inters) / len(inters) if inters else 0.0
+
+                    if inclure_interrogations and inters and devs:
+                        note_classe = (val_dev + val_inter) / 2
+                    elif inclure_interrogations and inters:
+                        note_classe = val_inter
+                    else:
+                        note_classe = val_dev
+
                     note_compo = note_classe
                     moyen_coef = note_classe * coef
                     total_coef += coef

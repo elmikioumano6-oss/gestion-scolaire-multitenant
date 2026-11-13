@@ -84,21 +84,21 @@ def get_matieres_dynamiques_cahier(selected_classes_labels, classes_cycle, ecole
     return sorted(list(m_dict.values()))
 
 def afficher_cahier_texte():
-    st.markdown("## 📖 Cahier de Texte Numérique")
-    st.markdown("Suivi centralisé des cours dispensés, des contenus pédagogiques, des durées et des devoirs.")
+    st.markdown("## Cahier de Texte Numerique")
+    st.markdown("Suivi centralise des cours dispenses, des contenus pedagogiques, des durees et des devoirs.")
     st.markdown("---")
 
     school_id = st.session_state.get("school_id")
     is_super_admin = st.session_state.get("is_super_admin", False)
     role_utilisateur = str(st.session_state.get("role", "")).lower()
     username = st.session_state.get("username", "admin")
-    school_name = st.session_state.get("school_name", "Établissement")
+    school_name = st.session_state.get("school_name", "Etablissement")
     cycle_en_cours = st.session_state.get("cycle_actif", "Collège")
 
     est_admin = is_super_admin or "admin" in role_utilisateur or "directeur" in role_utilisateur
 
     if not school_id and not is_super_admin:
-        st.warning("⚠️ Veuillez vous connecter pour accéder à cette section.")
+        st.warning("Veuillez vous connecter pour acceder a cette section.")
         return
 
     db = SessionLocal()
@@ -129,38 +129,66 @@ def afficher_cahier_texte():
         classes_cycle = classes_query.all()
 
         if not classes_cycle:
-            st.warning(f"⚠️ Veuillez configurer des classes pour le cycle **{cycle_en_cours}**.")
+            st.warning(f"Veuillez configurer des classes pour le cycle {cycle_en_cours}.")
             return
 
         noms_classes = [c.libelle for c in classes_cycle]
 
         tab1, tab2 = st.tabs([
-            "📖 Consulter le Cahier de Texte",
-            "✍️ Saisir un Cours / Devoir",
+            "Consulter le Cahier de Texte",
+            "Saisir un Cours / Devoir",
         ])
 
         with tab1:
-            st.markdown(f"<h4 class='tab-title'>Entrées du Cahier de Texte — {cycle_en_cours}</h4>", unsafe_allow_html=True)
-            classe_consult = st.selectbox("Sélectionner la classe à consulter", noms_classes, key="consult_cahier_classe")
+            st.markdown(f"<h4 class='tab-title'>Entrees du Cahier de Texte — {cycle_en_cours}</h4>", unsafe_allow_html=True)
+            
+            col_c1, col_c2, col_c3 = st.columns(3)
+            with col_c1:
+                classe_consult = st.selectbox("Classe", noms_classes, key="consult_cahier_classe")
+            with col_c2:
+                mois_noms = {
+                    1: "Janvier", 2: "Février", 3: "Mars", 4: "Avril", 
+                    5: "Mai", 6: "Juin", 7: "Juillet", 8: "Août", 
+                    9: "Septembre", 10: "Octobre", 11: "Novembre", 12: "Décembre"
+                }
+                mois_options = ["Tous les mois"] + [f"{m:02d} - {nom}" for m, nom in mois_noms.items()]
+                mois_choisi_str = st.selectbox("Mois", options=mois_options, key="consult_cahier_mois")
+            with col_c3:
+                noms_matieres_consult = get_matieres_dynamiques_cahier([classe_consult], classes_cycle, target_school_id, cycle_en_cours, db)
+                matiere_options = ["Toutes les matières"] + noms_matieres_consult
+                matiere_choisie_consult = st.selectbox("Matière", options=matiere_options, key="consult_cahier_matiere")
 
             classe_obj = next((c for c in classes_cycle if c.libelle == classe_consult), None)
             if classe_obj:
-                entrees_db = (
-                    db.query(CahierTexte)
-                    .filter(
-                        CahierTexte.school_id == target_school_id,
-                        CahierTexte.classe_id == classe_obj.id,
-                    )
-                    .order_by(CahierTexte.date_cours.desc(), CahierTexte.id.desc())
-                    .all()
-                )
+                entrees_db = db.query(CahierTexte).filter(
+                    CahierTexte.school_id == target_school_id,
+                    CahierTexte.classe_id == classe_obj.id
+                ).order_by(CahierTexte.date_cours.desc(), CahierTexte.id.desc()).all()
+
+                # --- FILTRAGE PAR MOIS ---
+                if mois_choisi_str != "Tous les mois":
+                    try:
+                        mois_num = int(mois_choisi_str.split(" - ")[0])
+                        entrees_db = [
+                            e for e in entrees_db 
+                            if isinstance(e.date_cours, datetime) and e.date_cours.month == mois_num
+                        ]
+                    except Exception:
+                        pass
+
+                # --- FILTRAGE PAR MATIÈRE ---
+                if matiere_choisie_consult != "Toutes les matières":
+                    mat_brutes_all = db.query(Matiere).filter(Matiere.school_id == target_school_id).all()
+                    mat_cible = next((m for m in mat_brutes_all if (m.libelle if hasattr(m, "libelle") and m.libelle else getattr(m, "nom", "")).strip().title() == matiere_choisie_consult), None)
+                    if mat_cible:
+                        entrees_db = [e for e in entrees_db if e.matiere_id == mat_cible.id]
 
                 if not entrees_db:
-                    st.info(f"Aucune entrée enregistrée pour la classe {classe_consult}.")
+                    st.info(f"Aucune entrée enregistrée pour la classe {classe_consult} avec les filtres sélectionnés.")
                 else:
                     for e in entrees_db:
                         matiere_obj = db.query(Matiere).filter(Matiere.id == e.matiere_id).first()
-                        nom_matiere = (matiere_obj.libelle if hasattr(matiere_obj, "libelle") and matiere_obj.libelle else getattr(matiere_obj, "nom", "Matière")) if matiere_obj else "Matière"
+                        nom_matiere = matiere_obj.libelle if matiere_obj and hasattr(matiere_obj, "libelle") and matiere_obj.libelle else (getattr(matiere_obj, "nom", "Matière") if matiere_obj else "Matière")
                         
                         nom_enseignant_affiche = e.auteur_saisie or "Administration"
                         if hasattr(e, "enseignant_id") and e.enseignant_id:
@@ -179,7 +207,7 @@ def afficher_cahier_texte():
 
                             if est_admin:
                                 st.markdown("---")
-                                st.markdown("##### ⚙️ Administration : Gérer la séance")
+                                st.markdown("##### Administration : Gérer la séance")
                                 
                                 list_noms_ens = list(dict_ens_options.keys())
                                 current_ens_index = 0
@@ -200,11 +228,11 @@ def afficher_cahier_texte():
                                 with col_reassign2:
                                     st.write("")
                                     st.write("")
-                                    if st.button("👤 Changer prof", key=f"btn_reassign_prof_{e.id}"):
+                                    if st.button("Changer prof", key=f"btn_reassign_prof_{e.id}"):
                                         try:
                                             e.enseignant_id = dict_ens_options.get(nouveau_prof_nom)
                                             db.commit()
-                                            st.success("✅ Enseignant réassigné avec succès !")
+                                            st.success("Enseignant réassigné avec succès !")
                                             st.rerun()
                                         except Exception as err:
                                             db.rollback()
@@ -239,30 +267,30 @@ def afficher_cahier_texte():
 
                                 col_btn_mod, col_btn_supp = st.columns(2)
                                 with col_btn_mod:
-                                    if st.button("💾 Mettre à jour", key=f"btn_update_seance_{e.id}"):
+                                    if st.button("Mettre à jour", key=f"btn_update_seance_{e.id}"):
                                         try:
                                             e.date_cours = datetime.combine(nouvelle_date, nouvelle_heure)
                                             e.duree_seance = f"{int(nouvelle_duree)} heure{'s' if nouvelle_duree > 1 else ''}"
                                             db.commit()
-                                            st.success("✅ Séance mise à jour avec succès !")
+                                            st.success("Séance mise à jour avec succès !")
                                             st.rerun()
                                         except Exception as err:
                                             db.rollback()
                                             st.error(f"Erreur lors de la mise à jour : {err}")
 
                                 with col_btn_supp:
-                                    if st.button("🗑️ Supprimer la séance", key=f"btn_delete_seance_{e.id}", type="secondary"):
+                                    if st.button("Supprimer la séance", key=f"btn_delete_seance_{e.id}", type="secondary"):
                                         st.session_state[f"confirm_del_seance_{e.id}"] = True
 
                                 if st.session_state.get(f"confirm_del_seance_{e.id}", False):
-                                    st.warning("⚠️ Voulez-vous vraiment supprimer définitivement cette entrée du cahier de texte ?")
+                                    st.warning("Voulez-vous vraiment supprimer définitivement cette entrée du cahier de texte ?")
                                     col_c1, col_c2 = st.columns(2)
                                     with col_c1:
                                         if st.button("Oui, supprimer", key=f"yes_del_seance_{e.id}", type="primary"):
                                             try:
                                                 db.delete(e)
                                                 db.commit()
-                                                st.success("✅ Séance supprimée avec succès !")
+                                                st.success("Séance supprimée avec succès !")
                                                 st.session_state[f"confirm_del_seance_{e.id}"] = False
                                                 st.rerun()
                                             except Exception as err:
@@ -316,19 +344,22 @@ def afficher_cahier_texte():
                 enseignant_nom_affiche = dict_ens_par_id[enseignant_trouve_id]
 
             if enseignant_nom_affiche:
-                st.info(f"💡 Enseignant affecté sélectionné automatiquement : **{enseignant_nom_affiche}**")
+                st.info(f"Enseignant affecté sélectionné automatiquement : {enseignant_nom_affiche}")
 
             liste_noms_ens = list(dict_ens_options.keys())
-            defaut_idx = 0
-            if enseignant_nom_affiche in liste_noms_ens:
-                defaut_idx = liste_noms_ens.index(enseignant_nom_affiche)
+            defaut_nom = enseignant_nom_affiche if enseignant_nom_affiche in liste_noms_ens else (liste_noms_ens[0] if liste_noms_ens else "")
 
-            cle_selectbox_ens = f"form_cahier_enseignant_libre_{classe_choisie}_{matiere_choisie}"
+            cle_selectbox_ens = "form_cahier_enseignant_libre"
+            
+            dernier_contexte = f"{classe_choisie}_{matiere_choisie}"
+            if st.session_state.get("cahier_contexte_precedent") != dernier_contexte:
+                st.session_state["cahier_contexte_precedent"] = dernier_contexte
+                if defaut_nom:
+                    st.session_state[cle_selectbox_ens] = defaut_nom
 
             enseignant_nom_selectionne = st.selectbox(
                 "Enseignant dispensant le cours (Modifiable si remplacement) *",
                 options=liste_noms_ens,
-                index=defaut_idx,
                 key=cle_selectbox_ens,
                 help="Sélectionnez librement l'enseignant de votre choix pour ce cours."
             )
@@ -337,11 +368,11 @@ def afficher_cahier_texte():
             titre_cours = st.text_input("Titre du cours *", key="form_cahier_titre")
             contenu = st.text_area("Contenu détaillé de la séance *", key="form_cahier_contenu")
 
-            if st.button("💾 Enregistrer l'entrée dans la base", type="primary", key="form_cahier_submit"):
+            if st.button("Enregistrer l'entrée dans la base", type="primary", key="form_cahier_submit"):
                 if not titre_cours.strip() or not contenu.strip():
-                    st.error("⚠️ Veuillez remplir le titre et le contenu détaillé.")
+                    st.error("Veuillez remplir le titre et le contenu détaillé.")
                 elif not enseignant_id_final:
-                    st.error("⚠️ Veuillez sélectionner l'enseignant.")
+                    st.error("Veuillez sélectionner l'enseignant.")
                 else:
                     cls_obj = next((c for c in classes_cycle if c.libelle == classe_choisie), None)
                     mat_brutes_all = db.query(Matiere).filter(Matiere.school_id == target_school_id).all()
@@ -368,7 +399,7 @@ def afficher_cahier_texte():
                                 break
 
                     if doublon_trouve:
-                        st.error("⚠️ Un cours identique avec la même date, le même titre et le même contenu existe déjà pour cette classe et cette matière.")
+                        st.error("Un cours identique avec la même date, le même titre et le même contenu existe déjà pour cette classe et cette matière.")
                     else:
                         nouvelle_entree = CahierTexte(
                             school_id=target_school_id,
@@ -386,7 +417,7 @@ def afficher_cahier_texte():
                         )
                         db.add(nouvelle_entree)
                         db.commit()
-                        st.success("✅ Entrée enregistrée avec succès !")
+                        st.success("Entrée enregistrée avec succès !")
                         st.rerun()
 
     except Exception as e:
