@@ -84,21 +84,20 @@ def get_matieres_dynamiques_cahier(selected_classes_labels, classes_cycle, ecole
     return sorted(list(m_dict.values()))
 
 def afficher_cahier_texte():
-    st.markdown("## Cahier de Texte Numerique")
-    st.markdown("Suivi centralise des cours dispenses, des contenus pedagogiques, des durees et des devoirs.")
+    st.markdown("## Cahier de Texte Numérique")
+    st.markdown("Suivi centralisé des cours dispensés, des contenus pédagogiques, des durées et des devoirs.")
     st.markdown("---")
 
     school_id = st.session_state.get("school_id")
     is_super_admin = st.session_state.get("is_super_admin", False)
     role_utilisateur = str(st.session_state.get("role", "")).lower()
     username = st.session_state.get("username", "admin")
-    school_name = st.session_state.get("school_name", "Etablissement")
     cycle_en_cours = st.session_state.get("cycle_actif", "Collège")
 
     est_admin = is_super_admin or "admin" in role_utilisateur or "directeur" in role_utilisateur
 
     if not school_id and not is_super_admin:
-        st.warning("Veuillez vous connecter pour acceder a cette section.")
+        st.warning("Veuillez vous connecter pour accéder à cette section.")
         return
 
     db = SessionLocal()
@@ -140,7 +139,7 @@ def afficher_cahier_texte():
         ])
 
         with tab1:
-            st.markdown(f"<h4 class='tab-title'>Entrees du Cahier de Texte — {cycle_en_cours}</h4>", unsafe_allow_html=True)
+            st.markdown(f"<h4 class='tab-title'>Entrées du Cahier de Texte — {cycle_en_cours}</h4>", unsafe_allow_html=True)
             
             col_c1, col_c2, col_c3 = st.columns(3)
             with col_c1:
@@ -160,12 +159,22 @@ def afficher_cahier_texte():
 
             classe_obj = next((c for c in classes_cycle if c.libelle == classe_consult), None)
             if classe_obj:
+                toutes_matieres = db.query(Matiere).filter(Matiere.school_id == target_school_id).all()
+                dict_matieres_par_id = {
+                    m.id: (m.libelle if hasattr(m, "libelle") and m.libelle else getattr(m, "nom", "Matière"))
+                    for m in toutes_matieres
+                }
+
                 entrees_db = db.query(CahierTexte).filter(
                     CahierTexte.school_id == target_school_id,
                     CahierTexte.classe_id == classe_obj.id
                 ).order_by(CahierTexte.date_cours.desc(), CahierTexte.id.desc()).all()
 
-                # --- FILTRAGE PAR MOIS ---
+                if matiere_choisie_consult != "Toutes les matières":
+                    mat_cible = next((m for m in toutes_matieres if (m.libelle if hasattr(m, "libelle") and m.libelle else getattr(m, "nom", "")).strip().title() == matiere_choisie_consult), None)
+                    if mat_cible:
+                        entrees_db = [e for e in entrees_db if e.matiere_id == mat_cible.id]
+
                 if mois_choisi_str != "Tous les mois":
                     try:
                         mois_num = int(mois_choisi_str.split(" - ")[0])
@@ -176,34 +185,34 @@ def afficher_cahier_texte():
                     except Exception:
                         pass
 
-                # --- FILTRAGE PAR MATIÈRE ---
-                if matiere_choisie_consult != "Toutes les matières":
-                    mat_brutes_all = db.query(Matiere).filter(Matiere.school_id == target_school_id).all()
-                    mat_cible = next((m for m in mat_brutes_all if (m.libelle if hasattr(m, "libelle") and m.libelle else getattr(m, "nom", "")).strip().title() == matiere_choisie_consult), None)
-                    if mat_cible:
-                        entrees_db = [e for e in entrees_db if e.matiere_id == mat_cible.id]
-
                 if not entrees_db:
                     st.info(f"Aucune entrée enregistrée pour la classe {classe_consult} avec les filtres sélectionnés.")
                 else:
                     for e in entrees_db:
-                        matiere_obj = db.query(Matiere).filter(Matiere.id == e.matiere_id).first()
-                        nom_matiere = matiere_obj.libelle if matiere_obj and hasattr(matiere_obj, "libelle") and matiere_obj.libelle else (getattr(matiere_obj, "nom", "Matière") if matiere_obj else "Matière")
+                        nom_matiere = dict_matieres_par_id.get(e.matiere_id, "Matière")
                         
                         nom_enseignant_affiche = e.auteur_saisie or "Administration"
                         if hasattr(e, "enseignant_id") and e.enseignant_id:
-                            ens_lie = db.query(Enseignant).filter(Enseignant.id == e.enseignant_id).first()
-                            if ens_lie:
-                                nom_enseignant_affiche = f"{getattr(ens_lie, 'nom', '')} {getattr(ens_lie, 'prenom', '')}".strip()
+                            nom_enseignant_affiche = dict_ens_par_id.get(e.enseignant_id, nom_enseignant_affiche)
 
                         date_str = e.date_cours.strftime("%d/%m/%Y %H:%M") if isinstance(e.date_cours, datetime) else (str(e.date_cours) if e.date_cours else "N/D")
                         duree_val = getattr(e, "duree_seance", "1 heure")
                         titre = e.titre or 'Séance sans titre'
 
-                        with st.expander(f"{date_str} — {nom_matiere.title()} ({duree_val}) | {titre}"):
+                        # Gestion de la direction d'affichage selon la langue (ex: Arabe RTL)
+                        langue_cours = getattr(e, "langue", "fr")
+                        direction_texte = "rtl" if langue_cours == "ar" else "ltr"
+                        align_texte = "right" if langue_cours == "ar" else "left"
+
+                        with st.expander(f"{date_str} — {nom_matiere.title()} ({duree_val}) | {titre} [{langue_cours.upper()}]"):
                             st.write(f"**Enseignant(e) :** {nom_enseignant_affiche}")
-                            st.write(f"**Contenu :**")
-                            st.write(e.contenu)
+                            st.markdown(f"**Contenu :**")
+                            st.markdown(
+                                f"""<div style="direction: {direction_texte}; text-align: {align_texte}; background-color: #f8f9fa; padding: 10px; border-radius: 5px;">
+                                {e.contenu}
+                                </div>""", 
+                                unsafe_allow_html=True
+                            )
 
                             if est_admin:
                                 st.markdown("---")
@@ -303,6 +312,16 @@ def afficher_cahier_texte():
 
         with tab2:
             st.markdown("#### Saisie de Cours")
+            
+            # --- SÉLECTION DE LA LANGUE DE SAISIE ---
+            langue_options = {"Français": "fr", "English": "en", "العربية": "ar"}
+            langue_choisie = st.selectbox(
+                "Langue de saisie", 
+                options=list(langue_options.keys()), 
+                key="form_cahier_langue"
+            )
+            code_langue = langue_options[langue_choisie]
+
             col1, col2 = st.columns(2)
             with col1:
                 classe_choisie = st.selectbox("Classe", noms_classes, key="form_cahier_classe")
@@ -314,7 +333,6 @@ def afficher_cahier_texte():
                 date_cours = st.date_input("Date du cours", value=datetime.now().date(), key="form_cahier_date")
                 duree_cours = st.selectbox("Durée de la séance", options=[1.0, 2.0, 3.0, 4.0], format_func=lambda x: f"{int(x)} heure{'s' if x > 1 else ''}", key="form_cahier_duree")
 
-            # --- DÉTECTION AUTOMATIQUE DE L'ENSEIGNANT ---
             enseignant_trouve_id = None
             enseignant_nom_affiche = ""
 
@@ -378,7 +396,6 @@ def afficher_cahier_texte():
                     mat_brutes_all = db.query(Matiere).filter(Matiere.school_id == target_school_id).all()
                     mat_obj = next((m for m in mat_brutes_all if (m.libelle if hasattr(m, "libelle") and m.libelle else getattr(m, "nom", "")).strip().title() == matiere_choisie), None)
 
-                    # --- VÉRIFICATION ANTI-DOUBLON STRICTE À L'ENREGISTREMENT ---
                     titre_saisi_net = " ".join(titre_cours.strip().lower().split())
                     contenu_saisi_net = " ".join(contenu.strip().lower().split())
 
@@ -414,6 +431,7 @@ def afficher_cahier_texte():
                             contenu=contenu.strip(),
                             auteur_saisie=username,
                             statut_validation="Validé",
+                            langue=code_langue,
                         )
                         db.add(nouvelle_entree)
                         db.commit()
