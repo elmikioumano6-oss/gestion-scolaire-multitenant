@@ -346,6 +346,8 @@ class CahierTexte(Base):
     difficultees = Column(Text, nullable=True)
     mesures_correctives = Column(Text, nullable=True)
     
+    langue = Column(String(10), default="fr", nullable=True)
+    
     est_substitue = Column(Integer, default=0)
     auteur_saisie = Column(String(100), nullable=True)
     statut_validation = Column(String(50), default="Validé")
