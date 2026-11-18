@@ -199,7 +199,6 @@ def afficher_cahier_texte():
                         duree_val = getattr(e, "duree_seance", "1 heure")
                         titre = e.titre or 'Séance sans titre'
 
-                        # Gestion de la direction d'affichage selon la langue (ex: Arabe RTL)
                         langue_cours = getattr(e, "langue", "fr")
                         direction_texte = "rtl" if langue_cours == "ar" else "ltr"
                         align_texte = "right" if langue_cours == "ar" else "left"
@@ -207,8 +206,9 @@ def afficher_cahier_texte():
                         with st.expander(f"{date_str} — {nom_matiere.title()} ({duree_val}) | {titre} [{langue_cours.upper()}]"):
                             st.write(f"**Enseignant(e) :** {nom_enseignant_affiche}")
                             st.markdown(f"**Contenu :**")
+                            # Affichage stylisé avec contraste parfait (fond sombre et texte clair lisible)
                             st.markdown(
-                                f"""<div style="direction: {direction_texte}; text-align: {align_texte}; background-color: #f8f9fa; padding: 10px; border-radius: 5px;">
+                                f"""<div style="direction: {direction_texte}; text-align: {align_texte}; background-color: #1e293b; color: #f8fafc; padding: 12px; border-radius: 6px; border: 1px solid #334155;">
                                 {e.contenu}
                                 </div>""", 
                                 unsafe_allow_html=True
@@ -313,7 +313,6 @@ def afficher_cahier_texte():
         with tab2:
             st.markdown("#### Saisie de Cours")
             
-            # --- SÉLECTION DE LA LANGUE DE SAISIE ---
             langue_options = {"Français": "fr", "English": "en", "العربية": "ar"}
             langue_choisie = st.selectbox(
                 "Langue de saisie", 
